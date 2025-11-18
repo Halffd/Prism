@@ -60,3 +60,10 @@ cache/
 
 
 test-output
+
+vite.config.*.timestamp*
+vitest.config.*.timestamp*
+
+# Next.js
+.next
+out

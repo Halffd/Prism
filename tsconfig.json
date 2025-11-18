@@ -8,6 +8,39 @@
     },
     {
       "path": "./apps/Prism"
+    },
+    {
+      "path": "./apps/extension-e2e"
+    },
+    {
+      "path": "./apps/extension"
+    },
+    {
+      "path": "./libs/shared-types"
+    },
+    {
+      "path": "./libs/ui-components"
+    },
+    {
+      "path": "./libs/api-client"
+    },
+    {
+      "path": "./libs/llm-service"
+    },
+    {
+      "path": "./libs/context-manager"
+    },
+    {
+      "path": "./apps/web-e2e"
+    },
+    {
+      "path": "./apps/web"
+    },
+    {
+      "path": "./apps/api-e2e"
+    },
+    {
+      "path": "./apps/api"
     }
   ]
 }

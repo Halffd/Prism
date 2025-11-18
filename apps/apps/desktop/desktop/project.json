@@ -1,0 +1,59 @@
+{
+  "name": "apps-desktop-desktop",
+  "$schema": "../../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/apps/desktop/desktop/src",
+  "projectType": "application",
+  "targets": {
+    "build": {
+      "executor": "nx-electron:build",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/apps/apps/desktop/desktop",
+        "main": "apps/apps/desktop/desktop/src/main.ts",
+        "tsConfig": "apps/apps/desktop/desktop/tsconfig.app.json",
+        "assets": ["apps/apps/desktop/desktop/src/assets"]
+      },
+      "configurations": {
+        "production": {
+          "optimization": true,
+          "extractLicenses": true,
+          "inspect": false,
+          "fileReplacements": [
+            {
+              "replace": "apps/apps/desktop/desktop/src/environments/environment.ts",
+              "with": "apps/apps/desktop/desktop/src/environments/environment.prod.ts"
+            }
+          ]
+        }
+      }
+    },
+    "serve": {
+      "executor": "nx-electron:execute",
+      "options": {
+        "buildTarget": "apps-desktop-desktop:build"
+      }
+    },
+    "package": {
+      "executor": "nx-electron:package",
+      "options": {
+        "name": "apps-desktop-desktop",
+        "frontendProject": "",
+        "sourcePath": "dist/apps",
+        "outputPath": "dist/packages",
+        "prepackageOnly": true
+      }
+    },
+    "make": {
+      "executor": "nx-electron:make",
+      "options": {
+        "name": "apps-desktop-desktop",
+        "frontendProject": "",
+        "sourcePath": "dist/apps",
+        "outputPath": "dist/executables"
+      }
+    },
+    "lint": {
+      "command": "eslint apps/apps/desktop/desktop/**/*.ts"
+    }
+  }
+}
