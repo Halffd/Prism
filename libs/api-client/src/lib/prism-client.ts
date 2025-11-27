@@ -27,7 +27,7 @@ export class PrismClient {
       })
     });
 
-    return response.json();
+    return response.json() as Promise<ApiResponse<Message>>;
   }
 
   async getHistory(sessionId: string): Promise<ApiResponse<Message[]>> {
@@ -40,9 +40,8 @@ export class PrismClient {
       }
     );
 
-    return response.json();
+    return response.json() as Promise<ApiResponse<Message[]>>;
   }
 }
 
 
-null

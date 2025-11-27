@@ -14,7 +14,7 @@ export interface ContextData {
   selectedText?: string;
   fullText?: string;
   appName?: string;  // For mobile screen context
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ChatSession {
@@ -30,5 +30,3 @@ export interface ApiResponse<T> {
   data?: T;
   error?: string;
 }
-
-null
