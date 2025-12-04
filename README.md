@@ -35,6 +35,95 @@ These targets are either [inferred automatically](https://nx.dev/concepts/inferr
 
 [More about running tasks in the docs &raquo;](https://nx.dev/features/run-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
 
+## AI Provider Support
+
+Prism now supports multiple AI provider services:
+
+- **OpenAI (ChatGPT)**: Use GPT models for advanced language understanding
+- **Google Gemini**: Access Google's state-of-the-art Gemini models
+- **Alibaba Qwen**: Leverage Alibaba's powerful Qwen language models
+- **Prism API**: Connect to your own custom Prism backend service
+
+### Configuration
+
+You can configure the AI provider and settings in each application:
+
+#### Expo App (Mobile)
+1. Navigate to the Settings screen
+2. Select your preferred AI provider from the dropdown
+3. Enter your API key (for OpenAI, Gemini, or Qwen)
+4. Optionally specify a custom model name
+
+#### Web App
+1. Click the "⚙️ Settings" button in the chat interface
+2. Choose your AI provider from the dropdown
+3. Enter your API key if using OpenAI, Gemini, or Qwen
+4. Save your settings
+
+#### Browser Extension
+1. Click the gear icon (⚙️) in the popup interface
+2. Select your AI provider
+3. Enter your API key and model settings
+4. Click "Save Settings" to apply changes
+
+## New Features
+
+### Markdown Support
+All applications now support rich markdown formatting in chat messages, including:
+
+- **Headers**: `# Header`, `## Subheader`
+- **Text styling**: `**bold**`, `*italic*`, `~~strikethrough~~`
+- **Lists**: Both ordered and unordered lists
+- **Code blocks**: Syntax highlighting for multiple programming languages
+- **Links and images**: Embedded links and image support
+- **Tables**: Data tables with alignment support
+
+### Code Syntax Highlighting
+The extension and web app now highlight code in messages with support for over 100 programming languages, including:
+
+- JavaScript, TypeScript, Python, Java, C++, C#
+- HTML, CSS, SQL, Go, Rust, PHP, Ruby, Swift
+- And many more languages with accurate syntax highlighting
+
+### Floating Chat Icon
+The browser extension now displays a floating chat icon on every webpage:
+
+- Positioned in the top-right corner for easy access
+- Diamond-shaped icon with gradient styling
+- Click the icon to instantly open the chat interface
+- Right-click the icon to hide it temporarily
+- Automatically reappears on page navigation
+
+### Chat History and Session Management
+- **Persistent Chat Sessions**: Your conversations are saved automatically and can be resumed later
+- **Multiple Sessions**: Create and switch between different chat contexts
+- **Session Organization**: Manage and organize your chat history with titled sessions
+- **Cross-Platform Sync**: Chat history syncs across extension, web, and mobile apps
+
+### Enhanced Menu System
+- **Navigation Menu**: Access all app features from a centralized menu
+- **Session Switching**: Quickly switch between different chat sessions
+- **Quick Actions**: Access common functions like settings and clearing history
+- **Prompt Shortcuts**: Access your saved prompts directly from the menu
+
+### Prompt Shortcuts
+- **Save Common Prompts**: Store frequently used prompts for quick access
+- **Categorization**: Organize prompts into different categories
+- **Quick Insertion**: One-click insertion of saved prompts into the chat input
+- **Manage Library**: Add, edit, and delete prompts as needed
+
+### Performance Caching
+- **Response Caching**: Frequently asked questions are cached for faster response times
+- **Intelligent Expiration**: Cached responses expire after 1 hour to ensure freshness
+- **Offline Availability**: Cached content available even when offline
+- **Reduced API Calls**: Decreases API usage by avoiding duplicate requests
+
+### Local and Online Storage
+- **IndexedDB Storage**: Local NoSQL database for fast offline access
+- **Cloud Sync**: Optional online synchronization with secure API endpoints
+- **Data Encryption**: All synced data encrypted in transit and at rest
+- **Conflict Resolution**: Smart merging of local and remote changes
+
 ## Add new projects
 
 While you could add new projects to your workspace manually, you might want to leverage [Nx plugins](https://nx.dev/concepts/nx-plugins?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) and their [code generation](https://nx.dev/features/generate-code?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) feature.

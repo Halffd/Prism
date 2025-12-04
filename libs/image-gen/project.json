@@ -1,0 +1,20 @@
+{
+  "name": "image-gen",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/image-gen/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}"],
+      "options": {
+        "outputPath": "dist/libs/image-gen",
+        "tsConfig": "libs/image-gen/tsconfig.lib.json",
+        "packageJson": "libs/image-gen/package.json",
+        "main": "libs/image-gen/src/index.ts",
+        "assets": ["libs/image-gen/*.md"]
+      }
+    }
+  },
+  "tags": []
+}

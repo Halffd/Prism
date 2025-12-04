@@ -30,3 +30,17 @@ export interface ApiResponse<T> {
   data?: T;
   error?: string;
 }
+
+export type AIProvider = 'openai' | 'gemini' | 'qwen' | 'prism-api';
+
+export interface AIConfig {
+  provider: AIProvider;
+  apiKey?: string;
+  apiUrl?: string;
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  topP?: number;
+  frequencyPenalty?: number;
+  presencePenalty?: number;
+}

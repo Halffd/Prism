@@ -51,6 +51,12 @@
       "path": "../../libs/shared-types"
     },
     {
+      "path": "../../libs/image-gen"
+    },
+    {
+      "path": "../../libs/shared-db"
+    },
+    {
       "path": "../../libs/api-client"
     }
   ]

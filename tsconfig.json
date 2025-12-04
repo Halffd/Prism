@@ -44,6 +44,12 @@
     },
     {
       "path": "./apps/apps/desktop/desktop"
+    },
+    {
+      "path": "./libs/shared-db"
+    },
+    {
+      "path": "./libs/image-gen"
     }
   ]
 }

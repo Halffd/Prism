@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { chatRouter } from './chat.routes';
 import { sessionRouter } from './session.routes';
 import { authRouter } from './auth.routes';
+import { syncRouter } from './sync.routes';
 
 const router = Router();
 
@@ -9,6 +10,7 @@ const router = Router();
 router.use('/auth', authRouter);
 router.use('/chat', chatRouter);
 router.use('/sessions', sessionRouter);
+router.use('/sync', syncRouter);
 
 // API info and health check
 router.get('/', (req, res) => {
@@ -18,7 +20,8 @@ router.get('/', (req, res) => {
     endpoints: {
       auth: '/api/auth',
       chat: '/api/chat',
-      sessions: '/api/sessions'
+      sessions: '/api/sessions',
+      sync: '/api/sync'
     }
   });
 });

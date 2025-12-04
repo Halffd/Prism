@@ -11,13 +11,69 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { PrismClient } from '@prism/api-client';
-import type { Message } from '@prism/shared-types';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { UnifiedAIClient } from '@prism/api-client';
+import type { Message, AIConfig } from '@prism/shared-types';
 
-const client = new PrismClient(process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api');
+// Web-compatible storage solution
+export const storage = {
+  getItem: async (key: string): Promise<string | null> => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      return window.localStorage.getItem(key);
+    }
+    try {
+      // Fallback to AsyncStorage for native platforms
+      const AsyncStorage = await import('@react-native-async-storage/async-storage').then(m => m.default);
+      return await AsyncStorage.getItem(key);
+    } catch (error) {
+      console.error('Storage get error:', error);
+      return null;
+    }
+  },
+  setItem: async (key: string, value: string): Promise<void> => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(key, value);
+      return;
+    }
+    try {
+      // Fallback to AsyncStorage for native platforms
+      const AsyncStorage = await import('@react-native-async-storage/async-storage').then(m => m.default);
+      await AsyncStorage.setItem(key, value);
+    } catch (error) {
+      console.error('Storage set error:', error);
+    }
+  }
+};
 
-export function ChatScreen() {
+// Get current AI configuration from storage
+const getAIConfig = async (): Promise<AIConfig> => {
+  const storedConfig = await storage.getItem('aiConfig');
+  if (storedConfig) {
+    try {
+      return JSON.parse(storedConfig);
+    } catch (error) {
+      console.error('Failed to parse AI config, using default:', error);
+    }
+  }
+  return {
+    provider: 'prism-api',
+    apiUrl: process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api'
+  };
+};
+
+// Create client with the stored AI configuration
+const createClient = async (): Promise<UnifiedAIClient> => {
+  const aiConfig = await getAIConfig();
+  return new UnifiedAIClient({
+    aiConfig: aiConfig,
+    prismApiUrl: aiConfig.apiUrl
+  });
+};
+
+interface ChatScreenProps {
+  navigateToSettings?: () => void;
+}
+
+export function ChatScreen({ navigateToSettings }: ChatScreenProps = {}) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -38,7 +94,7 @@ export function ChatScreen() {
 
   const loadHistory = async () => {
     try {
-      const savedMessages = await AsyncStorage.getItem('chatHistory');
+      const savedMessages = await storage.getItem('chatHistory');
       if (savedMessages) {
         setMessages(JSON.parse(savedMessages));
       }
@@ -49,7 +105,7 @@ export function ChatScreen() {
 
   const saveHistory = async (msgs: Message[]) => {
     try {
-      await AsyncStorage.setItem('chatHistory', JSON.stringify(msgs));
+      await storage.setItem('chatHistory', JSON.stringify(msgs));
     } catch (error) {
       console.error('Failed to save chat history:', error);
     }
@@ -70,12 +126,30 @@ export function ChatScreen() {
     setLoading(true);
 
     try {
+      const client = await createClient(); // Create client with current AI settings
       const response = await client.sendMessage(input);
       if (response.success && response.data) {
         setMessages((prev) => [...prev, response.data!]);
+      } else {
+        // If API call fails, add an error message to the chat
+        const errorMessage: Message = {
+          id: `error-${Date.now()}`,
+          role: 'assistant',
+          content: response.error || 'Failed to get response. Please try again later.',
+          timestamp: Date.now(),
+        };
+        setMessages((prev) => [...prev, errorMessage]);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error sending message:', error);
+      // Add an error message to the chat in case of network errors
+      const errorMessage: Message = {
+        id: `error-${Date.now()}`,
+        role: 'assistant',
+        content: error.message || 'Network error. Please check your connection.',
+        timestamp: Date.now(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
     } finally {
       setLoading(false);
     }
@@ -83,6 +157,14 @@ export function ChatScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Prism Chat</Text>
+        {navigateToSettings && (
+          <TouchableOpacity style={styles.settingsButton} onPress={navigateToSettings}>
+            <Text style={styles.settingsButtonText}>⚙️</Text>
+          </TouchableOpacity>
+        )}
+      </View>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.container}
@@ -131,6 +213,27 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f0f0f0',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    backgroundColor: '#007bff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#ccc',
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  settingsButton: {
+    padding: 5,
+  },
+  settingsButtonText: {
+    fontSize: 20,
   },
   messagesList: {
     padding: 10,

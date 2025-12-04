@@ -1,7 +1,13 @@
-import { PrismClient } from '@prism/api-client';
-import type { Message, ContextData } from '@prism/shared-types';
+import { UnifiedAIClient } from '@prism/api-client';
+import type { Message, ContextData, AIConfig } from '@prism/shared-types';
 
-const client = new PrismClient('http://localhost:3000/api');
+// Initialize with default settings - will be overridden by stored settings
+const defaultAIConfig: AIConfig = {
+  provider: 'prism-api',
+  apiUrl: 'http://localhost:3000/api'
+};
+
+let client = new UnifiedAIClient({ aiConfig: defaultAIConfig });
 
 // Listen for messages from popup or content script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -14,6 +20,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.type === 'GET_CONTEXT') {
     handleGetContext(sender.tab?.id)
+      .then(sendResponse)
+      .catch((error) => sendResponse({ error: error.message }));
+    return true;
+  }
+
+  if (request.type === 'UPDATE_AI_CONFIG') {
+    updateAIConfig(request.data)
+      .then(sendResponse)
+      .catch((error) => sendResponse({ error: error.message }));
+    return true;
+  }
+
+  if (request.type === 'GET_AI_CONFIG') {
+    getAIConfig()
       .then(sendResponse)
       .catch((error) => sendResponse({ error: error.message }));
     return true;
@@ -62,6 +82,20 @@ async function handleGetContext(tabId?: number) {
     console.error('Error getting context:', error);
     throw error;
   }
+}
+
+async function getAIConfig() {
+  const result = await chrome.storage.local.get('aiConfig');
+  return result.aiConfig || defaultAIConfig;
+}
+
+async function updateAIConfig(config: AIConfig) {
+  await chrome.storage.local.set({ aiConfig: config });
+  client = new UnifiedAIClient({
+    aiConfig: config,
+    prismApiUrl: config.apiUrl
+  });
+  return { success: true };
 }
 
 async function getHistory(): Promise<Message[]> {

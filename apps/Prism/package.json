@@ -7,7 +7,7 @@
   },
   "dependencies": {
     "@expo/metro-config": "*",
-    "@react-native-async-storage/async-storage": "^2.2.0",
+    "@react-native-async-storage/async-storage": "2.1.2",
     "@testing-library/react-native": "*",
     "expo": "*",
     "expo-splash-screen": "*",
@@ -16,9 +16,9 @@
     "jest-expo": "*",
     "metro-config": "*",
     "metro-resolver": "*",
-    "react": "19.2.0",
+    "react": "19.0.0",
     "react-dom": "19.0.0",
-    "react-native": "*",
+    "react-native": "0.79.6",
     "react-native-svg": "*",
     "react-native-svg-transformer": "*",
     "react-native-web": "*"

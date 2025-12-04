@@ -1,0 +1,20 @@
+{
+  "name": "shared-db",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/shared-db/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}"],
+      "options": {
+        "outputPath": "dist/libs/shared-db",
+        "tsConfig": "libs/shared-db/tsconfig.lib.json",
+        "packageJson": "libs/shared-db/package.json",
+        "main": "libs/shared-db/src/index.ts",
+        "assets": ["libs/shared-db/*.md"]
+      }
+    }
+  },
+  "tags": []
+}

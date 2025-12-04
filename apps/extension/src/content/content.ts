@@ -7,6 +7,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse(context);
     return true;
   }
+
+  if (request.type === 'GET_SELECTED_TEXT') {
+    const selection = window.getSelection();
+    const selectedText = selection ? selection.toString().trim() : '';
+    sendResponse({ text: selectedText });
+    return true;
+  }
+
+  if (request.type === 'GET_PAGE_CONTENTS') {
+    const content = getMainContent();
+    sendResponse({ content });
+    return true;
+  }
 });
 
 function extractPageContext(): ContextData {
@@ -59,14 +72,19 @@ function getMainContent(): string {
   return document.body.textContent?.trim() || '';
 }
 
-// Add floating button on page (optional)
+// Add floating button on page (top right corner)
 function injectFloatingButton() {
+  // Check if button already exists to avoid duplicates
+  if (document.getElementById('prism-floating-button')) {
+    return;
+  }
+
   const button = document.createElement('div');
   button.id = 'prism-floating-button';
   button.innerHTML = '💎';
   button.style.cssText = `
     position: fixed;
-    bottom: 20px;
+    top: 20px;
     right: 20px;
     width: 50px;
     height: 50px;
@@ -80,7 +98,8 @@ function injectFloatingButton() {
     font-size: 24px;
     box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     z-index: 999999;
-    transition: transform 0.2s;
+    transition: transform 0.2s, opacity 0.2s;
+    user-select: none;
   `;
 
   button.addEventListener('mouseenter', () => {
@@ -96,14 +115,36 @@ function injectFloatingButton() {
     chrome.runtime.sendMessage({ type: 'OPEN_CHAT' });
   });
 
+  // Add close button functionality
+  button.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    button.style.opacity = '0';
+    setTimeout(() => {
+      document.body.removeChild(button);
+    }, 200);
+  });
+
   document.body.appendChild(button);
 }
 
-// Uncomment to enable floating button
+// Enable floating button
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', injectFloatingButton);
 } else {
   injectFloatingButton();
 }
+
+// Re-inject button if it's removed (e.g., by SPA navigation)
+const observer = new MutationObserver((mutationsList) => {
+  if (!document.getElementById('prism-floating-button')) {
+    setTimeout(() => injectFloatingButton(), 500); // Small delay to allow page to load
+  }
+});
+
+// Start observing
+observer.observe(document.body, {
+  childList: true,
+  subtree: true
+});
 
 console.log('Prism content script loaded on:', window.location.href);

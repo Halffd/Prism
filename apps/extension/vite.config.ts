@@ -23,6 +23,7 @@ export default defineConfig({
     alias: {
       '@prism/api-client': resolve(__dirname, '../../libs/api-client/src'),
       '@prism/shared-types': resolve(__dirname, '../../libs/shared-types/src'),
+      '@prism/image-gen': resolve(__dirname, '../../libs/image-gen/src'),
     },
   },
 

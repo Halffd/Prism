@@ -33,6 +33,12 @@
   "include": ["src/**/*.js", "src/**/*.jsx", "src/**/*.ts", "src/**/*.tsx"],
   "references": [
     {
+      "path": "../../libs/image-gen/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/shared-db/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/shared-types/tsconfig.lib.json"
     },
     {
