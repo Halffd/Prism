@@ -1,0 +1,302 @@
+.settings-container {
+  width: 100%;
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 20px;
+  background: #f5f5f5;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  font-family: Arial, sans-serif;
+
+  .settings-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #ddd;
+
+    h2 {
+      margin: 0;
+      color: #333;
+      font-size: 1.5em;
+    }
+
+    .close-btn {
+      background: none;
+      border: none;
+      font-size: 1.5em;
+      cursor: pointer;
+      color: #666;
+      padding: 0;
+      width: 30px;
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      &:hover {
+        color: #333;
+      }
+    }
+  }
+
+  .settings-content {
+    .settings-section {
+      margin-bottom: 30px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid #eee;
+
+      &:last-child {
+        border-bottom: none;
+      }
+
+      h3 {
+        margin-top: 0;
+        margin-bottom: 15px;
+        color: #333;
+        font-size: 1.2em;
+        border-bottom: 1px solid #ddd;
+        padding-bottom: 5px;
+      }
+    }
+
+    .form-group {
+      margin-bottom: 15px;
+
+      label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: bold;
+        color: #333;
+      }
+
+      .form-control {
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+        box-sizing: border-box;
+
+        &:focus {
+          outline: none;
+          border-color: #007bff;
+          box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+        }
+      }
+
+      select.form-control {
+        background-color: #fff;
+        cursor: pointer;
+      }
+    }
+
+    // Site list styles
+    .site-list {
+      margin-bottom: 10px;
+      min-height: 40px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 5px;
+
+      .site-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 5px;
+        background-color: #f9f9f9;
+        margin-bottom: 5px;
+        border-radius: 3px;
+
+        span {
+          flex-grow: 1;
+          word-break: break-all;
+        }
+
+        .remove-site-btn {
+          background: #dc3545;
+          color: white;
+          border: none;
+          border-radius: 3px;
+          padding: 2px 6px;
+          cursor: pointer;
+          margin-left: 10px;
+
+          &:hover {
+            background: #c82333;
+          }
+        }
+      }
+
+      .no-sites {
+        color: #666;
+        font-style: italic;
+        text-align: center;
+        padding: 10px 0;
+        margin: 0;
+      }
+    }
+
+    .add-site-btn {
+      background-color: #28a745;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 8px 12px;
+      cursor: pointer;
+
+      &:hover {
+        background-color: #218838;
+      }
+    }
+
+    // Prompt form styles
+    .prompt-form {
+      .prompt-input {
+        width: 100%;
+        margin-bottom: 10px;
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+        box-sizing: border-box;
+      }
+
+      .prompt-textarea {
+        width: 100%;
+        margin-bottom: 10px;
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+        box-sizing: border-box;
+        resize: vertical;
+      }
+
+      .prompt-add-btn {
+        background-color: #28a745;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        padding: 8px 16px;
+        cursor: pointer;
+
+        &:hover {
+          background-color: #218838;
+        }
+      }
+    }
+
+    // Prompt list styles
+    .prompt-list {
+      .prompt-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px;
+        background-color: #f9f9f9;
+        margin-bottom: 5px;
+        border-radius: 4px;
+
+        .prompt-content {
+          flex-grow: 1;
+
+          .prompt-name {
+            font-weight: bold;
+            margin-bottom: 3px;
+          }
+
+          .prompt-info {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 5px;
+
+            .shortcut-tag {
+              background-color: #007bff;
+              color: white;
+              padding: 2px 6px;
+              border-radius: 3px;
+              font-size: 0.8em;
+            }
+          }
+
+          .prompt-text {
+            font-size: 0.9em;
+            color: #666;
+          }
+        }
+
+        .prompt-actions {
+          .prompt-delete-btn {
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            padding: 4px 8px;
+            cursor: pointer;
+
+            &:hover {
+              background-color: #c82333;
+            }
+          }
+        }
+      }
+
+      .no-prompts {
+        color: #666;
+        font-style: italic;
+        text-align: center;
+        padding: 10px 0;
+      }
+    }
+  }
+
+  .settings-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
+
+    .save-btn, .cancel-btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    .save-btn {
+      background-color: #007bff;
+      color: white;
+
+      &:hover {
+        background-color: #0056b3;
+      }
+    }
+
+    .cancel-btn {
+      background-color: #6c757d;
+      color: white;
+
+      &:hover {
+        background-color: #545b62;
+      }
+    }
+  }
+
+  .loading {
+    text-align: center;
+    padding: 20px;
+    color: #666;
+  }
+}
+
+/* Responsive design */
+@media (max-width: 600px) {
+  .settings-container {
+    padding: 10px;
+    margin: 0;
+    width: 100%;
+  }
+}

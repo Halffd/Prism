@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" version="1.1">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#28508A"/>
+      <stop offset="1" stop-color="#0B2138"/>
+    </linearGradient>
+    <linearGradient id="losangGrad" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#1960C8"/>
+      <stop offset="1" stop-color="#0A3B8C"/>
+    </linearGradient>
+  </defs>
+
+  <!-- rounded square background -->
+  <rect x="16" y="16" width="480" height="480" rx="88" ry="88" fill="url(#bgGrad)"/>
+
+  <!-- vertical losang (tall diamond) centered -->
+  <g>
+    <polygon points="256,100 360,256 256,412 152,256" fill="url(#losangGrad)" />
+    <!-- subtle inner highlight -->
+    <polygon points="256,140 320,256 256,372 192,256" fill="#89C7FF" opacity="0.12"/>
+  </g>
+</svg>

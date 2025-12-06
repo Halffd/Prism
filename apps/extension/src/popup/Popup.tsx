@@ -530,7 +530,6 @@ export function Popup() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const [showSettings, setShowSettings] = useState(false);
 
   const renderMenu = () => (
     <div className="menu-overlay">
@@ -730,127 +729,7 @@ export function Popup() {
     </div>
   );
 
-  const updateAIConfig = async (config: AIConfig) => {
-    try {
-      await chrome.runtime.sendMessage({
-        type: 'UPDATE_AI_CONFIG',
-        data: config
-      });
-      setAiConfig(config);
-      client = new UnifiedAIClient({
-        aiConfig: config,
-        prismApiUrl: config.apiUrl
-      });
-      setShowSettings(false); // Close settings after saving
-    } catch (error) {
-      console.error('Failed to update AI config:', error);
-    }
-  };
 
-  const renderSettings = () => (
-    <div className="settings-overlay">
-      <div className="settings-panel">
-        <div className="settings-header">
-          <h2>AI Settings</h2>
-          <button onClick={() => setShowSettings(false)} className="close-btn">✕</button>
-        </div>
-
-        <div className="settings-content">
-          <div className="form-group">
-            <label>AI Provider</label>
-            <select
-              value={aiConfig.provider}
-              onChange={(e) => setAiConfig({...aiConfig, provider: e.target.value as AIProvider})}
-              className="form-control"
-            >
-              <option value="prism-api">Prism API</option>
-              <option value="openai">OpenAI (ChatGPT)</option>
-              <option value="gemini">Google Gemini</option>
-              <option value="qwen">Alibaba Qwen</option>
-            </select>
-          </div>
-
-          {aiConfig.provider !== 'prism-api' && (
-            <>
-              <div className="form-group">
-                <label>API Key</label>
-                <input
-                  type="password"
-                  value={aiConfig.apiKey || ''}
-                  onChange={(e) => setAiConfig({...aiConfig, apiKey: e.target.value})}
-                  placeholder={`Enter ${aiConfig.provider} API key`}
-                  className="form-control"
-                />
-              </div>
-
-              <div className="form-group">
-                <label>Model</label>
-                <input
-                  type="text"
-                  value={aiConfig.model || ''}
-                  onChange={(e) => setAiConfig({...aiConfig, model: e.target.value})}
-                  placeholder="e.g., gpt-3.5-turbo, gemini-pro, qwen-max"
-                  className="form-control"
-                />
-              </div>
-            </>
-          )}
-
-          {aiConfig.provider === 'prism-api' && (
-            <div className="form-group">
-              <label>Prism API URL</label>
-              <input
-                type="text"
-                value={aiConfig.apiUrl || ''}
-                onChange={(e) => setAiConfig({...aiConfig, apiUrl: e.target.value})}
-                placeholder="Enter Prism API URL"
-                className="form-control"
-              />
-            </div>
-          )}
-
-          {/* Image Generation Settings */}
-          <div className="form-group">
-            <label>Hugging Face API Key</label>
-            <input
-              type="password"
-              value={imageGenerationApiKey}
-              onChange={(e) => setImageGenerationApiKey(e.target.value)}
-              placeholder="Enter your Hugging Face API key"
-              className="form-control"
-            />
-          </div>
-
-          <div className="form-group">
-            <label>Image Generation Model</label>
-            <select
-              value={imageGenerationModel}
-              onChange={(e) => setImageGenerationModel(e.target.value)}
-              className="form-control"
-            >
-              <option value="stabilityai/stable-diffusion-2-1">Stable Diffusion 2.1</option>
-              <option value="runwayml/stable-diffusion-v1-5">Stable Diffusion 1.5</option>
-              <option value="stabilityai/stable-diffusion-xl-base-1.0">SDXL</option>
-              <option value="black-forest-labs/FLUX.1-schnell">FLUX Schnell</option>
-              <option value="black-forest-labs/FLUX.1-dev">FLUX Dev</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="settings-actions">
-          <button
-            onClick={() => {
-              updateAIConfig(aiConfig);
-              saveImageGenerationConfig();
-            }}
-            className="save-btn"
-          >
-            Save Settings
-          </button>
-        </div>
-      </div>
-    </div>
-  );
 
   return (
     <div className="popup-container">
@@ -863,7 +742,7 @@ export function Popup() {
               📄 Context: {context.type}
             </span>
           )}
-          <button onClick={() => setShowSettings(true)} className="settings-btn">⚙️</button>
+          <button onClick={() => chrome.runtime.openOptionsPage()} className="settings-btn">⚙️</button>
           <button onClick={clearHistory} className="clear-btn">
             🗑️
           </button>
@@ -1038,7 +917,6 @@ export function Popup() {
         </div>
       </div>
 
-      {showSettings && renderSettings()}
       {showMenu && renderMenu()}
       {showPrompts && renderPromptShortcuts()}
     </div>

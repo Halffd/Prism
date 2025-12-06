@@ -11,7 +11,14 @@
     "nxe:test:frontend": "nx test <frontend-app-name>",
     "nxe:test:backend": "nx test apps-desktop-desktop",
     "nxe:package:app": "nx run apps-desktop-desktop:make --prepackageOnly",
-    "nxe:make:app": "nx run apps-desktop-desktop:make"
+    "nxe:make:app": "nx run apps-desktop-desktop:make",
+    "build:extension": "nx build @prism/extension",
+    "build:api": "nx build @prism/api",
+    "build:dapp": "nx build @prism/web",
+    "build:all": "npm run build:extension && npm run build:api && npm run build:dapp",
+    "serve:extension": "nx serve @prism/extension",
+    "serve:api": "nx serve @prism/api",
+    "serve:dapp": "nx serve @prism/web"
   },
   "private": true,
   "dependencies": {

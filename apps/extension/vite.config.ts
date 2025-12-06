@@ -37,14 +37,20 @@ export default defineConfig({
     rollupOptions: {
       input: {
         popup: resolve(__dirname, 'index.html'),
+        settings: resolve(__dirname, 'settings.html'),
         background: resolve(__dirname, 'src/background/background.ts'),
         content: resolve(__dirname, 'src/content/content.ts'),
       },
       output: {
         entryFileNames: (chunkInfo) => {
-          const facadeModuleId = chunkInfo.facadeModuleId ? chunkInfo.facadeModuleId.split('/').pop() : 'unknown';
-          const name = facadeModuleId?.replace('.ts', '.js') || '[name].js';
-          return name;
+          // Use fixed names for extension files that are referenced in manifest.json
+          if (chunkInfo.name === 'background') {
+            return 'background.js';
+          } else if (chunkInfo.name === 'content') {
+            return 'content.js';
+          }
+          // For other entries, use the hashed names
+          return '[name]-[hash].js';
         },
         chunkFileNames: 'assets/[name]-[hash].js',
         assetFileNames: 'assets/[name].[ext]',
