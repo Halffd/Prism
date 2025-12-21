@@ -36,7 +36,8 @@ export function Settings({ onClose }: SettingsProps) {
     name: '',
     content: '',
     category: '',
-    shortcutKey: ''
+    shortcutKey: '',
+    customPrefix: ''
   });
   const [loading, setLoading] = useState<boolean>(true);
   const [fetchingModels, setFetchingModels] = useState<boolean>(false);
@@ -46,6 +47,7 @@ export function Settings({ onClose }: SettingsProps) {
   const [sidebarWidth, setSidebarWidth] = useState<number>(350);
   const [pageContentTokenLimit, setPageContentTokenLimit] = useState<number>(20000);
   const [totalMessageTokenLimit, setTotalMessageTokenLimit] = useState<number>(20000);
+  const [commandPrefix, setCommandPrefix] = useState<string>('_');
   const [saveTimeout, setSaveTimeout] = useState<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -135,6 +137,7 @@ export function Settings({ onClose }: SettingsProps) {
         setSidebarWidth(displaySettings.sidebarWidth || 350);
         setPageContentTokenLimit(displaySettings.pageContentTokenLimit || 20000);
         setTotalMessageTokenLimit(displaySettings.totalMessageTokenLimit || 20000);
+        setCommandPrefix(displaySettings.commandPrefix || '_');
       } else {
         // Set defaults
         setDisplayMode('popup');
@@ -142,6 +145,7 @@ export function Settings({ onClose }: SettingsProps) {
         setSidebarWidth(350);
         setPageContentTokenLimit(20000);
         setTotalMessageTokenLimit(20000);
+        setCommandPrefix('_'); // Default underscore
       }
 
       // Load prompt shortcuts
@@ -229,7 +233,8 @@ export function Settings({ onClose }: SettingsProps) {
           enablePopupIframe: displayMode === 'iframe',
           enableSidebar: displayMode === 'sidebar',
           pageContentTokenLimit: pageContentTokenLimit,
-          totalMessageTokenLimit: totalMessageTokenLimit
+          totalMessageTokenLimit: totalMessageTokenLimit,
+          commandPrefix: commandPrefix  // Save command prefix
         } as ExtensionSettings
       });
 
@@ -297,7 +302,8 @@ export function Settings({ onClose }: SettingsProps) {
           enablePopupIframe: displayMode === 'iframe',
           enableSidebar: displayMode === 'sidebar',
           pageContentTokenLimit: pageContentTokenLimit,
-          totalMessageTokenLimit: totalMessageTokenLimit
+          totalMessageTokenLimit: totalMessageTokenLimit,
+          commandPrefix: commandPrefix  // Save command prefix
         } as ExtensionSettings
       });
 
@@ -351,10 +357,11 @@ export function Settings({ onClose }: SettingsProps) {
         content: newPrompt.content,
         category: newPrompt.category || 'General',
         shortcutKey: newPrompt.shortcutKey || undefined,
+        customPrefix: newPrompt.customPrefix || undefined,
         createdAt: Date.now()
       };
       savePromptShortcutToDB(prompt);
-      setNewPrompt({ name: '', content: '', category: '', shortcutKey: '' });
+      setNewPrompt({ name: '', content: '', category: '', shortcutKey: '', customPrefix: '' });
     }
   };
 
@@ -777,6 +784,23 @@ export function Settings({ onClose }: SettingsProps) {
         </div>
 
         <div className="settings-section">
+          <h3>Command Settings</h3>
+          <div className="form-group">
+            <label>Command Prefix</label>
+            <input
+              type="text"
+              value={commandPrefix}
+              onChange={(e) => setCommandPrefix(e.target.value)}
+              className="form-control"
+              placeholder="e.g., _ (underscore)"
+              maxLength={1}
+              minLength={1}
+            />
+            <small className="form-hint">Set the global command prefix (default is underscore '_'). This is used for slash commands like _fix, _explain, etc.</small>
+          </div>
+        </div>
+
+        <div className="settings-section">
           <h3>Token Limits</h3>
           <div className="form-group">
             <label>Page Content Token Limit</label>
@@ -922,6 +946,14 @@ export function Settings({ onClose }: SettingsProps) {
                 value={newPrompt.category}
                 onChange={(e) => setNewPrompt({...newPrompt, category: e.target.value})}
                 className="prompt-input form-control"
+              />
+              <input
+                type="text"
+                placeholder="Custom prefix (optional, e.g. #)"
+                value={newPrompt.customPrefix}
+                onChange={(e) => setNewPrompt({...newPrompt, customPrefix: e.target.value})}
+                className="prompt-input form-control"
+                maxLength={1}
               />
               <button
                 onClick={addNewPrompt}

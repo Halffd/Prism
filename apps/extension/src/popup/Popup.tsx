@@ -150,11 +150,11 @@ export function Popup() {
     getCurrentContext();
   }, []);
 
-  // Initialize font scaling
+  // Initialize font scaling and command prefix
   useEffect(() => {
-    const initFontScale = async () => {
+    const initConfig = async () => {
       try {
-        const result = await chrome.storage.local.get(['fontScale']);
+        const result = await chrome.storage.local.get(['fontScale', 'displaySettings']);
         let currentFontScale = 1.0;
         if (result.fontScale) {
           currentFontScale = Math.max(0.5, Math.min(2.0, result.fontScale)); // Clamp between 0.5 and 2.0
@@ -162,12 +162,21 @@ export function Popup() {
 
         // Apply font scale to the document root (for the popup)
         document.documentElement.style.setProperty('--font-scale', currentFontScale.toString());
+
+        // Set default command prefix if not set
+        if (!result.displaySettings?.commandPrefix) {
+          const updatedSettings = {
+            ...result.displaySettings,
+            commandPrefix: '_'  // Default underscore prefix
+          };
+          await chrome.storage.local.set({ displaySettings: updatedSettings });
+        }
       } catch (error) {
-        console.warn('Could not load font scale, using default:', error);
+        console.warn('Could not load configuration, using defaults:', error);
       }
     };
 
-    initFontScale();
+    initConfig();
   }, []);
 
   // Update models when AI configuration changes
@@ -540,24 +549,69 @@ export function Popup() {
         }
       }
 
-      // Check for slash commands (e.g., /fix)
-      if (e.key === 'Enter' && input.trim().startsWith('/')) {
-        e.preventDefault(); // Prevent sending the message
-        const command = input.trim().split(' ')[0]; // Get the command part
-        const prompt = promptShortcuts.find(p => p.shortcutKey === command);
-        if (prompt) {
-          // Replace the command with the prompt content
-          const remainingText = input.substring(command.length).trim();
-          const newInput = prompt.content + (remainingText ? ' ' + remainingText : '');
-          setInput(newInput);
+      // Check for slash commands (e.g., /fix) - updated to use configurable prefix
+      if (e.key === 'Enter') {
+        // Since we can't use async operations in event handler directly, we'll try to get the prefix from our local state first
+        // If not available, we'll use the default underscore
+        let commandPrefix = '_'; // Default prefix
 
-          // After updating the input, send the message
-          setTimeout(() => {
+        // First try to get from localStorage
+        try {
+          const settings = localStorage.getItem('displaySettings');
+          if (settings) {
+            const parsedSettings = JSON.parse(settings);
+            if (parsedSettings.commandPrefix) {
+              commandPrefix = parsedSettings.commandPrefix;
+            }
+          }
+        } catch (e) {
+          console.warn('Could not parse display settings from localStorage');
+        }
+
+        // If localStorage doesn't have it, continue using the default
+
+        const commandPattern = new RegExp(`^\\${commandPrefix}([a-zA-Z0-9_]+)`);
+        const match = input.trim().match(commandPattern);
+
+        if (match) {
+          e.preventDefault(); // Prevent sending the message
+          const command = match[0]; // Full command with prefix (e.g., "_fix")
+          const commandName = match[1]; // Command name without prefix (e.g., "fix")
+
+          // First try to find a prompt with a custom prefix that matches the input
+          let prompt = null;
+
+          // Find a prompt where the input starts with the prompt's custom prefix followed by the command name
+          for (const p of promptShortcuts) {
+            if (p.customPrefix) {
+              const customCommandPattern = new RegExp(`^\\${p.customPrefix}${commandName}`);
+              if (customCommandPattern.test(input.trim())) {
+                prompt = p;
+                break;
+              }
+            }
+          }
+
+          // If no custom prefix prompt found, try finding with the global prefix
+          if (!prompt) {
+            // Look for prompt with shortcutKey matching the command (e.g., "_fix")
+            prompt = promptShortcuts.find(p => p.shortcutKey === command);
+          }
+
+          if (prompt) {
+            // Replace the command with the prompt content
+            const remainingText = input.substring(command.length).trim();
+            const newInput = prompt.content + (remainingText ? ' ' + remainingText : '');
+            setInput(newInput);
+
+            // After updating the input, send the message
+            setTimeout(() => {
+              sendMessage();
+            }, 0);
+          } else {
+            // If it's a command but not found, send the message as is
             sendMessage();
-          }, 0);
-        } else {
-          // If it's a slash command but not found, send the message as is
-          sendMessage();
+          }
         }
       }
 

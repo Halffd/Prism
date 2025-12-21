@@ -1008,8 +1008,66 @@ export function StandaloneChatPage() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
+                // Check for commands with configurable prefix (default to '_')
+                const settings = localStorage.getItem('displaySettings');
+                let commandPrefix = '_';
+                if (settings) {
+                  try {
+                    const parsedSettings = JSON.parse(settings);
+                    if (parsedSettings.commandPrefix) {
+                      commandPrefix = parsedSettings.commandPrefix;
+                    }
+                  } catch (e) {
+                    console.warn('Could not parse display settings from localStorage');
+                  }
+                }
+
+                const commandPattern = new RegExp(`^\\${commandPrefix}([a-zA-Z0-9_]+)`);
+                const match = input.trim().match(commandPattern);
+
+                if (match) {
+                  e.preventDefault(); // Prevent sending the message
+                  const command = match[0]; // Full command with prefix (e.g., "_fix")
+                  const commandName = match[1]; // Command name without prefix (e.g., "fix")
+
+                  // First try to find a prompt with a custom prefix that matches the input
+                  let prompt = null;
+
+                  // Find a prompt where the input starts with the prompt's custom prefix followed by the command name
+                  for (const p of promptShortcuts) {
+                    if (p.customPrefix) {
+                      const customCommandPattern = new RegExp(`^\\${p.customPrefix}${commandName}`);
+                      if (customCommandPattern.test(input.trim())) {
+                        prompt = p;
+                        break;
+                      }
+                    }
+                  }
+
+                  // If no custom prefix prompt found, try finding with the global prefix
+                  if (!prompt) {
+                    // Look for prompt with shortcutKey matching the command (e.g., "_fix")
+                    prompt = promptShortcuts.find(p => p.shortcutKey === command);
+                  }
+
+                  if (prompt) {
+                    // Replace the command with the prompt content
+                    const remainingText = input.substring(command.length).trim();
+                    const newInput = prompt.content + (remainingText ? ' ' + remainingText : '');
+                    setInput(newInput);
+
+                    // After updating the input, send the message
+                    setTimeout(() => {
+                      sendMessage();
+                    }, 0);
+                  } else {
+                    // If it's a command but not found, send the message as is
+                    sendMessage();
+                  }
+                } else {
+                  e.preventDefault();
+                  sendMessage();
+                }
               }
             }}
             placeholder="Ask anything..."

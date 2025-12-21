@@ -17,6 +17,7 @@ export interface PromptShortcut {
   createdAt: number;
   category?: string;
   shortcutKey?: string; // Optional keyboard shortcut
+  customPrefix?: string; // Optional custom prefix for this shortcut
 }
 
 

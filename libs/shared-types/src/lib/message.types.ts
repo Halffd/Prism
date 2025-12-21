@@ -18,6 +18,17 @@ export interface ContextData {
   metadata?: Record<string, unknown>;
 }
 
+export interface PromptShortcut {
+  id: string;
+  name: string;
+  content: string;
+  category: string;
+  shortcutKey?: string;        // Global shortcut key like /fix
+  keyboardShortcut?: string;   // Keyboard shortcut like Ctrl+Shift+F
+  customPrefix?: string;       // Optional custom prefix for this shortcut
+  createdAt: number;
+}
+
 export interface ChatSession {
   id: string;
   userId: string;
@@ -77,4 +88,5 @@ export interface ExtensionSettings {
   defaultProvider: AIProvider;
   pageContentTokenLimit?: number;  // Token limit for page content (default 20000)
   totalMessageTokenLimit?: number; // Total token limit for message + context (default 20000)
+  commandPrefix?: string;          // Global command prefix (default is underscore '_')
 }
