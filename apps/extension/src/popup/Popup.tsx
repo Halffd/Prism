@@ -541,13 +541,23 @@ export function Popup() {
       }
 
       // Check for slash commands (e.g., /fix)
-      if (e.key === 'Enter' && input.startsWith('/')) {
-        const command = input.split(' ')[0];
+      if (e.key === 'Enter' && input.trim().startsWith('/')) {
+        e.preventDefault(); // Prevent sending the message
+        const command = input.trim().split(' ')[0]; // Get the command part
         const prompt = promptShortcuts.find(p => p.shortcutKey === command);
         if (prompt) {
-          e.preventDefault();
           // Replace the command with the prompt content
-          setInput(prompt.content);
+          const remainingText = input.substring(command.length).trim();
+          const newInput = prompt.content + (remainingText ? ' ' + remainingText : '');
+          setInput(newInput);
+
+          // After updating the input, send the message
+          setTimeout(() => {
+            sendMessage();
+          }, 0);
+        } else {
+          // If it's a slash command but not found, send the message as is
+          sendMessage();
         }
       }
 
