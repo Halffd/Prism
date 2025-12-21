@@ -2,6 +2,7 @@ export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
+  images?: string[]; // Base64 encoded image data or URLs
   context?: ContextData;
   timestamp: number;
   tokens?: number;
@@ -31,11 +32,28 @@ export interface ApiResponse<T> {
   error?: string;
 }
 
-export type AIProvider = 'openai' | 'gemini' | 'qwen' | 'prism-api';
+export type AIProvider = 'openai' | 'gemini' | 'qwen' | 'prism-api' | 'koboldcpp' | 'llamacpp' | 'ollama' | 'sglang' | 'transformers' | 'claude' | 'deepseek' | 'grok' | 'openrouter' | 'poe';
 
 export interface AIConfig {
   provider: AIProvider;
-  apiKey?: string;
+  // Store API keys separately for each provider
+  providerKeys?: {
+    'openai'?: string;
+    'gemini'?: string;
+    'qwen'?: string;
+    'prism-api'?: string;
+    'koboldcpp'?: string;
+    'llamacpp'?: string;
+    'ollama'?: string;
+    'sglang'?: string;
+    'transformers'?: string;
+    'claude'?: string;
+    'deepseek'?: string;
+    'grok'?: string;
+    'openrouter'?: string;
+    'poe'?: string;
+  };
+  apiKey?: string; // Keep for backward compatibility
   apiUrl?: string;
   model?: string;
   temperature?: number;
@@ -43,4 +61,20 @@ export interface AIConfig {
   topP?: number;
   frequencyPenalty?: number;
   presencePenalty?: number;
+  // Additional options for local providers
+  localApiUrl?: string;  // For local inference providers
+  imageSupport?: boolean; // Whether the provider supports image input
+}
+
+export type PopupDisplayMode = 'popup' | 'sidebar' | 'iframe' | 'floating';
+
+export interface ExtensionSettings {
+  popupDisplayMode: PopupDisplayMode;
+  sidebarPosition: 'left' | 'right';
+  sidebarWidth: number;
+  enablePopupIframe: boolean;
+  enableSidebar: boolean;
+  defaultProvider: AIProvider;
+  pageContentTokenLimit?: number;  // Token limit for page content (default 20000)
+  totalMessageTokenLimit?: number; // Total token limit for message + context (default 20000)
 }

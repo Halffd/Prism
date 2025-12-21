@@ -92,6 +92,75 @@ export function ChatScreen({ navigateToSettings }: ChatScreenProps = {}) {
     }
   }, [messages]);
 
+  const copyMessageToClipboard = async (content: string) => {
+    try {
+      // Try to use Clipboard API if available, otherwise use React Native Clipboard
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(content);
+      } else {
+        const Clipboard = await import('expo-clipboard').then(m => m.default || m);
+        await Clipboard.setStringAsync(content);
+      }
+    } catch (err) {
+      console.error('Failed to copy message:', err);
+    }
+  };
+
+  const resendMessage = async (message: Message) => {
+    if (message.role === 'user') {
+      // Resend the user's message by putting it in the input field
+      setInput(message.content);
+    } else if (message.role === 'assistant') {
+      // Find the corresponding user message and resend it
+      const userMessageIndex = messages.findIndex(
+        (msg, idx) => idx < messages.indexOf(message) && msg.role === 'user'
+      );
+      if (userMessageIndex !== -1) {
+        setInput(messages[userMessageIndex].content);
+      }
+    }
+  };
+
+  const getRelativeTime = (timestamp: number): string => {
+    const now = Date.now();
+    const diffInSeconds = Math.floor((now - timestamp) / 1000);
+
+    if (diffInSeconds < 60) {
+      return 'just now';
+    } else if (diffInSeconds < 3600) {
+      const minutes = Math.floor(diffInSeconds / 60);
+      return `${minutes}m ago`;
+    } else if (diffInSeconds < 86400) {
+      const hours = Math.floor(diffInSeconds / 3600);
+      return `${hours}h ago`;
+    } else {
+      const days = Math.floor(diffInSeconds / 86400);
+      return `${days}d ago`;
+    }
+  };
+
+  const getTimeSinceLastMessage = (currentIndex: number): string | null => {
+    if (currentIndex === 0) return null; // First message has no previous message
+
+    const currentTimestamp = messages[currentIndex].timestamp;
+    const previousTimestamp = messages[currentIndex - 1].timestamp;
+
+    const diffInSeconds = Math.floor((currentTimestamp - previousTimestamp) / 1000);
+
+    if (diffInSeconds < 60) {
+      return `${diffInSeconds}s after`;
+    } else if (diffInSeconds < 3600) {
+      const minutes = Math.floor(diffInSeconds / 60);
+      return `${minutes}m after`;
+    } else if (diffInSeconds < 86400) {
+      const hours = Math.floor(diffInSeconds / 3600);
+      return `${hours}h after`;
+    } else {
+      const days = Math.floor(diffInSeconds / 86400);
+      return `${days}d after`;
+    }
+  };
+
   const loadHistory = async () => {
     try {
       const savedMessages = await storage.getItem('chatHistory');
@@ -173,19 +242,79 @@ export function ChatScreen({ navigateToSettings }: ChatScreenProps = {}) {
         <FlatList
           ref={flatListRef}
           data={messages}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <View
-              style={[
-                styles.messageContainer,
-                item.role === 'user' ? styles.userMessage : styles.assistantMessage,
-              ]}
-            >
-              <Text style={item.role === 'user' ? styles.userText : styles.assistantText}>
-                {item.content}
-              </Text>
-            </View>
-          )}
+          keyExtractor={(item, index) => `${item.id}-${index}`}
+          renderItem={({ item, index }) => {
+            const currentMsgDate = new Date(item.timestamp);
+            const previousMsgDate = index > 0 ? new Date(messages[index - 1].timestamp) : null;
+            const showDateSeparator = !previousMsgDate ||
+              currentMsgDate.toDateString() !== previousMsgDate.toDateString();
+
+            const timeString = currentMsgDate.toLocaleTimeString([], {
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false
+            });
+
+            const relativeTime = getRelativeTime(item.timestamp);
+
+            return (
+              <React.Fragment>
+                {showDateSeparator && (
+                  <View style={styles.dateSeparator}>
+                    <Text style={styles.dateSeparatorText}>
+                      {currentMsgDate.toLocaleDateString([], {
+                        weekday: 'long',
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric'
+                      })}
+                    </Text>
+                  </View>
+                )}
+                <View
+                  style={[
+                    styles.messageContainer,
+                    item.role === 'user' ? styles.userMessage : styles.assistantMessage,
+                  ]}
+                >
+                  <View style={styles.messageHeader}>
+                    <View style={styles.timestampContainer}>
+                      <Text style={item.role === 'user' ? styles.userTimestamp : styles.assistantTimestamp}>
+                        {timeString}
+                      </Text>
+                      <Text style={styles.relativeTime}>
+                        {relativeTime}
+                      </Text>
+                    </View>
+                    <View style={styles.buttonContainer}>
+                      <TouchableOpacity
+                        style={styles.copyButton}
+                        onPress={() => copyMessageToClipboard(item.content)}
+                      >
+                        <Text style={styles.copyButtonText}>📋</Text>
+                      </TouchableOpacity>
+                      {item.role === 'assistant' && (
+                        <TouchableOpacity
+                          style={styles.resendButton}
+                          onPress={() => resendMessage(item)}
+                        >
+                          <Text style={styles.resendButtonText}>↪️</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
+                  {index > 0 && (
+                    <Text style={styles.timeSincePrevious}>
+                      {getTimeSinceLastMessage(index)}
+                    </Text>
+                  )}
+                  <Text style={item.role === 'user' ? styles.userText : styles.assistantText}>
+                    {item.content}
+                  </Text>
+                </View>
+              </React.Fragment>
+            );
+          }}
           contentContainerStyle={styles.messagesList}
         />
         <View style={styles.inputContainer}>
@@ -251,6 +380,69 @@ const styles = StyleSheet.create({
   assistantMessage: {
     backgroundColor: '#e0e0e0',
     alignSelf: 'flex-start',
+  },
+  messageHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 5,
+  },
+  timestampContainer: {
+    flexDirection: 'column',
+  },
+  buttonContainer: {
+    flexDirection: 'row',
+  },
+  userTimestamp: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.8)',
+    marginBottom: 2,
+  },
+  assistantTimestamp: {
+    fontSize: 12,
+    color: 'rgba(0, 0, 0, 0.6)',
+    marginBottom: 2,
+  },
+  relativeTime: {
+    fontSize: 10,
+    fontStyle: 'italic',
+    color: 'rgba(0, 0, 0, 0.6)',
+  },
+  copyButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  copyButtonText: {
+    fontSize: 14,
+  },
+  resendButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  resendButtonText: {
+    fontSize: 14,
+  },
+  timeSincePrevious: {
+    fontSize: 10,
+    fontStyle: 'italic',
+    color: 'rgba(0, 0, 0, 0.5)',
+    marginBottom: 5,
+    paddingLeft: 15,
+    borderLeftWidth: 1,
+    borderLeftColor: '#ccc',
+  },
+  dateSeparator: {
+    alignItems: 'center',
+    marginVertical: 10,
+  },
+  dateSeparatorText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: 'rgba(0, 0, 0, 0.6)',
+    backgroundColor: '#e0e0e0',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
   },
   userText: {
     color: 'white',

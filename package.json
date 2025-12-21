@@ -24,6 +24,7 @@
   "dependencies": {
     "@expo/metro-config": "~0.20.14",
     "@expo/metro-runtime": "~5.0.4",
+    "@google/generative-ai": "^0.24.1",
     "@huggingface/inference": "^4.13.4",
     "axios": "^1.6.0",
     "dexie": "^4.2.1",

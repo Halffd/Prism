@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AIConfig } from '@prism/shared-types';
+import { AIConfig, ExtensionSettings, PopupDisplayMode } from '@prism/shared-types';
 import { UnifiedAIClient } from '@prism/api-client';
 import {
   getPromptShortcuts,
@@ -12,7 +12,13 @@ import './Settings.scss';
 // Initialize with default settings - will be overridden by stored settings
 const defaultAIConfig: AIConfig = {
   provider: 'prism-api',
-  apiUrl: 'http://localhost:3000/api'
+  apiUrl: 'http://localhost:3000/api',
+  providerKeys: {
+    'openai': '',
+    'gemini': '',
+    'qwen': '',
+    'prism-api': ''
+  }
 };
 
 interface SettingsProps {
@@ -33,10 +39,40 @@ export function Settings({ onClose }: SettingsProps) {
     shortcutKey: ''
   });
   const [loading, setLoading] = useState<boolean>(true);
+  const [fetchingModels, setFetchingModels] = useState<boolean>(false);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [displayMode, setDisplayMode] = useState<PopupDisplayMode>('popup');
+  const [sidebarPosition, setSidebarPosition] = useState<'left' | 'right'>('right');
+  const [sidebarWidth, setSidebarWidth] = useState<number>(350);
+  const [pageContentTokenLimit, setPageContentTokenLimit] = useState<number>(20000);
+  const [totalMessageTokenLimit, setTotalMessageTokenLimit] = useState<number>(20000);
+  const [saveTimeout, setSaveTimeout] = useState<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     loadSettings();
   }, []);
+
+  // Auto-save settings when any setting changes
+  useEffect(() => {
+    // Clear previous timeout
+    if (saveTimeout) {
+      clearTimeout(saveTimeout);
+    }
+
+    // Set new timeout to save settings after 1 second of inactivity
+    const timeout = setTimeout(() => {
+      updateSettingsAuto();
+    }, 1000);
+
+    setSaveTimeout(timeout);
+
+    // Cleanup function
+    return () => {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    };
+  }, [aiConfig, imageGenerationApiKey, imageGenerationModel, excludedSites, whitelistedSites, displayMode, sidebarPosition, sidebarWidth]);
 
   const loadSettings = async () => {
     try {
@@ -50,7 +86,26 @@ export function Settings({ onClose }: SettingsProps) {
       ]);
 
       if (result.aiConfig) {
-        const config = result.aiConfig as AIConfig;
+        let config = result.aiConfig as AIConfig;
+
+        // Ensure providerKeys exists and has all providers
+        if (!config.providerKeys) {
+          config.providerKeys = {
+            'openai': config.apiKey || '',
+            'gemini': config.apiKey || '',
+            'qwen': config.apiKey || '',
+            'prism-api': config.apiKey || config.apiUrl || ''
+          };
+        } else {
+          // Ensure all provider keys exist
+          config.providerKeys = {
+            'openai': config.providerKeys['openai'] || '',
+            'gemini': config.providerKeys['gemini'] || '',
+            'qwen': config.providerKeys['qwen'] || '',
+            'prism-api': config.providerKeys['prism-api'] || config.apiUrl || ''
+          };
+        }
+
         setAiConfig(config);
       } else {
         setAiConfig(defaultAIConfig);
@@ -72,6 +127,23 @@ export function Settings({ onClose }: SettingsProps) {
         setWhitelistedSites(result.whitelistedSites);
       }
 
+      // Load display preferences
+      if (result.displaySettings) {
+        const displaySettings = result.displaySettings as ExtensionSettings;
+        setDisplayMode(displaySettings.popupDisplayMode || 'popup');
+        setSidebarPosition(displaySettings.sidebarPosition || 'right');
+        setSidebarWidth(displaySettings.sidebarWidth || 350);
+        setPageContentTokenLimit(displaySettings.pageContentTokenLimit || 20000);
+        setTotalMessageTokenLimit(displaySettings.totalMessageTokenLimit || 20000);
+      } else {
+        // Set defaults
+        setDisplayMode('popup');
+        setSidebarPosition('right');
+        setSidebarWidth(350);
+        setPageContentTokenLimit(20000);
+        setTotalMessageTokenLimit(20000);
+      }
+
       // Load prompt shortcuts
       const shortcuts = await getPromptShortcuts();
       setPromptShortcuts(shortcuts);
@@ -83,16 +155,57 @@ export function Settings({ onClose }: SettingsProps) {
     }
   };
 
+  const fetchAvailableModels = async () => {
+    setFetchingModels(true);
+    try {
+      // Create a temporary client with the current AI config
+      // Update the current provider's API key in the config temporarily to use the new providerKeys structure
+      const tempConfig = { ...aiConfig };
+
+      if (tempConfig.providerKeys) {
+        // Temporarily set apiKey to the current provider's key
+        tempConfig.apiKey = tempConfig.providerKeys[tempConfig.provider] || '';
+
+        // For prism-api, use the apiUrl field
+        if (tempConfig.provider === 'prism-api' && tempConfig.providerKeys['prism-api']) {
+          tempConfig.apiUrl = tempConfig.providerKeys['prism-api'];
+        }
+      }
+
+      const client = new UnifiedAIClient({ aiConfig: tempConfig });
+      const models = await client.getAvailableModels();
+      setAvailableModels(models);
+    } catch (error) {
+      console.error('Error fetching available models:', error);
+      alert('Failed to fetch available models. Please check your API key and connection.');
+    } finally {
+      setFetchingModels(false);
+    }
+  };
+
   const updateSettings = async () => {
     try {
+      // Update the current provider's API key in the providerKeys object
+      const updatedConfig = { ...aiConfig };
+
+      if (updatedConfig.providerKeys) {
+        // Set the apiKey field to the current provider's key for backward compatibility
+        updatedConfig.apiKey = updatedConfig.providerKeys[updatedConfig.provider] || '';
+
+        // For prism-api, also use the apiUrl field
+        if (updatedConfig.provider === 'prism-api' && updatedConfig.providerKeys['prism-api']) {
+          updatedConfig.apiUrl = updatedConfig.providerKeys['prism-api'];
+        }
+      }
+
       // Save AI configuration
       await chrome.storage.local.set({
-        aiConfig: aiConfig
+        aiConfig: updatedConfig
       });
 
       await chrome.runtime.sendMessage({
         type: 'UPDATE_AI_CONFIG',
-        data: aiConfig
+        data: updatedConfig
       });
 
       // Save image generation settings
@@ -107,9 +220,100 @@ export function Settings({ onClose }: SettingsProps) {
         whitelistedSites: whitelistedSites
       });
 
+      // Save display preferences
+      await chrome.storage.local.set({
+        displaySettings: {
+          popupDisplayMode: displayMode,
+          sidebarPosition: sidebarPosition,
+          sidebarWidth: sidebarWidth,
+          enablePopupIframe: displayMode === 'iframe',
+          enableSidebar: displayMode === 'sidebar',
+          pageContentTokenLimit: pageContentTokenLimit,
+          totalMessageTokenLimit: totalMessageTokenLimit
+        } as ExtensionSettings
+      });
+
+      // Send a message to update the display mode across the extension
+      await chrome.runtime.sendMessage({
+        type: 'UPDATE_DISPLAY_MODE',
+        data: {
+          popupDisplayMode: displayMode,
+          sidebarPosition: sidebarPosition,
+          sidebarWidth: sidebarWidth,
+          pageContentTokenLimit: pageContentTokenLimit,
+          totalMessageTokenLimit: totalMessageTokenLimit
+        }
+      });
+
       if (onClose) onClose();
     } catch (error) {
       console.error('Failed to update settings:', error);
+    }
+  };
+
+  const updateSettingsAuto = async () => {
+    try {
+      // Update the current provider's API key in the providerKeys object
+      const updatedConfig = { ...aiConfig };
+
+      if (updatedConfig.providerKeys) {
+        // Set the apiKey field to the current provider's key for backward compatibility
+        updatedConfig.apiKey = updatedConfig.providerKeys[updatedConfig.provider] || '';
+
+        // For prism-api, also use the apiUrl field
+        if (updatedConfig.provider === 'prism-api' && updatedConfig.providerKeys['prism-api']) {
+          updatedConfig.apiUrl = updatedConfig.providerKeys['prism-api'];
+        }
+      }
+
+      // Save AI configuration
+      await chrome.storage.local.set({
+        aiConfig: updatedConfig
+      });
+
+      await chrome.runtime.sendMessage({
+        type: 'UPDATE_AI_CONFIG',
+        data: updatedConfig
+      });
+
+      // Save image generation settings
+      await chrome.storage.local.set({
+        imageGenApiKey: imageGenerationApiKey,
+        imageGenModel: imageGenerationModel
+      });
+
+      // Save excluded and whitelisted sites
+      await chrome.storage.local.set({
+        excludedSites: excludedSites,
+        whitelistedSites: whitelistedSites
+      });
+
+      // Save display preferences
+      await chrome.storage.local.set({
+        displaySettings: {
+          popupDisplayMode: displayMode,
+          sidebarPosition: sidebarPosition,
+          sidebarWidth: sidebarWidth,
+          enablePopupIframe: displayMode === 'iframe',
+          enableSidebar: displayMode === 'sidebar',
+          pageContentTokenLimit: pageContentTokenLimit,
+          totalMessageTokenLimit: totalMessageTokenLimit
+        } as ExtensionSettings
+      });
+
+      // Send a message to update the display mode across the extension
+      await chrome.runtime.sendMessage({
+        type: 'UPDATE_DISPLAY_MODE',
+        data: {
+          popupDisplayMode: displayMode,
+          sidebarPosition: sidebarPosition,
+          sidebarWidth: sidebarWidth,
+          pageContentTokenLimit: pageContentTokenLimit,
+          totalMessageTokenLimit: totalMessageTokenLimit
+        }
+      });
+    } catch (error) {
+      console.error('Failed to auto-save settings:', error);
     }
   };
 
@@ -197,9 +401,9 @@ export function Settings({ onClose }: SettingsProps) {
 
       <div className="settings-content">
         <div className="settings-section">
-          <h3>AI Configuration</h3>
+          <h3>AI Provider Selection</h3>
           <div className="form-group">
-            <label>AI Provider</label>
+            <label>Active AI Provider</label>
             <select
               value={aiConfig.provider}
               onChange={(e) => setAiConfig({...aiConfig, provider: e.target.value as any})}
@@ -209,47 +413,396 @@ export function Settings({ onClose }: SettingsProps) {
               <option value="openai">OpenAI (ChatGPT)</option>
               <option value="gemini">Google Gemini</option>
               <option value="qwen">Alibaba Qwen</option>
+              <option value="koboldcpp">KoboldCPP</option>
+              <option value="llamacpp">Llama.cpp</option>
+              <option value="ollama">Ollama</option>
+              <option value="sglang">SGLang</option>
+              <option value="transformers">Transformers</option>
+              <option value="claude">Claude</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="grok">Grok</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="poe">Poe</option>
             </select>
           </div>
+        </div>
 
-          {aiConfig.provider !== 'prism-api' && (
+        <div className="settings-section">
+          <h3>Provider API Keys</h3>
+          <div className="form-group">
+            <label>OpenAI API Key</label>
+            <input
+              type="password"
+              value={aiConfig.providerKeys?.openai || ''}
+              onChange={(e) => setAiConfig({
+                ...aiConfig,
+                providerKeys: {
+                  ...aiConfig.providerKeys,
+                  openai: e.target.value
+                }
+              })}
+              placeholder="Enter your OpenAI API key"
+              className="form-control"
+            />
+            <small className="form-hint">Required for OpenAI models (GPT-3.5, GPT-4, etc.)</small>
+          </div>
+
+          <div className="form-group">
+            <label>Google Gemini API Key</label>
+            <input
+              type="password"
+              value={aiConfig.providerKeys?.gemini || ''}
+              onChange={(e) => setAiConfig({
+                ...aiConfig,
+                providerKeys: {
+                  ...aiConfig.providerKeys,
+                  gemini: e.target.value
+                }
+              })}
+              placeholder="Enter your Google Gemini API key"
+              className="form-control"
+            />
+            <small className="form-hint">Required for Google's Gemini models</small>
+          </div>
+
+          <div className="form-group">
+            <label>Alibaba Qwen API Key</label>
+            <input
+              type="password"
+              value={aiConfig.providerKeys?.qwen || ''}
+              onChange={(e) => setAiConfig({
+                ...aiConfig,
+                providerKeys: {
+                  ...aiConfig.providerKeys,
+                  qwen: e.target.value
+                }
+              })}
+              placeholder="Enter your Alibaba Qwen API key"
+              className="form-control"
+            />
+            <small className="form-hint">Required for Alibaba's Qwen models</small>
+          </div>
+
+          <div className="form-group">
+            <label>KoboldCPP API URL</label>
+            <input
+              type="text"
+              value={aiConfig.providerKeys?.koboldcpp || aiConfig.localApiUrl || ''}
+              onChange={(e) => setAiConfig({
+                ...aiConfig,
+                localApiUrl: e.target.value,
+                providerKeys: {
+                  ...aiConfig.providerKeys,
+                  koboldcpp: e.target.value
+                }
+              })}
+              placeholder="Enter your KoboldCPP API URL (e.g., http://localhost:5001)"
+              className="form-control"
+            />
+            <small className="form-hint">Enter the URL for your KoboldCPP server</small>
+          </div>
+
+          <div className="form-group">
+            <label>Llama.cpp API URL</label>
+            <input
+              type="text"
+              value={aiConfig.providerKeys?.llamacpp || aiConfig.localApiUrl || ''}
+              onChange={(e) => setAiConfig({
+                ...aiConfig,
+                localApiUrl: e.target.value,
+                providerKeys: {
+                  ...aiConfig.providerKeys,
+                  llamacpp: e.target.value
+                }
+              })}
+              placeholder="Enter your Llama.cpp API URL (e.g., http://localhost:8080)"
+              className="form-control"
+            />
+            <small className="form-hint">Enter the URL for your Llama.cpp server</small>
+          </div>
+
+          <div className="form-group">
+            <label>Ollama API URL</label>
+            <input
+              type="text"
+              value={aiConfig.providerKeys?.ollama || aiConfig.localApiUrl || ''}
+              onChange={(e) => setAiConfig({
+                ...aiConfig,
+                localApiUrl: e.target.value,
+                providerKeys: {
+                  ...aiConfig.providerKeys,
+                  ollama: e.target.value
+                }
+              })}
+              placeholder="Enter your Ollama API URL (e.g., http://localhost:11434)"
+              className="form-control"
+            />
+            <small className="form-hint">Enter the URL for your Ollama server</small>
+          </div>
+
+          <div className="form-group">
+            <label>SGLang API URL</label>
+            <input
+              type="text"
+              value={aiConfig.providerKeys?.sglang || aiConfig.localApiUrl || ''}
+              onChange={(e) => setAiConfig({
+                ...aiConfig,
+                localApiUrl: e.target.value,
+                providerKeys: {
+                  ...aiConfig.providerKeys,
+                  sglang: e.target.value
+                }
+              })}
+              placeholder="Enter your SGLang API URL (e.g., http://localhost:30000)"
+              className="form-control"
+            />
+            <small className="form-hint">Enter the URL for your SGLang server</small>
+          </div>
+
+          <div className="form-group">
+            <label>Transformers API Key</label>
+            <input
+              type="password"
+              value={aiConfig.providerKeys?.transformers || ''}
+              onChange={(e) => setAiConfig({
+                ...aiConfig,
+                providerKeys: {
+                  ...aiConfig.providerKeys,
+                  transformers: e.target.value
+                }
+              })}
+              placeholder="Enter your Transformers API key (Hugging Face token)"
+              className="form-control"
+            />
+            <small className="form-hint">API key for Hugging Face Transformers API</small>
+          </div>
+
+          <div className="form-group">
+            <label>Claude API Key</label>
+            <input
+              type="password"
+              value={aiConfig.providerKeys?.claude || ''}
+              onChange={(e) => setAiConfig({
+                ...aiConfig,
+                providerKeys: {
+                  ...aiConfig.providerKeys,
+                  claude: e.target.value
+                }
+              })}
+              placeholder="Enter your Anthropic Claude API key"
+              className="form-control"
+            />
+            <small className="form-hint">API key for Anthropic Claude API</small>
+          </div>
+
+          <div className="form-group">
+            <label>DeepSeek API Key</label>
+            <input
+              type="password"
+              value={aiConfig.providerKeys?.deepseek || ''}
+              onChange={(e) => setAiConfig({
+                ...aiConfig,
+                providerKeys: {
+                  ...aiConfig.providerKeys,
+                  deepseek: e.target.value
+                }
+              })}
+              placeholder="Enter your DeepSeek API key"
+              className="form-control"
+            />
+            <small className="form-hint">API key for DeepSeek API</small>
+          </div>
+
+          <div className="form-group">
+            <label>Grok API Key</label>
+            <input
+              type="password"
+              value={aiConfig.providerKeys?.grok || ''}
+              onChange={(e) => setAiConfig({
+                ...aiConfig,
+                providerKeys: {
+                  ...aiConfig.providerKeys,
+                  grok: e.target.value
+                }
+              })}
+              placeholder="Enter your Grok API key"
+              className="form-control"
+            />
+            <small className="form-hint">API key for Grok API</small>
+          </div>
+
+          <div className="form-group">
+            <label>OpenRouter API Key</label>
+            <input
+              type="password"
+              value={aiConfig.providerKeys?.openrouter || ''}
+              onChange={(e) => setAiConfig({
+                ...aiConfig,
+                providerKeys: {
+                  ...aiConfig.providerKeys,
+                  openrouter: e.target.value
+                }
+              })}
+              placeholder="Enter your OpenRouter API key"
+              className="form-control"
+            />
+            <small className="form-hint">API key for OpenRouter API</small>
+          </div>
+
+          <div className="form-group">
+            <label>Poe API Key</label>
+            <input
+              type="password"
+              value={aiConfig.providerKeys?.poe || ''}
+              onChange={(e) => setAiConfig({
+                ...aiConfig,
+                providerKeys: {
+                  ...aiConfig.providerKeys,
+                  poe: e.target.value
+                }
+              })}
+              placeholder="Enter your Poe API key"
+              className="form-control"
+            />
+            <small className="form-hint">API key for Poe API (if available)</small>
+          </div>
+
+          <div className="form-group">
+            <label>Prism API URL</label>
+            <input
+              type="text"
+              value={aiConfig.providerKeys?.['prism-api'] || aiConfig.apiUrl || ''}
+              onChange={(e) => setAiConfig({
+                ...aiConfig,
+                apiUrl: e.target.value,
+                providerKeys: {
+                  ...aiConfig.providerKeys,
+                  'prism-api': e.target.value
+                }
+              })}
+              placeholder="Enter your Prism API URL"
+              className="form-control"
+            />
+            <small className="form-hint">Enter the URL for your Prism API endpoint</small>
+          </div>
+        </div>
+
+        <div className="settings-section">
+          <h3>Model Configuration</h3>
+          <div className="form-group">
+            <label>Model</label>
+            <input
+              type="text"
+              value={aiConfig.model || ''}
+              onChange={(e) => setAiConfig({...aiConfig, model: e.target.value})}
+              placeholder="e.g., gpt-3.5-turbo, gemini-pro, qwen-max"
+              className="form-control"
+            />
+            <small className="form-hint">Specify the model to use with the current provider</small>
+          </div>
+
+          <div className="form-group">
+            <button
+              type="button"
+              className="fetch-models-btn"
+              onClick={fetchAvailableModels}
+              disabled={fetchingModels}
+            >
+              {fetchingModels ? 'Fetching...' : 'Fetch Available Models'}
+            </button>
+            {availableModels.length > 0 && (
+              <div className="available-models">
+                <label>Available Models:</label>
+                <div className="model-list">
+                  {availableModels.map((model, index) => (
+                    <button
+                      key={index}
+                      type="button"
+                      className="model-btn"
+                      onClick={() => setAiConfig({...aiConfig, model})}
+                    >
+                      {model}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="settings-section">
+          <h3>Display Options</h3>
+          <div className="form-group">
+            <label>Popup Display Mode</label>
+            <select
+              value={displayMode}
+              onChange={(e) => setDisplayMode(e.target.value as any)}
+              className="form-control"
+            >
+              <option value="popup">Extension Popup</option>
+              <option value="floating">Floating Window</option>
+              <option value="sidebar">Sidebar</option>
+              <option value="iframe">Popup as Iframe</option>
+            </select>
+            <small className="form-hint">Choose how the Prism interface appears on web pages</small>
+          </div>
+
+          {displayMode === 'sidebar' && (
             <>
               <div className="form-group">
-                <label>API Key</label>
-                <input
-                  type="password"
-                  value={aiConfig.apiKey || ''}
-                  onChange={(e) => setAiConfig({...aiConfig, apiKey: e.target.value})}
-                  placeholder={`Enter ${aiConfig.provider} API key`}
+                <label>Sidebar Position</label>
+                <select
+                  value={sidebarPosition}
+                  onChange={(e) => setSidebarPosition(e.target.value as any)}
                   className="form-control"
-                />
+                >
+                  <option value="left">Left</option>
+                  <option value="right">Right</option>
+                </select>
               </div>
 
               <div className="form-group">
-                <label>Model</label>
+                <label>Sidebar Width (px)</label>
                 <input
-                  type="text"
-                  value={aiConfig.model || ''}
-                  onChange={(e) => setAiConfig({...aiConfig, model: e.target.value})}
-                  placeholder="e.g., gpt-3.5-turbo, gemini-pro, qwen-max"
+                  type="number"
+                  value={sidebarWidth}
+                  onChange={(e) => setSidebarWidth(Number(e.target.value))}
+                  min="200"
+                  max="600"
                   className="form-control"
                 />
               </div>
             </>
           )}
+        </div>
 
-          {aiConfig.provider === 'prism-api' && (
-            <div className="form-group">
-              <label>Prism API URL</label>
-              <input
-                type="text"
-                value={aiConfig.apiUrl || ''}
-                onChange={(e) => setAiConfig({...aiConfig, apiUrl: e.target.value})}
-                placeholder="Enter Prism API URL"
-                className="form-control"
-              />
-            </div>
-          )}
+        <div className="settings-section">
+          <h3>Token Limits</h3>
+          <div className="form-group">
+            <label>Page Content Token Limit</label>
+            <input
+              type="number"
+              value={pageContentTokenLimit}
+              onChange={(e) => setPageContentTokenLimit(Number(e.target.value))}
+              min="1000"
+              max="100000"
+              className="form-control"
+            />
+            <small className="form-hint">Maximum tokens to extract from page content (default: 20000)</small>
+          </div>
+
+          <div className="form-group">
+            <label>Total Message Token Limit</label>
+            <input
+              type="number"
+              value={totalMessageTokenLimit}
+              onChange={(e) => setTotalMessageTokenLimit(Number(e.target.value))}
+              min="1000"
+              max="100000"
+              className="form-control"
+            />
+            <small className="form-hint">Maximum total tokens for message + context (default: 20000)</small>
+          </div>
         </div>
 
         <div className="settings-section">

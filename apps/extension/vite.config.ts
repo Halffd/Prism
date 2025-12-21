@@ -38,6 +38,7 @@ export default defineConfig({
       input: {
         popup: resolve(__dirname, 'index.html'),
         settings: resolve(__dirname, 'settings.html'),
+        chat: resolve(__dirname, 'chat.html'),
         background: resolve(__dirname, 'src/background/background.ts'),
         content: resolve(__dirname, 'src/content/content.ts'),
       },

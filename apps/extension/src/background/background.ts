@@ -48,10 +48,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 async function handleSendMessage(data: {
   content: string;
   context?: ContextData;
+  images?: string[];
+  aiConfig?: AIConfig;
 }) {
   try {
-    const response = await client.sendMessage(data.content, data.context);
-    
+    // Update client if new AI config is provided
+    if (data.aiConfig) {
+      client = new UnifiedAIClient({
+        aiConfig: data.aiConfig,
+        prismApiUrl: data.aiConfig.apiUrl
+      });
+    }
+
+    const response = await client.sendMessage(data.content, data.context, undefined, data.images);
+
     // Store in chrome.storage for history
     if (response.success && response.data) {
       const history = await getHistory();
@@ -70,11 +80,16 @@ async function handleGetContext(tabId?: number) {
   if (!tabId) return { error: 'No active tab' };
 
   try {
-    // Inject content script if not already injected
+    // Get extension settings to pass token limits
+    const result = await chrome.storage.local.get(['displaySettings']);
+    const settings = result.displaySettings;
+    const pageContentTokenLimit = settings?.pageContentTokenLimit || 20000;
+
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    
+
     const response = await chrome.tabs.sendMessage(tabId, {
-      type: 'EXTRACT_CONTEXT'
+      type: 'EXTRACT_CONTEXT',
+      pageContentTokenLimit
     });
 
     return response;
