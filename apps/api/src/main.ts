@@ -7,10 +7,23 @@ import { routes } from './app/routes';
 import { errorHandler } from './app/middleware/error-handler';
 import { logger } from './app/middleware/logger';
 
+// Import database initialization
+import { initDb } from './app/services/db.service';
+
 const host = process.env.HOST ?? 'localhost';
 const port = process.env.PORT ? Number(process.env.PORT) : 3000;
 
 const app = express();
+
+// Initialize database connection
+initDb()
+  .then(() => {
+    console.log('Database initialized successfully');
+  })
+  .catch(err => {
+    console.error('Failed to initialize database:', err);
+    process.exit(1);
+  });
 
 // Security middleware
 app.use(helmet());

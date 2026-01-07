@@ -1,5 +1,33 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Message, ContextData, ChatSession } from '@prism/shared-types';
+
+// Define interfaces locally since imports are having issues
+interface Message {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  images?: string[];
+  context?: ContextData;
+  timestamp: number;
+  tokens?: number;
+}
+
+interface ContextData {
+  type: 'page' | 'screen' | 'selection';
+  url?: string;
+  title?: string;
+  selectedText?: string;
+  fullText?: string;
+  appName?: string;
+  metadata?: Record<string, unknown>;
+}
+
+interface ChatSession {
+  id: string;
+  userId: string;
+  messages: Message[];
+  createdAt: number;
+  updatedAt: number;
+}
 
 // Data access layer interface
 interface IDataAccess {
@@ -89,4 +117,5 @@ class InMemoryDataAccess implements IDataAccess {
 // Create singleton instance
 const dataAccess: IDataAccess = new InMemoryDataAccess();
 
-export { dataAccess, IDataAccess };
+export { dataAccess };
+export type { IDataAccess };

@@ -1,6 +1,5 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { SessionModel } from '../models';
-import { ApiResponse } from '@prism/shared-types';
 import { AuthenticatedRequest } from '../middleware/auth';
 
 export const createSession = async (req: AuthenticatedRequest, res: Response) => {
@@ -15,13 +14,13 @@ export const createSession = async (req: AuthenticatedRequest, res: Response) =>
       messages
     });
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       data: session
     });
   } catch (error: unknown) {
     console.error('Error in createSession:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: 'Failed to create session'
     });
@@ -52,13 +51,13 @@ export const getSession = async (req: AuthenticatedRequest, res: Response) => {
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       data: session
     });
   } catch (error: unknown) {
     console.error('Error in getSession:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: 'Failed to get session'
     });
@@ -94,13 +93,13 @@ export const updateSession = async (req: AuthenticatedRequest, res: Response) =>
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       data: updatedSession
     });
   } catch (error: unknown) {
     console.error('Error in updateSession:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: 'Failed to update session'
     });
@@ -136,13 +135,13 @@ export const deleteSession = async (req: AuthenticatedRequest, res: Response) =>
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       data: { message: 'Session deleted successfully' }
     });
   } catch (error: unknown) {
     console.error('Error in deleteSession:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: 'Failed to delete session'
     });
@@ -156,13 +155,13 @@ export const listSessions = async (req: AuthenticatedRequest, res: Response) => 
 
     const sessions = await SessionModel.findAll(userId);
 
-    res.json({
+    return res.json({
       success: true,
       data: sessions
     });
   } catch (error: unknown) {
     console.error('Error in listSessions:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: 'Failed to list sessions'
     });

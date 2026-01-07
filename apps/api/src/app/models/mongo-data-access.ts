@@ -1,6 +1,34 @@
-import { Message, ChatSession } from '@prism/shared-types';
 import { User, Session, MessageModel, IUser, ISession, IMessage } from './mongo-schemas';
 import mongoose from 'mongoose';
+
+// Define interfaces locally since imports are having issues
+interface Message {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  images?: string[];
+  context?: ContextData;
+  timestamp: number;
+  tokens?: number;
+}
+
+interface ContextData {
+  type: 'page' | 'screen' | 'selection';
+  url?: string;
+  title?: string;
+  selectedText?: string;
+  fullText?: string;
+  appName?: string;
+  metadata?: Record<string, unknown>;
+}
+
+interface ChatSession {
+  id: string;
+  userId: string;
+  messages: Message[];
+  createdAt: number;
+  updatedAt: number;
+}
 
 // Initialize connection
 import connectToDatabase from '../utils/db';
@@ -141,4 +169,5 @@ class MongoDataAccess implements IDataAccess {
 // Create singleton instance
 const dataAccess: IDataAccess = new MongoDataAccess();
 
-export { dataAccess, IDataAccess };
+export { dataAccess };
+export type { IDataAccess };

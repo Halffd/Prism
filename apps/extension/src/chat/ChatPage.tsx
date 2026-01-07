@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useSelector, useDispatch } from 'react-redux';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -13,6 +14,18 @@ import {
   loadChatSessionById
 } from '@prism/shared-db';
 import type { Message, ContextData, AIConfig } from '@prism/shared-types';
+import {
+  setMessages,
+  addMessage,
+  setLoading,
+  setCurrentSessionId,
+  setSessions,
+  setSelectedProvider,
+  setAIConfig,
+  updateAIConfig,
+  setContext,
+  RootState
+} from '@prism/redux-store';
 import './ChatPage.scss';
 
 // Initialize with default settings - will be overridden by stored settings
@@ -24,18 +37,15 @@ const defaultAIConfig: AIConfig = {
 let client = new UnifiedAIClient({ aiConfig: defaultAIConfig });
 
 export function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const dispatch = useDispatch();
+  const { messages, loading, currentSessionId, sessions, selectedProvider: reduxSelectedProvider } = useSelector((state: RootState) => state.chat);
+  const { config: reduxAIConfig } = useSelector((state: RootState) => state.aiConfig);
+  const { context: reduxContext } = useSelector((state: RootState) => state.context);
+
   const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [context, setContext] = useState<ContextData | null>(null);
-  const [aiConfig, setAiConfig] = useState<AIConfig>(defaultAIConfig);
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [currentSessionId, setCurrentSessionId] = useState<string>(() => {
-    // Generate a default session ID based on timestamp
-    return `session_${Date.now()}`;
-  });
   const [showMenu, setShowMenu] = useState(false);
-  const [selectedProvider, setSelectedProvider] = useState<AIConfig['provider']>('openai');
+  // Use the selectedProvider from Redux state
+  const selectedProvider = reduxSelectedProvider;
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -45,27 +55,31 @@ export function ChatPage() {
       if (result.aiConfig) {
         try {
           const config = result.aiConfig as AIConfig;
-          setAiConfig(config);
-          setSelectedProvider(config.provider);
+          dispatch(setAIConfig(config));
+          dispatch(setSelectedProvider(config.provider));
           client = new UnifiedAIClient({
             aiConfig: config,
             prismApiUrl: config.apiUrl
           });
         } catch (error) {
           console.error('Failed to load AI config, using default:', error);
+          dispatch(setAIConfig(defaultAIConfig));
+          dispatch(setSelectedProvider(defaultAIConfig.provider));
           client = new UnifiedAIClient({ aiConfig: defaultAIConfig });
         }
       } else {
+        dispatch(setAIConfig(defaultAIConfig));
+        dispatch(setSelectedProvider(defaultAIConfig.provider));
         client = new UnifiedAIClient({ aiConfig: defaultAIConfig });
       }
     });
 
     // Load chat sessions
     loadChatSessionsFromDB();
-    
+
     // Load current chat history
     loadChatHistoryFromDB();
-  }, []);
+  }, [dispatch]);
 
   useEffect(() => {
     scrollToBottom();
@@ -74,20 +88,20 @@ export function ChatPage() {
   const loadChatHistoryFromDB = async () => {
     try {
       const history = await loadChatHistory(currentSessionId);
-      setMessages(history);
+      dispatch(setMessages(history));
     } catch (error) {
       console.error('Failed to load chat history from database:', error);
-      setMessages([]);
+      dispatch(setMessages([]));
     }
   };
 
   const loadChatSessionsFromDB = async () => {
     try {
       const sessionsList = await getChatSessions();
-      setSessions(sessionsList);
+      dispatch(setSessions(sessionsList));
     } catch (error) {
       console.error('Failed to load chat sessions:', error);
-      setSessions([]);
+      dispatch(setSessions([]));
     }
   };
 
@@ -102,24 +116,24 @@ export function ChatPage() {
   };
 
   const switchToSession = async (sessionId: string) => {
-    setCurrentSessionId(sessionId);
+    dispatch(setCurrentSessionId(sessionId));
     try {
       const history = await loadChatSessionById(sessionId);
       if (history) {
-        setMessages(history.messages);
+        dispatch(setMessages(history.messages));
       } else {
-        setMessages([]);
+        dispatch(setMessages([]));
       }
     } catch (error) {
       console.error('Failed to load session:', error);
-      setMessages([]);
+      dispatch(setMessages([]));
     }
   };
 
   const createNewSession = () => {
     const newSessionId = `session_${Date.now()}`;
-    setCurrentSessionId(newSessionId);
-    setMessages([]);
+    dispatch(setCurrentSessionId(newSessionId));
+    dispatch(setMessages([]));
   };
 
   const deleteSession = async (sessionId: string) => {
@@ -179,42 +193,40 @@ export function ChatPage() {
       content: input,
       timestamp: Date.now(),
       tokens: totalTokens, // Include token count
-      context
+      context: reduxContext
     };
 
-    const newMessages = [...messages, userMessage];
-    setMessages(newMessages);
+    dispatch(addMessage(userMessage));
     setInput('');
-    setLoading(true);
+    dispatch(setLoading(true));
 
     try {
       // Temporarily use selected provider for this message
-      const tempConfig = { ...aiConfig, provider: selectedProvider };
+      const tempConfig = { ...reduxAIConfig, provider: selectedProvider };
       client.updateAIConfig(tempConfig);
 
-      const response = await client.sendMessage(input, context, currentSessionId);
+      const response = await client.sendMessage(input, reduxContext, currentSessionId);
 
       if (response.success && response.data) {
-        const updatedMessages = [...newMessages, response.data];
-        setMessages(updatedMessages);
+        dispatch(addMessage(response.data));
 
         // Save to database
-        await saveCurrentChatToDB(updatedMessages);
+        await saveCurrentChatToDB([...messages, userMessage, response.data]);
 
         // Update the current AI config back to the original if different
-        if (aiConfig.provider !== selectedProvider) {
-          client.updateAIConfig(aiConfig);
+        if (reduxAIConfig.provider !== selectedProvider) {
+          client.updateAIConfig(reduxAIConfig);
         }
       }
     } catch (error) {
       console.error('Error sending message:', error);
     } finally {
-      setLoading(false);
+      dispatch(setLoading(false));
     }
   };
 
   const clearHistory = async () => {
-    setMessages([]);
+    dispatch(setMessages([]));
     await saveCurrentChatToDB([]);
   };
 
@@ -356,9 +368,9 @@ export function ChatPage() {
       <div className="chat-header">
         <h1>💎 Prism Chat</h1>
         <div className="header-actions">
-          <select 
-            value={selectedProvider} 
-            onChange={(e) => setSelectedProvider(e.target.value as AIConfig['provider'])}
+          <select
+            value={selectedProvider}
+            onChange={(e) => dispatch(setSelectedProvider(e.target.value as AIConfig['provider']))}
             className="provider-selector"
           >
             <option value="openai">OpenAI</option>

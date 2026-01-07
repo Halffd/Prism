@@ -1,4 +1,23 @@
-import { Message, ContextData } from '@prism/shared-types';
+// Define interfaces locally since imports are having issues
+interface Message {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  images?: string[];
+  context?: ContextData;
+  timestamp: number;
+  tokens?: number;
+}
+
+interface ContextData {
+  type: 'page' | 'screen' | 'selection';
+  url?: string;
+  title?: string;
+  selectedText?: string;
+  fullText?: string;
+  appName?: string;
+  metadata?: Record<string, unknown>;
+}
 
 export interface LLMConfig {
   apiKey: string;
@@ -109,11 +128,11 @@ export class LLMService {
     );
 
     if (!response.ok) {
-      const errorData = await response.json();
+      const errorData: any = await response.json();
       throw new Error(`OpenAI API error: ${errorData.error?.message || 'Unknown error'}`);
     }
 
-    const data = await response.json();
+    const data: any = await response.json();
     return data.choices[0].message.content;
   }
 
@@ -145,11 +164,11 @@ export class LLMService {
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
+      const errorData: any = await response.json();
       throw new Error(`Anthropic API error: ${errorData.error?.message || 'Unknown error'}`);
     }
 
-    const data = await response.json();
+    const data: any = await response.json();
     return data.content[0].text;
   }
 

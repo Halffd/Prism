@@ -1,5 +1,33 @@
-import { Message, ChatSession } from '@prism/shared-types';
 import { dataAccess } from './mongo-data-access';
+
+// Define interfaces locally since imports are having issues
+interface Message {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  images?: string[];
+  context?: ContextData;
+  timestamp: number;
+  tokens?: number;
+}
+
+interface ContextData {
+  type: 'page' | 'screen' | 'selection';
+  url?: string;
+  title?: string;
+  selectedText?: string;
+  fullText?: string;
+  appName?: string;
+  metadata?: Record<string, unknown>;
+}
+
+interface ChatSession {
+  id: string;
+  userId: string;
+  messages: Message[];
+  createdAt: number;
+  updatedAt: number;
+}
 
 export const SessionModel = {
   create: async (session: Omit<ChatSession, 'id' | 'createdAt' | 'updatedAt'>): Promise<ChatSession> => {

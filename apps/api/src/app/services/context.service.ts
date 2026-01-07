@@ -1,4 +1,14 @@
-import { ContextData } from '@prism/shared-types';
+
+// Define ContextData interface locally since import was removed
+interface ContextData {
+  type: 'page' | 'screen' | 'selection';
+  url?: string;
+  title?: string;
+  selectedText?: string;
+  fullText?: string;
+  appName?: string;
+  metadata?: Record<string, unknown>;
+}
 
 export interface ProcessedContext {
   summary: string;

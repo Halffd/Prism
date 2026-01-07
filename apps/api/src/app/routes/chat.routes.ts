@@ -1,15 +1,14 @@
 import { Router } from 'express';
 import {
   sendMessage,
-  getHistory,
-  createContextProcessor
+  getHistory
 } from '../controllers/chat.controller';
 import { authenticate } from '../middleware/auth';
+import { createContextProcessor } from '../services/context.service';
 
 const router = Router();
 
 // Create context processor
-const contextProcessor = createContextProcessor();
 
 // Chat endpoints
 router.post('/', authenticate, sendMessage);

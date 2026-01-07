@@ -49,6 +49,7 @@ async function handleSendMessage(data: {
   content: string;
   context?: ContextData;
   images?: string[];
+  conversationHistory?: any[];
   aiConfig?: AIConfig;
 }) {
   try {
@@ -60,11 +61,14 @@ async function handleSendMessage(data: {
       });
     }
 
-    const response = await client.sendMessage(data.content, data.context, undefined, data.images);
+    // Pass the conversation history to the AI client
+    const response = await client.sendMessage(data.content, data.context, data.conversationHistory, data.images);
 
     // Store in chrome.storage for history
     if (response.success && response.data) {
       const history = await getHistory();
+      // Make sure we're not duplicating the response
+      // The response.data is already the assistant message, so we just need to add it
       history.push(response.data);
       await chrome.storage.local.set({ history });
     }

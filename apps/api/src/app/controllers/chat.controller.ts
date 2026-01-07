@@ -1,8 +1,7 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { MessageModel, SessionModel } from '../models';
 import { createContextProcessor } from '../services/context.service';
 import { LLMService } from '../services/llm.service';
-import { Message, ContextData } from '@prism/shared-types';
 import { AuthenticatedRequest } from '../middleware/auth';
 
 // Initialize services
@@ -19,7 +18,7 @@ const llmService: LLMService = new LLMService({
 
 export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { content, context, sessionId } = req.body;
+    const { content, context, sessionId } = req.body || {};
 
     if (!content) {
       return res.status(400).json({
@@ -61,7 +60,7 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
     const processedContext = contextProcessor.process(context);
 
     // Save user message to session
-    const _userMessage = await MessageModel.addMessageToSession(session.id, {
+    await MessageModel.addMessageToSession(session.id, {
       role: 'user',
       content,
       context
@@ -80,7 +79,7 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
       context
     });
 
-    res.json({
+    return res.json({
       success: true,
       data: assistantMessage,
       // Include processed context info for debugging/monitoring
@@ -92,7 +91,7 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
     });
   } catch (error: any) {
     console.error('Error in sendMessage:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: 'Failed to send message'
     });
@@ -135,13 +134,13 @@ export const getHistory = async (req: AuthenticatedRequest, res: Response) => {
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       data: messages
     });
   } catch (error: unknown) {
     console.error('Error in getHistory:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: 'Failed to retrieve history'
     });

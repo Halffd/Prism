@@ -740,6 +740,8 @@ function injectFloatingButton() {
   button.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     button.style.opacity = '0';
+    buttonRemovedByUser = true; // Mark that user removed the button
+    localStorage.setItem('prismButtonRemoved', 'true'); // Persist the state
     setTimeout(() => {
       document.body.removeChild(button);
     }, 200);
@@ -751,19 +753,27 @@ function injectFloatingButton() {
 // Enable floating button
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
+    // Reset the button removal flag when we're on a new page
+    localStorage.removeItem('prismButtonRemoved');
+    buttonRemovedByUser = false;
     injectFloatingButton();
     loadDisplaySettings();
   });
 } else {
+  // Reset the button removal flag when we're on a new page
+  localStorage.removeItem('prismButtonRemoved');
+  buttonRemovedByUser = false;
   injectFloatingButton();
   loadDisplaySettings();
   initializeFontScale();
   setupHotkeyListener();
 }
 
-// Re-inject button if it's removed (e.g., by SPA navigation)
+// Check if button was previously removed by the user
+let buttonRemovedByUser = localStorage.getItem('prismButtonRemoved') === 'true';
+
 const observer = new MutationObserver((mutationsList) => {
-  if (!document.getElementById('prism-floating-button')) {
+  if (!document.getElementById('prism-floating-button') && !buttonRemovedByUser) {
     setTimeout(() => injectFloatingButton(), 500); // Small delay to allow page to load
   }
 });
