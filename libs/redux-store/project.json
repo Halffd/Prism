@@ -1,0 +1,28 @@
+{
+  "name": "redux-store",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceFrom": ["libs/redux-store"],
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}"],
+      "options": {
+        "outputPath": "dist/libs/redux-store",
+        "main": "libs/redux-store/src/index.ts",
+        "tsConfig": "libs/redux-store/tsconfig.lib.json",
+        "assets": [
+          "libs/redux-store/*.md"
+        ]
+      }
+    },
+    "lint": {
+      "executor": "@nx/eslint:eslint",
+      "outputs": ["{options.outputFile}"],
+      "options": {
+        "lintFilePatterns": ["libs/redux-store/**/*.ts"]
+      }
+    }
+  },
+  "tags": []
+}
