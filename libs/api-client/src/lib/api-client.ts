@@ -1,5 +1,14 @@
 import { AIService, ChatCompletionRequest } from '@prism/llm-service';
-import { Message, ContextData, ApiResponse, AIConfig } from '@prism/shared-types';
+import {
+  Message,
+  ContextData,
+  ApiResponse,
+  AIConfig,
+  ChatSession,
+  PromptShortcut
+} from '@prism/shared-types';
+import { networkStatusService } from './network-status';
+import { getFirebaseIdToken } from '@prism/firebase-auth';
 
 export interface UnifiedAIClientOptions {
   aiConfig?: AIConfig;
@@ -56,8 +65,92 @@ export class UnifiedAIClient {
     sessionId?: string,
     images?: string[]
   ): Promise<ApiResponse<Message>> {
-    // If using an AI provider directly, use the AI service
-    if (this.aiService && this.aiConfig && this.aiConfig.provider !== 'prism-api') {
+    // Check network status
+    const isOnline = networkStatusService.isCurrentlyOnline();
+
+    // If we have an AI service (local models) or we're offline, use the local AI service
+    if (this.aiService && this.aiConfig) {
+      try {
+        // Check if provider is a local model or if we're offline
+        const isLocalProvider = this.isLocalModelProvider(this.aiConfig.provider);
+        const shouldUseLocal = isLocalProvider || !isOnline;
+
+        if (shouldUseLocal) {
+          // Use local AI service (offline first approach)
+          const userMessage: Message = {
+            id: Date.now().toString(),
+            role: 'user',
+            content,
+            images,
+            context,
+            timestamp: Date.now()
+          };
+
+          const request: ChatCompletionRequest = {
+            messages: [userMessage],
+            context,
+            config: this.aiConfig
+          };
+
+          const response = await this.aiService.chatCompletion(request);
+
+          const assistantMessage: Message = {
+            id: `assistant-${Date.now()}`,
+            role: 'assistant',
+            content: response.content,
+            timestamp: Date.now(),
+            context,
+            tokens: response.tokensUsed
+          };
+
+          return {
+            success: true,
+            data: assistantMessage
+          };
+        }
+      } catch (error: any) {
+        console.warn('Local model failed, attempting fallback:', error.message);
+        // Continue to try online method if local fails
+      }
+    }
+
+    // If we're online and have Prism API configured, try the API
+    if (isOnline && this.prismApiUrl) {
+      try {
+        // Get Firebase ID token to include in the request
+        const firebaseToken = await getFirebaseIdToken();
+
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json'
+        };
+
+        // Add Firebase token if available
+        if (firebaseToken) {
+          headers['Authorization'] = `Bearer ${firebaseToken}`;
+        } else if (this.prismApiKey) {
+          // Fall back to API key if no Firebase token
+          headers['Authorization'] = `Bearer ${this.prismApiKey}`;
+        }
+
+        const response = await fetch(`${this.prismApiUrl}/api/chat`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            content,
+            context,
+            sessionId,
+            images
+          })
+        });
+
+        return await response.json() as Promise<ApiResponse<Message>>;
+      } catch (error: any) {
+        console.warn('API request failed:', error.message);
+      }
+    }
+
+    // If all online methods fail, try local models again as last resort
+    if (this.aiService && this.aiConfig) {
       try {
         const userMessage: Message = {
           id: Date.now().toString(),
@@ -97,36 +190,25 @@ export class UnifiedAIClient {
       }
     }
 
-    // Otherwise, fall back to Prism API
-    if (!this.prismApiUrl) {
-      return {
-        success: false,
-        error: 'No API configuration found'
-      };
-    }
+    // Finally, return an error if no method worked
+    return {
+      success: false,
+      error: isOnline
+        ? 'No API configuration found and local model failed'
+        : 'Offline and no local model configured or available'
+    };
+  }
 
-    try {
-      const response = await fetch(`${this.prismApiUrl}/api/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(this.prismApiKey && { Authorization: `Bearer ${this.prismApiKey}` })
-        },
-        body: JSON.stringify({
-          content,
-          context,
-          sessionId,
-          images
-        })
-      });
-
-      return await response.json() as Promise<ApiResponse<Message>>;
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || 'Failed to connect to Prism API'
-      };
-    }
+  // Helper method to check if provider is a local model
+  private isLocalModelProvider(provider: string): boolean {
+    const localProviders = [
+      'koboldcpp',
+      'llamacpp',
+      'ollama',
+      'sglang',
+      'transformers'
+    ];
+    return localProviders.includes(provider);
   }
 
   updateAIConfig(config: AIConfig) {
@@ -183,6 +265,208 @@ export class UnifiedAIClient {
         return ['poe', 'sage', 'dragonfruit', 'citrine'];
       default:
         return [];
+    }
+  }
+
+  // Sync methods for chat history and configuration
+  async syncMessages(messages: Message[]): Promise<ApiResponse<{ message: string; count: number }>> {
+    if (!this.prismApiUrl) {
+      return {
+        success: false,
+        error: 'No API configuration found'
+      };
+    }
+
+    try {
+      // Get Firebase ID token to include in the request
+      const firebaseToken = await getFirebaseIdToken();
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+
+      // Add Firebase token if available
+      if (firebaseToken) {
+        headers['Authorization'] = `Bearer ${firebaseToken}`;
+      } else if (this.prismApiKey) {
+        // Fall back to API key if no Firebase token
+        headers['Authorization'] = `Bearer ${this.prismApiKey}`;
+      }
+
+      const response = await fetch(`${this.prismApiUrl}/api/sync/messages`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ messages })
+      });
+
+      return await response.json() as Promise<ApiResponse<{ message: string; count: number }>>;
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to sync messages'
+      };
+    }
+  }
+
+  async syncSessions(sessions: ChatSession[]): Promise<ApiResponse<{ message: string; count: number }>> {
+    if (!this.prismApiUrl) {
+      return {
+        success: false,
+        error: 'No API configuration found'
+      };
+    }
+
+    try {
+      // Get Firebase ID token to include in the request
+      const firebaseToken = await getFirebaseIdToken();
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+
+      // Add Firebase token if available
+      if (firebaseToken) {
+        headers['Authorization'] = `Bearer ${firebaseToken}`;
+      } else if (this.prismApiKey) {
+        // Fall back to API key if no Firebase token
+        headers['Authorization'] = `Bearer ${this.prismApiKey}`;
+      }
+
+      const response = await fetch(`${this.prismApiUrl}/api/sync/sessions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ sessions })
+      });
+
+      return await response.json() as Promise<ApiResponse<{ message: string; count: number }>>;
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to sync sessions'
+      };
+    }
+  }
+
+  async syncPrompts(prompts: PromptShortcut[]): Promise<ApiResponse<{ message: string; count: number }>> {
+    if (!this.prismApiUrl) {
+      return {
+        success: false,
+        error: 'No API configuration found'
+      };
+    }
+
+    try {
+      // Get Firebase ID token to include in the request
+      const firebaseToken = await getFirebaseIdToken();
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+
+      // Add Firebase token if available
+      if (firebaseToken) {
+        headers['Authorization'] = `Bearer ${firebaseToken}`;
+      } else if (this.prismApiKey) {
+        // Fall back to API key if no Firebase token
+        headers['Authorization'] = `Bearer ${this.prismApiKey}`;
+      }
+
+      const response = await fetch(`${this.prismApiUrl}/api/sync/prompts`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ prompts })
+      });
+
+      return await response.json() as Promise<ApiResponse<{ message: string; count: number }>>;
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to sync prompts'
+      };
+    }
+  }
+
+  async getSyncedData(): Promise<ApiResponse<{
+    messages: Message[];
+    sessions: ChatSession[];
+    prompts: PromptShortcut[];
+  }>> {
+    if (!this.prismApiUrl) {
+      return {
+        success: false,
+        error: 'No API configuration found'
+      };
+    }
+
+    try {
+      // Get Firebase ID token to include in the request
+      const firebaseToken = await getFirebaseIdToken();
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+
+      // Add Firebase token if available
+      if (firebaseToken) {
+        headers['Authorization'] = `Bearer ${firebaseToken}`;
+      } else if (this.prismApiKey) {
+        // Fall back to API key if no Firebase token
+        headers['Authorization'] = `Bearer ${this.prismApiKey}`;
+      }
+
+      const response = await fetch(`${this.prismApiUrl}/api/sync/data`, {
+        method: 'GET',
+        headers
+      });
+
+      return await response.json() as Promise<ApiResponse<{
+        messages: Message[];
+        sessions: ChatSession[];
+        prompts: PromptShortcut[];
+      }>>;
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to get synced data'
+      };
+    }
+  }
+
+  async clearSyncedData(): Promise<ApiResponse<{ message: string }>> {
+    if (!this.prismApiUrl) {
+      return {
+        success: false,
+        error: 'No API configuration found'
+      };
+    }
+
+    try {
+      // Get Firebase ID token to include in the request
+      const firebaseToken = await getFirebaseIdToken();
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+
+      // Add Firebase token if available
+      if (firebaseToken) {
+        headers['Authorization'] = `Bearer ${firebaseToken}`;
+      } else if (this.prismApiKey) {
+        // Fall back to API key if no Firebase token
+        headers['Authorization'] = `Bearer ${this.prismApiKey}`;
+      }
+
+      const response = await fetch(`${this.prismApiUrl}/api/sync/clear`, {
+        method: 'DELETE',
+        headers
+      });
+
+      return await response.json() as Promise<ApiResponse<{ message: string }>>;
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to clear synced data'
+      };
     }
   }
 }

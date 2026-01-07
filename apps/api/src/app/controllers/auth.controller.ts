@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { Request, Response } from 'express';
-import { User, IUser } from '../models/mongo-schemas';
+import { User } from '../models/mongo-schemas';
 import connectToDatabase from '../utils/db';
 import { AuthenticatedRequest } from '../middleware/auth';
 
@@ -52,7 +52,7 @@ export const register = async (req: Request, res: Response) => {
       { expiresIn: '24h' }
     );
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       data: {
         id: savedUser._id.toString(),
@@ -63,7 +63,7 @@ export const register = async (req: Request, res: Response) => {
     });
   } catch (error: unknown) {
     console.error('Registration error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: 'Internal server error'
     });
@@ -109,7 +109,7 @@ export const login = async (req: Request, res: Response) => {
       { expiresIn: '24h' }
     );
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         id: user._id.toString(),
@@ -120,14 +120,12 @@ export const login = async (req: Request, res: Response) => {
     });
   } catch (error: unknown) {
     console.error('Login error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: 'Internal server error'
     });
   }
 };
-
-import { AuthenticatedRequest } from '../middleware/auth';
 
 // Get current user info
 export const getCurrentUser = async (req: AuthenticatedRequest, res: Response) => {
@@ -149,7 +147,7 @@ export const getCurrentUser = async (req: AuthenticatedRequest, res: Response) =
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         id: user._id.toString(),
@@ -159,7 +157,7 @@ export const getCurrentUser = async (req: AuthenticatedRequest, res: Response) =
     });
   } catch (error: unknown) {
     console.error('Get user error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: 'Internal server error'
     });
