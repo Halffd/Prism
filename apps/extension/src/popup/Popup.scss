@@ -876,6 +876,24 @@
   }
 }
 
+.sync-from-btn, .sync-to-btn, .autosync-btn {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-primary);
+  font-size: var(--font-sm);
+
+  &:hover {
+    background: var(--bg-hover);
+  }
+}
+
 .refresh-models-btn {
   background: var(--bg-tertiary);
   color: var(--text-primary);
@@ -887,6 +905,29 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  font-size: var(--font-sm);
+
+  &:hover {
+    background: var(--bg-hover);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.auth-signin-btn, .auth-signout-btn {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-primary);
   font-size: var(--font-sm);
 
   &:hover {

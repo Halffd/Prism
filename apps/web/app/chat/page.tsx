@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useSelector, useDispatch } from 'react-redux';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -13,10 +14,25 @@ import {
   deleteChatSession,
   setCache,
   getCache,
-  ChatSession
+  ChatSession,
+  savePromptShortcut,
+  getPromptShortcuts,
+  deletePromptShortcut,
+  PromptShortcut
 } from '@prism/shared-db';
 import { ImageGenerationService } from '@prism/image-gen';
 import type { Message, ContextData, AIConfig } from '@prism/shared-types';
+import {
+  setMessages,
+  addMessage,
+  setLoading,
+  setCurrentSessionId,
+  setAIConfig,
+  updateAIConfig,
+  RootState
+} from '@prism/redux-store';
+import { useAuth } from '@/src/auth-provider';
+import { networkStatusService } from '@prism/api-client';
 
 // Initialize with default settings - will be overridden by stored settings
 const defaultAIConfig: AIConfig = {
@@ -27,14 +43,11 @@ const defaultAIConfig: AIConfig = {
 let client: UnifiedAIClient;
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const dispatch = useDispatch();
+  const { messages, loading, currentSessionId } = useSelector((state: RootState) => state.chat);
+  const { config: aiConfig } = useSelector((state: RootState) => state.aiConfig);
+  const { user, isAuthenticated, loading: authLoading, signInWithGoogle, signOut } = useAuth();
   const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [aiConfig, setAiConfig] = useState<AIConfig>(defaultAIConfig);
-  const [currentSessionId, setCurrentSessionId] = useState<string>(() => {
-    // Generate a default session ID based on timestamp
-    return `session_${Date.now()}`;
-  });
 
   // Image generation state
   const [imageGenerationPrompt, setImageGenerationPrompt] = useState<string>('');
@@ -49,22 +62,24 @@ export default function ChatPage() {
     if (savedConfig) {
       try {
         const config = JSON.parse(savedConfig) as AIConfig;
-        setAiConfig(config);
+        dispatch(setAIConfig(config));
         client = new UnifiedAIClient({
           aiConfig: config,
           prismApiUrl: config.apiUrl
         });
       } catch (error) {
         console.error('Failed to load AI config, using default:', error);
+        dispatch(setAIConfig(defaultAIConfig));
         client = new UnifiedAIClient({ aiConfig: defaultAIConfig });
       }
     } else {
+      dispatch(setAIConfig(defaultAIConfig));
       client = new UnifiedAIClient({ aiConfig: defaultAIConfig });
     }
 
     // Load chat history from database
     loadChatHistoryFromDB();
-  }, []);
+  }, [dispatch]);
 
   useEffect(() => {
     // Save chat to database when messages change
@@ -76,13 +91,13 @@ export default function ChatPage() {
   const loadChatHistoryFromDB = async () => {
     try {
       const history = await loadChatHistory(currentSessionId);
-      setMessages(history);
+      dispatch(setMessages(history));
     } catch (error) {
       console.error('Failed to load chat history from database:', error);
       // Fallback to localStorage if database fails
       const savedMessages = localStorage.getItem('chatHistory');
       if (savedMessages) {
-        setMessages(JSON.parse(savedMessages));
+        dispatch(setMessages(JSON.parse(savedMessages)));
       }
     }
   };
@@ -155,9 +170,8 @@ export default function ChatPage() {
       };
 
       // Add the image as a new message in the chat
-      const newMessages = [...messages, imageMessage];
-      setMessages(newMessages);
-      saveCurrentChatToDB(newMessages);
+      dispatch(addMessage(imageMessage));
+      saveCurrentChatToDB([...messages, imageMessage]);
 
       // Save the image generation config
       localStorage.setItem('imageGenApiKey', imageGenerationApiKey);
@@ -175,12 +189,12 @@ export default function ChatPage() {
     localStorage.setItem('imageGenModel', imageGenerationModel);
   };
 
-  const updateAIConfig = (config: AIConfig) => {
-    setAiConfig(config);
+  const handleUpdateAIConfig = (config: AIConfig) => {
+    dispatch(updateAIConfig(config));
     localStorage.setItem('aiConfig', JSON.stringify(config));
     client = new UnifiedAIClient({
-      aiConfig: config,
-      prismApiUrl: config.apiUrl
+      aiConfig: { ...aiConfig, ...config },
+      prismApiUrl: config.apiUrl || aiConfig.apiUrl
     });
   };
 
@@ -194,15 +208,15 @@ export default function ChatPage() {
       timestamp: Date.now()
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    dispatch(addMessage(userMessage));
     setInput('');
-    setLoading(true);
+    dispatch(setLoading(true));
 
     try {
       // Check if we have a cached response
       const cachedResponse = await getCachedResponse(input);
       if (cachedResponse) {
-        setMessages(prev => [...prev, cachedResponse]);
+        dispatch(addMessage(cachedResponse));
         return;
       }
 
@@ -214,21 +228,195 @@ export default function ChatPage() {
         selectedText: window.getSelection()?.toString()
       };
 
+      // Before sending the message, save to database in case we go offline
+      await saveCurrentChatToDB([...messages, userMessage]);
+
       const response = await client.sendMessage(input, pageContext);
 
       if (response.success && response.data) {
-        setMessages(prev => [...prev, response.data!]);
+        dispatch(addMessage(response.data!));
         // Cache the response
         await setCachedResponse(input, response.data!);
+      } else {
+        // If response failed, show error message in chat
+        const errorMessage: Message = {
+          id: `error-${Date.now()}`,
+          role: 'assistant',
+          content: response.error || 'Failed to get response from AI',
+          timestamp: Date.now()
+        };
+        dispatch(addMessage(errorMessage));
       }
     } catch (error) {
       console.error('Error:', error);
+      // Show error message if network request failed
+      const errorMessage: Message = {
+        id: `error-${Date.now()}`,
+        role: 'assistant',
+        content: `Error: ${error.message || 'Failed to connect to AI service'}`,
+        timestamp: Date.now()
+      };
+      dispatch(addMessage(errorMessage));
+
+      // Also try to use a local model as fallback if the primary one failed
+      const fallbackConfig = { ...aiConfig };
+      if (!networkStatusService.isCurrentlyOnline() && fallbackConfig.provider === 'prism-api') {
+        // If offline and using prism-api, try to switch to a local model temporarily
+        // Note: In a real implementation, user preferences would determine which local model to use
+        console.info('Currently offline, using local model if available...');
+      }
     } finally {
-      setLoading(false);
+      dispatch(setLoading(false));
     }
   };
 
   const [showSettings, setShowSettings] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
+  const [syncIntervalId, setSyncIntervalId] = useState<NodeJS.Timeout | null>(null);
+  const [isOnline, setIsOnline] = useState(true); // Track network status
+
+  // Monitor network status
+  useEffect(() => {
+    const handleNetworkStatus = (status: { online: boolean }) => {
+      setIsOnline(status.online);
+    };
+
+    networkStatusService.addNetworkStatusListener(handleNetworkStatus);
+
+    // Set initial status
+    setIsOnline(networkStatusService.isCurrentlyOnline());
+
+    return () => {
+      networkStatusService.removeNetworkStatusListener(handleNetworkStatus);
+    };
+  }, []);
+
+  // Auto-sync functionality
+  useEffect(() => {
+    if (autoSyncEnabled) {
+      // Sync every 30 seconds but only when online
+      const interval = setInterval(() => {
+        if (networkStatusService.isCurrentlyOnline()) {
+          syncFromAPI().catch(console.error);
+        }
+      }, 30000);
+
+      setSyncIntervalId(interval);
+
+      return () => {
+        if (interval) {
+          clearInterval(interval);
+        }
+      };
+    } else if (syncIntervalId) {
+      clearInterval(syncIntervalId);
+      setSyncIntervalId(null);
+    }
+  }, [autoSyncEnabled, messages]);
+
+  const toggleAutoSync = () => {
+    setAutoSyncEnabled(!autoSyncEnabled);
+  };
+
+  const syncFromAPI = async () => {
+    try {
+      setSyncing(true);
+
+      // Set up API client
+      const apiClient = new UnifiedAIClient({
+        aiConfig: aiConfig,
+        prismApiUrl: aiConfig?.apiUrl || process.env.NEXT_PUBLIC_API_URL
+      });
+
+      // Get synced data from API
+      const syncedDataResult = await apiClient.getSyncedData();
+      if (!syncedDataResult.success) {
+        console.error('Failed to get synced data:', syncedDataResult.error);
+        alert(`Failed to get synced data: ${syncedDataResult.error}`);
+        return;
+      }
+
+      // Update messages
+      if (syncedDataResult.data?.messages) {
+        dispatch(setMessages(syncedDataResult.data.messages));
+      }
+
+      // Update sessions
+      if (syncedDataResult.data?.sessions) {
+        dispatch(setSessions(syncedDataResult.data.sessions));
+      }
+
+      // Note: The API currently doesn't sync AI config, only messages, sessions, and prompts
+
+      // Update prompt shortcuts if available
+      if (syncedDataResult.data?.prompts) {
+        // Process and save prompts to local storage or DB
+        for (const prompt of syncedDataResult.data.prompts) {
+          await savePromptShortcut(prompt);
+        }
+      }
+
+      alert('Successfully synced from API!');
+    } catch (error) {
+      console.error('Error syncing from API:', error);
+      alert(`Error syncing from API: ${error}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const syncToAPI = async () => {
+    try {
+      setSyncing(true);
+
+      // Set up API client
+      const apiClient = new UnifiedAIClient({
+        aiConfig: aiConfig,
+        prismApiUrl: aiConfig?.apiUrl || process.env.NEXT_PUBLIC_API_URL
+      });
+
+      // Sync current messages
+      const syncMessagesResult = await apiClient.syncMessages(messages);
+      if (!syncMessagesResult.success) {
+        console.error('Failed to sync messages:', syncMessagesResult.error);
+        alert(`Failed to sync messages: ${syncMessagesResult.error}`);
+        return;
+      }
+
+      // Sync current sessions
+      const syncSessionsResult = await apiClient.syncSessions([
+        {
+          id: currentSessionId,
+          userId: '', // This will be set by the server
+          messages: messages,
+          createdAt: Date.now(), // This will also be set by the server
+          updatedAt: Date.now()
+        }
+      ]);
+      if (!syncSessionsResult.success) {
+        console.error('Failed to sync sessions:', syncSessionsResult.error);
+        alert(`Failed to sync sessions: ${syncSessionsResult.error}`);
+        return;
+      }
+
+      // Sync prompt shortcuts
+      const promptShortcuts = await getPromptShortcuts();
+      const syncPromptsResult = await apiClient.syncPrompts(promptShortcuts);
+      if (!syncPromptsResult.success) {
+        console.error('Failed to sync prompts:', syncPromptsResult.error);
+        alert(`Failed to sync prompts: ${syncPromptsResult.error}`);
+        return;
+      }
+
+      alert('Successfully synced to API!');
+    } catch (error) {
+      console.error('Error syncing to API:', error);
+      alert(`Error syncing to API: ${error}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const renderSettings = () => (
     <div className="mb-6 p-4 bg-gray-100 rounded-lg">
@@ -247,7 +435,7 @@ export default function ChatPage() {
           <label className="block text-sm font-medium mb-1">AI Provider</label>
           <select
             value={aiConfig.provider}
-            onChange={(e) => updateAIConfig({ ...aiConfig, provider: e.target.value as any })}
+            onChange={(e) => handleUpdateAIConfig({ provider: e.target.value as any })}
             className="w-full p-2 border rounded"
           >
             <option value="prism-api">Prism API</option>
@@ -264,7 +452,7 @@ export default function ChatPage() {
               <input
                 type="password"
                 value={aiConfig.apiKey || ''}
-                onChange={(e) => updateAIConfig({ ...aiConfig, apiKey: e.target.value })}
+                onChange={(e) => handleUpdateAIConfig({ apiKey: e.target.value })}
                 placeholder={`Enter ${aiConfig.provider} API key`}
                 className="w-full p-2 border rounded"
               />
@@ -275,7 +463,7 @@ export default function ChatPage() {
               <input
                 type="text"
                 value={aiConfig.model || ''}
-                onChange={(e) => updateAIConfig({ ...aiConfig, model: e.target.value })}
+                onChange={(e) => handleUpdateAIConfig({ model: e.target.value })}
                 placeholder="e.g., gpt-3.5-turbo, gemini-pro, qwen-max"
                 className="w-full p-2 border rounded"
               />
@@ -289,7 +477,7 @@ export default function ChatPage() {
             <input
               type="text"
               value={aiConfig.apiUrl || ''}
-              onChange={(e) => updateAIConfig({ ...aiConfig, apiUrl: e.target.value })}
+              onChange={(e) => handleUpdateAIConfig({ apiUrl: e.target.value })}
               placeholder="Enter Prism API URL"
               className="w-full p-2 border rounded"
             />
@@ -330,12 +518,55 @@ export default function ChatPage() {
     <div className="flex flex-col h-screen max-w-4xl mx-auto p-4">
       <div className="mb-2 flex justify-between items-center">
         <h1 className="text-2xl font-bold">Prism AI</h1>
-        <button
-          onClick={() => setShowSettings(!showSettings)}
-          className="text-blue-500 hover:text-blue-700"
-        >
-          ⚙️ Settings
-        </button>
+        <div className="flex gap-2 items-center">
+          <div className={`w-3 h-3 rounded-full ${isOnline ? 'bg-green-500' : 'bg-red-500'}`}></div>
+          <span className="text-sm">{isOnline ? 'Online' : 'Offline'}</span>
+          <button
+            onClick={syncFromAPI}
+            disabled={syncing || !isOnline}
+            className="text-green-500 hover:text-green-700 disabled:opacity-50"
+          >
+            {syncing ? 'Syncing...' : '🔄 Sync from Extension'}
+          </button>
+          <button
+            onClick={syncToAPI}
+            disabled={syncing || !isOnline}
+            className="text-blue-500 hover:text-blue-700 disabled:opacity-50"
+          >
+            {syncing ? 'Syncing...' : '📤 Sync to Extension'}
+          </button>
+          <button
+            onClick={toggleAutoSync}
+            disabled={!isOnline}
+            className={`${autoSyncEnabled ? 'text-red-500' : 'text-gray-500'} hover:text-blue-700 disabled:opacity-50`}
+          >
+            {autoSyncEnabled ? '⏸️ Stop Auto-Sync' : '▶️ Start Auto-Sync'}
+          </button>
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className="text-blue-500 hover:text-blue-700"
+          >
+            ⚙️ Settings
+          </button>
+          {isAuthenticated ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm">Welcome, {user?.displayName || user?.email}</span>
+              <button
+                onClick={signOut}
+                className="text-red-500 hover:text-red-700"
+              >
+                Sign Out
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={signInWithGoogle}
+              className="text-blue-500 hover:text-blue-700"
+            >
+              Sign In with Google
+            </button>
+          )}
+        </div>
       </div>
 
       {showSettings && renderSettings()}

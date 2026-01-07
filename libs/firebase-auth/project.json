@@ -1,0 +1,28 @@
+{
+  "name": "firebase-auth",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceFrom": ["libs/firebase-auth"],
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}"],
+      "options": {
+        "outputPath": "dist/libs/firebase-auth",
+        "main": "libs/firebase-auth/src/index.ts",
+        "tsConfig": "libs/firebase-auth/tsconfig.lib.json",
+        "assets": [
+          "libs/firebase-auth/*.md"
+        ]
+      }
+    },
+    "lint": {
+      "executor": "@nx/eslint:eslint",
+      "outputs": ["{options.outputFile}"],
+      "options": {
+        "lintFilePatterns": ["libs/firebase-auth/**/*.ts"]
+      }
+    }
+  },
+  "tags": []
+}

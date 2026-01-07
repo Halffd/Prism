@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useSelector, useDispatch } from 'react-redux';
+import { useAuth } from '../auth-provider';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { UnifiedAIClient } from '@prism/api-client';
 import {
   saveChatHistory,
   loadChatHistory,
@@ -15,8 +16,22 @@ import {
   deletePromptShortcut,
   PromptShortcut
 } from '@prism/shared-db';
-import { ImageGenerationService } from '@prism/image-gen';
+import { ImageGenerationService, UnifiedAIClient, networkStatusService } from '@prism/api-client';
 import type { Message, ContextData, AIConfig } from '@prism/shared-types';
+import {
+  setMessages,
+  addMessage,
+  setLoading,
+  setCurrentSessionId,
+  setSessions,
+  setSelectedProvider,
+  setAIConfig,
+  updateAIConfig,
+  setContext,
+  updateSession,
+  removeSession,
+  RootState
+} from '@prism/redux-store';
 import './Popup.scss';
 
 // Initialize with default settings - will be overridden by stored settings
@@ -34,23 +49,65 @@ const defaultAIConfig: AIConfig = {
 let client = new UnifiedAIClient({ aiConfig: defaultAIConfig });
 
 export function Popup() {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const dispatch = useDispatch();
+  const { messages, loading, currentSessionId, sessions } = useSelector((state: RootState) => state.chat);
+  const { config: reduxAIConfig, availableModels, fetchingModels } = useSelector((state: RootState) => state.aiConfig);
+  const { context: reduxContext } = useSelector((state: RootState) => state.context);
+  const { user, isAuthenticated, loading: authLoading, signInWithGoogle, signOut } = useAuth();
+
   const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [context, setContext] = useState<ContextData | null>(null);
-  const [aiConfig, setAiConfig] = useState<AIConfig>(defaultAIConfig);
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
-  const [fetchingModels, setFetchingModels] = useState<boolean>(false);
   const [iframeUrl, setIframeUrl] = useState<string>('');
   const [isIframeInjected, setIsIframeInjected] = useState<boolean>(false);
   const [iframeError, setIframeError] = useState<string | null>(null);
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [currentSessionId, setCurrentSessionId] = useState<string>(() => {
-    // Generate a default session ID based on timestamp
-    return `session_${Date.now()}`;
-  });
   const [showMenu, setShowMenu] = useState(false);
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
+  const [autoSyncIntervalId, setAutoSyncIntervalId] = useState<NodeJS.Timeout | null>(null);
   const [promptShortcuts, setPromptShortcuts] = useState<PromptShortcut[]>([]);
+  const [isOnline, setIsOnline] = useState(true); // Track network status
+
+  // Monitor network status
+  useEffect(() => {
+    const handleNetworkStatus = (status: { online: boolean }) => {
+      setIsOnline(status.online);
+    };
+
+    networkStatusService.addNetworkStatusListener(handleNetworkStatus);
+
+    // Set initial status
+    setIsOnline(networkStatusService.isCurrentlyOnline());
+
+    return () => {
+      networkStatusService.removeNetworkStatusListener(handleNetworkStatus);
+    };
+  }, []);
+
+  // Auto-sync functionality
+  useEffect(() => {
+    if (autoSyncEnabled) {
+      // Sync every 30 seconds but only when online
+      const interval = setInterval(() => {
+        if (networkStatusService.isCurrentlyOnline()) {
+          syncFromAPI().catch(console.error);
+        }
+      }, 30000);
+
+      setAutoSyncIntervalId(interval);
+
+      return () => {
+        if (interval) {
+          clearInterval(interval);
+        }
+      };
+    } else if (autoSyncIntervalId) {
+      clearInterval(autoSyncIntervalId);
+      setAutoSyncIntervalId(null);
+    }
+  }, [autoSyncEnabled, messages]);
+
+  const toggleAutoSync = () => {
+    setAutoSyncEnabled(!autoSyncEnabled);
+  };
+
   const [showPrompts, setShowPrompts] = useState(false);
   const [newPrompt, setNewPrompt] = useState({
     name: '',
@@ -104,7 +161,7 @@ export function Popup() {
             };
           }
 
-          setAiConfig(config);
+          dispatch(setAIConfig(config));
           // Update the current provider's API key in the config before creating the client
           const updatedConfig = { ...config };
           if (updatedConfig.providerKeys) {
@@ -114,7 +171,7 @@ export function Popup() {
             }
           }
 
-          setAiConfig(updatedConfig);
+          dispatch(setAIConfig(updatedConfig));
           client = new UnifiedAIClient({
             aiConfig: updatedConfig,
             prismApiUrl: updatedConfig.apiUrl
@@ -124,9 +181,11 @@ export function Popup() {
           fetchAvailableModels(updatedConfig);
         } catch (error) {
           console.error('Failed to load AI config, using default:', error);
+          dispatch(setAIConfig(defaultAIConfig));
           client = new UnifiedAIClient({ aiConfig: defaultAIConfig });
         }
       } else {
+        dispatch(setAIConfig(defaultAIConfig));
         client = new UnifiedAIClient({ aiConfig: defaultAIConfig });
       }
     });
@@ -148,7 +207,7 @@ export function Popup() {
 
     // Get current page context
     getCurrentContext();
-  }, []);
+  }, [dispatch]);
 
   // Initialize font scaling and command prefix
   useEffect(() => {
@@ -181,12 +240,29 @@ export function Popup() {
 
   // Update models when AI configuration changes
   useEffect(() => {
-    fetchAvailableModels(aiConfig);
-  }, [aiConfig.provider]); // Only re-fetch when provider changes
+    fetchAvailableModels(reduxAIConfig);
+  }, [reduxAIConfig.provider]); // Only re-fetch when provider changes
 
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Listen for tab updates to refresh context when switching between tabs
+  useEffect(() => {
+    const handleTabUpdate = (tabId: number, changeInfo: chrome.tabs.TabChangeInfo, tab: chrome.tabs.Tab) => {
+      // Update context when the active tab changes
+      if (changeInfo.status === 'complete' && tab.active) {
+        getCurrentContext();
+      }
+    };
+
+    chrome.tabs.onUpdated.addListener(handleTabUpdate);
+
+    // Cleanup function to remove the listener
+    return () => {
+      chrome.tabs.onUpdated.removeListener(handleTabUpdate);
+    };
+  }, []);
 
   // Listen for AI configuration updates from the background script
   useEffect(() => {
@@ -212,7 +288,7 @@ export function Popup() {
           };
         }
 
-        setAiConfig(config);
+        dispatch(setAIConfig(config));
 
         // Update the client with the new configuration
         const updatedConfig = { ...config };
@@ -238,18 +314,18 @@ export function Popup() {
     return () => {
       chrome.runtime.onMessage.removeListener(handleConfigUpdate);
     };
-  }, []);
+  }, [dispatch]);
 
   const loadChatHistoryFromDB = async () => {
     try {
       const history = await loadChatHistory(currentSessionId);
-      setMessages(history);
+      dispatch(setMessages(history));
     } catch (error) {
       console.error('Failed to load chat history from database:', error);
       // Fallback to chrome storage if database fails
       const result = await chrome.storage.local.get('history');
       if (result.history) {
-        setMessages(result.history);
+        dispatch(setMessages(result.history));
       }
     }
   };
@@ -257,7 +333,7 @@ export function Popup() {
   const loadChatSessionsFromDB = async () => {
     try {
       const sessionsList = await getChatSessions();
-      setSessions(sessionsList);
+      dispatch(setSessions(sessionsList));
     } catch (error) {
       console.error('Failed to load chat sessions:', error);
     }
@@ -274,20 +350,20 @@ export function Popup() {
   };
 
   const switchToSession = async (sessionId: string) => {
-    setCurrentSessionId(sessionId);
+    dispatch(setCurrentSessionId(sessionId));
     try {
       const history = await loadChatHistory(sessionId);
-      setMessages(history);
+      dispatch(setMessages(history));
     } catch (error) {
       console.error('Failed to load session:', error);
-      setMessages([]);
+      dispatch(setMessages([]));
     }
   };
 
   const createNewSession = () => {
     const newSessionId = `session_${Date.now()}`;
-    setCurrentSessionId(newSessionId);
-    setMessages([]);
+    dispatch(setCurrentSessionId(newSessionId));
+    dispatch(setMessages([]));
   };
 
   const deleteSession = async (sessionId: string) => {
@@ -702,7 +778,7 @@ export function Popup() {
     }
   };
 
-  const getCurrentContext = async () => {
+  const getCurrentContext = async (): Promise<ContextData | null> => {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
@@ -713,10 +789,13 @@ export function Popup() {
 
         if (response && !response.error) {
           setContext(response);
+          return response;
         }
       }
+      return context; // Return current context if couldn't get fresh one
     } catch (error) {
       console.error('Error getting context:', error);
+      return context; // Return current context on error
     }
   };
 
@@ -752,8 +831,8 @@ export function Popup() {
   };
 
   const updateModel = (model: string) => {
-    const updatedConfig = { ...aiConfig, model };
-    setAiConfig(updatedConfig);
+    const updatedConfig = { ...reduxAIConfig, model };
+    dispatch(updateAIConfig(updatedConfig));
     client.updateAIConfig(updatedConfig);
 
     // Save the updated config to chrome storage
@@ -883,6 +962,9 @@ export function Popup() {
   const sendMessage = async () => {
     if (!input.trim() && uploadedImages.length === 0) return;
 
+    // Get fresh context before sending the message
+    const freshContext = await getCurrentContext();
+
     // Load extension settings to get token limits
     const result = await chrome.storage.local.get(['displaySettings']);
     const settings = result.displaySettings;
@@ -938,35 +1020,45 @@ export function Popup() {
       images: uploadedImages.length > 0 ? [...uploadedImages] : undefined,
       timestamp: Date.now(),
       tokens: totalTokens, // Include token count
-      context
+      context: freshContext
     };
 
-    const newMessages = [...messages, userMessage];
-    setMessages(newMessages);
+    dispatch(addMessage(userMessage));
     setInput('');
     setUploadedImages([]); // Clear uploaded images after sending
-    setLoading(true);
+    // Save to database before attempting to send, ensuring offline persistence
+    await saveCurrentChatToDB([...messages, userMessage]);
 
     try {
-      // Update the client with the current AI config (including model)
-      client.updateAIConfig(aiConfig);
+      // Check network status and use appropriate method
+      const isCurrentlyOnline = networkStatusService.isCurrentlyOnline();
 
-      const response = await chrome.runtime.sendMessage({
-        type: 'SEND_MESSAGE',
-        data: {
-          content: fullInput,
-          images: uploadedImages.length > 0 ? [...uploadedImages] : undefined,
-          context,
-          aiConfig: aiConfig // Include current AI config for the message
-        }
-      });
+      // Update the client with the current AI config (including model)
+      client.updateAIConfig(reduxAIConfig);
+
+      let response;
+      if (isCurrentlyOnline) {
+        // Try to send via the background script when online
+        response = await chrome.runtime.sendMessage({
+          type: 'SEND_MESSAGE',
+          data: {
+            content: fullInput,
+            images: uploadedImages.length > 0 ? [...uploadedImages] : undefined,
+            context: freshContext,
+            conversationHistory: messages, // Pass the current conversation history
+            aiConfig: reduxAIConfig // Include current AI config for the message
+          }
+        });
+      } else {
+        // When offline, try to use local models directly
+        response = await client.sendMessage(fullInput, freshContext, currentSessionId, uploadedImages.length > 0 ? [...uploadedImages] : undefined);
+      }
 
       if (response && response.success && response.data) {
-        const updatedMessages = [...newMessages, response.data];
-        setMessages(updatedMessages);
+        dispatch(addMessage(response.data));
 
-        // Save to database
-        await saveCurrentChatToDB(updatedMessages);
+        // Save to database to ensure persistence
+        await saveCurrentChatToDB([...messages, userMessage, response.data]);
       } else {
         // Handle error response
         console.error('Message failed:', response?.error || 'Unknown error');
@@ -976,11 +1068,10 @@ export function Popup() {
           role: 'assistant',
           content: `Error: ${response?.error || 'Failed to get response from AI'}`,
           timestamp: Date.now(),
-          context
+          context: freshContext
         };
-        const updatedMessages = [...newMessages, errorMessage];
-        setMessages(updatedMessages);
-        await saveCurrentChatToDB(updatedMessages);
+        dispatch(addMessage(errorMessage));
+        await saveCurrentChatToDB([...messages, userMessage, errorMessage]);
       }
     } catch (error) {
       console.error('Error sending message:', error);
@@ -990,19 +1081,117 @@ export function Popup() {
         role: 'assistant',
         content: `Error: ${(error as Error).message || 'Failed to send message to AI'}`,
         timestamp: Date.now(),
-        context
+        context: freshContext
       };
-      const updatedMessages = [...newMessages, errorMessage];
-      setMessages(updatedMessages);
-      await saveCurrentChatToDB(updatedMessages);
+      dispatch(addMessage(errorMessage));
+      await saveCurrentChatToDB([...messages, userMessage, errorMessage]);
     } finally {
-      setLoading(false);
+      dispatch(setLoading(false));
     }
   };
 
   const clearHistory = async () => {
-    setMessages([]);
+    dispatch(setMessages([]));
     await saveCurrentChatToDB([]);
+  };
+
+  const syncToAPI = async () => {
+    try {
+      // Get API configuration
+      const result = await chrome.storage.local.get(['aiConfig']);
+      const aiConfig = result.aiConfig;
+
+      // Set up API client
+      const apiClient = new UnifiedAIClient({
+        aiConfig: aiConfig,
+        prismApiUrl: aiConfig?.apiUrl || process.env.NEXT_PUBLIC_API_URL
+      });
+
+      // Sync messages
+      const syncMessagesResult = await apiClient.syncMessages(messages);
+      if (!syncMessagesResult.success) {
+        console.error('Failed to sync messages:', syncMessagesResult.error);
+        alert(`Failed to sync messages: ${syncMessagesResult.error}`);
+        return;
+      }
+
+      // Sync sessions (get all sessions from Redux state)
+      // For now, we'll just sync the current session info and all messages
+      const syncSessionsResult = await apiClient.syncSessions([
+        {
+          id: currentSessionId,
+          userId: '', // This will be set by the server
+          messages: messages,
+          createdAt: Date.now(), // This will also be set by the server
+          updatedAt: Date.now()
+        }
+      ]);
+      if (!syncSessionsResult.success) {
+        console.error('Failed to sync sessions:', syncSessionsResult.error);
+        alert(`Failed to sync sessions: ${syncSessionsResult.error}`);
+        return;
+      }
+
+      // Sync prompts (get from Redux state or local state)
+      // For now, we'll get them from chrome storage
+      const promptShortcutsResult = await getPromptShortcuts();
+      const syncPromptsResult = await apiClient.syncPrompts(promptShortcutsResult);
+      if (!syncPromptsResult.success) {
+        console.error('Failed to sync prompts:', syncPromptsResult.error);
+        alert(`Failed to sync prompts: ${syncPromptsResult.error}`);
+        return;
+      }
+
+      alert('Successfully synced to API!');
+    } catch (error) {
+      console.error('Error syncing to API:', error);
+      alert(`Error syncing to API: ${error}`);
+    }
+  };
+
+  const syncFromAPI = async () => {
+    try {
+      // Get API configuration
+      const result = await chrome.storage.local.get(['aiConfig']);
+      const aiConfig = result.aiConfig;
+
+      // Set up API client
+      const apiClient = new UnifiedAIClient({
+        aiConfig: aiConfig,
+        prismApiUrl: aiConfig?.apiUrl || process.env.NEXT_PUBLIC_API_URL
+      });
+
+      // Get synced data from API
+      const syncedDataResult = await apiClient.getSyncedData();
+      if (!syncedDataResult.success) {
+        console.error('Failed to get synced data:', syncedDataResult.error);
+        alert(`Failed to get synced data: ${syncedDataResult.error}`);
+        return;
+      }
+
+      // Update messages
+      if (syncedDataResult.data?.messages) {
+        dispatch(setMessages(syncedDataResult.data.messages));
+      }
+
+      // Update sessions
+      if (syncedDataResult.data?.sessions) {
+        dispatch(setSessions(syncedDataResult.data.sessions));
+      }
+
+      // Update prompt shortcuts if available
+      if (syncedDataResult.data?.prompts) {
+        // Process and save prompts to local storage
+        for (const prompt of syncedDataResult.data.prompts) {
+          await savePromptShortcut(prompt);
+        }
+      }
+
+      alert('Successfully synced from API!');
+    } catch (error) {
+      console.error('Error syncing from API:', error);
+      alert(`Error syncing from API: ${error}`);
+    }
   };
 
   const scrollToBottom = () => {
@@ -1216,17 +1405,30 @@ export function Popup() {
         <h1>💎 Prism</h1>
         <div className="header-actions">
           <button onClick={() => setShowMenu(true)} className="menu-btn">☰</button>
-          {context && (
-            <span className="context-indicator" title={context.title}>
-              📄 {context.type}
+          {/* Close button for popup when in browser action mode */}
+          <button
+            onClick={() => {
+              if (typeof window !== 'undefined' && window.close) {
+                window.close();
+              }
+            }}
+            className="close-btn"
+            title="Close popup"
+            style={{ display: typeof window !== 'undefined' && window.location?.pathname?.includes('index.html') ? 'block' : 'none' }}
+          >
+            ✕
+          </button>
+          {reduxContext && (
+            <span className="context-indicator" title={reduxContext.title}>
+              📄 {reduxContext.type}
             </span>
           )}
           <select
-            value={aiConfig.provider}
+            value={reduxAIConfig.provider}
             onChange={(e) => {
               const newProvider = e.target.value as AIConfig['provider'];
-              const updatedConfig = { ...aiConfig, provider: newProvider };
-              setAiConfig(updatedConfig);
+              const updatedConfig = { ...reduxAIConfig, provider: newProvider };
+              dispatch(updateAIConfig(updatedConfig));
               client.updateAIConfig(updatedConfig);
             }}
             className="provider-selector"
@@ -1249,7 +1451,7 @@ export function Popup() {
           </select>
 
           <select
-            value={aiConfig.model || ''}
+            value={reduxAIConfig.model || ''}
             onChange={(e) => updateModel(e.target.value)}
             className="model-selector"
             title="Select AI model"
@@ -1276,6 +1478,32 @@ export function Popup() {
           >
             {fetchingModels ? '🔄' : '♻️'}
           </button>
+          <div className={`w-2 h-2 rounded-full mr-2 ${isOnline ? 'bg-green-500' : 'bg-red-500'}`}
+               title={isOnline ? 'Online' : 'Offline'}></div>
+          <button
+            onClick={syncFromAPI}
+            className="sync-from-btn"
+            title="Sync from Prism API"
+            disabled={!isOnline}
+          >
+            📥
+          </button>
+          <button
+            onClick={syncToAPI}
+            className="sync-to-btn"
+            title="Sync to Prism API"
+            disabled={!isOnline}
+          >
+            📤
+          </button>
+          <button
+            onClick={toggleAutoSync}
+            className="autosync-btn"
+            title={autoSyncEnabled ? "Stop Auto-Sync" : "Start Auto-Sync"}
+            disabled={!isOnline}
+          >
+            {autoSyncEnabled ? '⏸️' : '▶️'}
+          </button>
           <button
             onClick={() => chrome.runtime.openOptionsPage()}
             className="settings-btn"
@@ -1290,22 +1518,43 @@ export function Popup() {
           >
             🗑️
           </button>
-          <span className="provider-indicator" title={`Current provider: ${aiConfig.provider}`}>
-            {aiConfig.provider === 'openai' && '🤖'}
-            {aiConfig.provider === 'gemini' && '⭐'}
-            {aiConfig.provider === 'claude' && '🤝'}
-            {aiConfig.provider === 'qwen' && '☁️'}
-            {aiConfig.provider === 'prism-api' && '💎'}
-            {aiConfig.provider === 'koboldcpp' && '👻'}
-            {aiConfig.provider === 'llamacpp' && '🦙'}
-            {aiConfig.provider === 'ollama' && '🦙'}
-            {aiConfig.provider === 'sglang' && '⚡'}
-            {aiConfig.provider === 'transformers' && '🔄'}
-            {aiConfig.provider === 'deepseek' && '🔍'}
-            {aiConfig.provider === 'grok' && '🤖'}
-            {aiConfig.provider === 'openrouter' && '🌐'}
-            {aiConfig.provider === 'poe' && '💬'}
-            <span className="provider-name">{aiConfig.provider}</span>
+          {isAuthenticated ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs truncate max-w-[100px]">{user?.displayName || user?.email}</span>
+              <button
+                onClick={signOut}
+                className="auth-signout-btn"
+                title="Sign Out"
+              >
+                👤
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={signInWithGoogle}
+              className="auth-signin-btn"
+              title="Sign In with Google"
+              disabled={!isOnline}
+            >
+              🔐
+            </button>
+          )}
+          <span className="provider-indicator" title={`Current provider: ${reduxAIConfig.provider}`}>
+            {reduxAIConfig.provider === 'openai' && '🤖'}
+            {reduxAIConfig.provider === 'gemini' && '⭐'}
+            {reduxAIConfig.provider === 'claude' && '🤝'}
+            {reduxAIConfig.provider === 'qwen' && '☁️'}
+            {reduxAIConfig.provider === 'prism-api' && '💎'}
+            {reduxAIConfig.provider === 'koboldcpp' && '👻'}
+            {reduxAIConfig.provider === 'llamacpp' && '🦙'}
+            {reduxAIConfig.provider === 'ollama' && '🦙'}
+            {reduxAIConfig.provider === 'sglang' && '⚡'}
+            {reduxAIConfig.provider === 'transformers' && '🔄'}
+            {reduxAIConfig.provider === 'deepseek' && '🔍'}
+            {reduxAIConfig.provider === 'grok' && '🤖'}
+            {reduxAIConfig.provider === 'openrouter' && '🌐'}
+            {reduxAIConfig.provider === 'poe' && '💬'}
+            <span className="provider-name">{reduxAIConfig.provider}</span>
           </span>
         </div>
       </div>
@@ -1314,9 +1563,9 @@ export function Popup() {
         {messages.length === 0 ? (
           <div className="empty-state">
             <p>👋 Ask me anything about this page!</p>
-            {context?.selectedText && (
+            {reduxContext?.selectedText && (
               <div className="selected-text">
-                Selected: "{context.selectedText.slice(0, 100)}..."
+                Selected: "{reduxContext.selectedText.slice(0, 100)}..."
               </div>
             )}
           </div>
