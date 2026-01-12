@@ -40,7 +40,53 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.type === 'OPEN_CHAT') {
-    chrome.action.openPopup();
+    // Check the current display mode to determine how to open the chat
+    chrome.storage.local.get(['displaySettings']).then((result) => {
+      const settings = result.displaySettings;
+      const displayMode = settings?.popupDisplayMode || 'popup';
+
+      if (displayMode === 'iframe') {
+        // For iframe mode, send a message to the content script to inject the iframe
+        chrome.tabs.query({active: true, currentWindow: true}).then((tabs) => {
+          if (tabs[0]?.id) {
+            chrome.tabs.sendMessage(tabs[0].id, { type: 'INJECT_IFRAME_CHAT' });
+          }
+        });
+      } else {
+        // For other modes, open the default popup
+        chrome.action.openPopup();
+      }
+    });
+    return;
+  }
+
+  if (request.type === 'INSERT_PROMPT_SHORTCUT') {
+    // Relay the message to the popup
+    chrome.runtime.sendMessage({
+      type: 'INSERT_PROMPT_CONTENT',
+      content: request.content
+    }).catch(error => {
+      // If sending to popup fails, open the popup and send it after it loads
+      chrome.action.openPopup();
+      // Store the content temporarily to be used when popup opens
+      chrome.storage.local.set({ pendingPromptContent: request.content });
+    });
+    return;
+  }
+
+  if (request.type === 'TOGGLE_MODE') {
+    // Store the mode state in chrome storage so the popup can access it
+    const modeStateKey = `mode_${request.mode}`;
+    chrome.storage.local.set({ [modeStateKey]: request.value });
+
+    // Also send a message to the popup if it's open
+    chrome.runtime.sendMessage({
+      type: 'MODE_TOGGLED',
+      mode: request.mode,
+      value: request.value
+    }).catch(error => {
+      // Popup might not be open, that's OK
+    });
     return;
   }
 });
@@ -76,7 +122,11 @@ async function handleSendMessage(data: {
     return response;
   } catch (error) {
     console.error('Error in background:', error);
-    throw error;
+    // Return an error response instead of throwing
+    return {
+      success: false,
+      error: (error as Error).message || 'Failed to send message'
+    };
   }
 }
 
@@ -134,15 +184,28 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === 'prism-explain' && info.selectionText) {
     // Open popup or sidebar with selected text
-    chrome.storage.local.set({ 
+    chrome.storage.local.set({
       pendingQuery: info.selectionText,
       contextUrl: tab?.url,
       contextTitle: tab?.title
     });
-    
+
     // Open popup
     chrome.action.openPopup();
   }
+});
+
+// Handle keyboard commands
+chrome.commands.onCommand.addListener(async (command) => {
+  if (command === '_execute_action') {
+    // Open the popup when the keyboard shortcut is triggered
+    chrome.action.openPopup();
+  }
+});
+
+// Also listen for the extension icon click to open the popup
+chrome.action.onClicked.addListener(() => {
+  chrome.action.openPopup();
 });
 
 console.log('Prism background service worker loaded! 🔥');

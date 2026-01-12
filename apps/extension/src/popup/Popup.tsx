@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useAuth } from '../auth-provider';
+import { supabaseAuthService } from '@prism/supabase-client';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -16,7 +17,8 @@ import {
   deletePromptShortcut,
   PromptShortcut
 } from '@prism/shared-db';
-import { ImageGenerationService, UnifiedAIClient, networkStatusService } from '@prism/api-client';
+import { UnifiedAIClient, networkStatusService } from '@prism/api-client';
+import { ImageGenerationService } from '@prism/image-gen';
 import type { Message, ContextData, AIConfig } from '@prism/shared-types';
 import {
   setMessages,
@@ -122,6 +124,11 @@ export function Popup() {
   const [sendSelectedText, setSendSelectedText] = useState<boolean>(true);
   const [sendPageContents, setSendPageContents] = useState<boolean>(false);
   const [sendScreenshot, setSendScreenshot] = useState<boolean>(false);
+  const [textSelectionMode, setTextSelectionMode] = useState<boolean>(false);
+  const [pageContextMode, setPageContextMode] = useState<boolean>(false);
+  const [pageScreenshotMode, setPageScreenshotMode] = useState<boolean>(false);
+  const [clipboardMode, setClipboardMode] = useState<boolean>(false);
+  const [pageInfoMode, setPageInfoMode] = useState<boolean>(false);
 
   // Image file upload state
   const [uploadedImages, setUploadedImages] = useState<string[]>([]);
@@ -190,13 +197,13 @@ export function Popup() {
       }
     });
 
-    // Load history from database
+    // Load history from local IndexedDB
     loadChatHistoryFromDB();
 
-    // Load chat sessions
+    // Load chat sessions from local IndexedDB
     loadChatSessionsFromDB();
 
-    // Load prompt shortcuts
+    // Load prompt shortcuts from local IndexedDB
     loadPromptShortcuts();
 
     // Initialize image generation
@@ -205,9 +212,79 @@ export function Popup() {
     // Check for pending query (from context menu)
     checkPendingQuery();
 
+    // Check for pending prompt content (from keyboard shortcut)
+    checkPendingPromptContent();
+
     // Get current page context
     getCurrentContext();
+
+    // Listen for messages from content script or background
+    const handleMessage = (request: any, sender: any, sendResponse: (response: any) => void) => {
+      if (request.type === 'INSERT_PROMPT_CONTENT') {
+        setInput(request.content);
+        return true; // Keep the message channel open for async response if needed
+      }
+      if (request.type === 'MODE_TOGGLED') {
+        switch (request.mode) {
+          case 'textSelection':
+            setTextSelectionMode(request.value);
+            break;
+          case 'pageContext':
+            setPageContextMode(request.value);
+            break;
+          case 'pageScreenshot':
+            setPageScreenshotMode(request.value);
+            break;
+          case 'clipboard':
+            setClipboardMode(request.value);
+            break;
+          case 'pageInfo':
+            setPageInfoMode(request.value);
+            break;
+        }
+        return true;
+      }
+      return true;
+    };
+
+    chrome.runtime.onMessage.addListener(handleMessage);
+
+    // Cleanup function to remove the listener
+    return () => {
+      chrome.runtime.onMessage.removeListener(handleMessage);
+    };
   }, [dispatch]);
+
+  // Auto-sync functionality moved to a separate effect
+  useEffect(() => {
+    if (autoSyncEnabled) {
+      // Sync every 30 seconds but only when online
+      const interval = setInterval(() => {
+        if (networkStatusService.isCurrentlyOnline()) {
+          syncFromAPI().catch(console.error);
+        }
+      }, 30000);
+
+      setAutoSyncIntervalId(interval);
+
+      return () => {
+        if (interval) {
+          clearInterval(interval);
+        }
+      };
+    } else if (autoSyncIntervalId) {
+      clearInterval(autoSyncIntervalId);
+      setAutoSyncIntervalId(null);
+    }
+  }, [autoSyncEnabled, messages]);
+
+  const checkPendingPromptContent = async () => {
+    const result = await chrome.storage.local.get('pendingPromptContent');
+    if (result.pendingPromptContent) {
+      setInput(result.pendingPromptContent);
+      await chrome.storage.local.remove('pendingPromptContent');
+    }
+  };
 
   // Initialize font scaling and command prefix
   useEffect(() => {
@@ -222,14 +299,7 @@ export function Popup() {
         // Apply font scale to the document root (for the popup)
         document.documentElement.style.setProperty('--font-scale', currentFontScale.toString());
 
-        // Set default command prefix if not set
-        if (!result.displaySettings?.commandPrefix) {
-          const updatedSettings = {
-            ...result.displaySettings,
-            commandPrefix: '_'  // Default underscore prefix
-          };
-          await chrome.storage.local.set({ displaySettings: updatedSettings });
-        }
+        // Removed command prefix initialization as we're using individual prompt shortcuts instead of global prefix
       } catch (error) {
         console.warn('Could not load configuration, using defaults:', error);
       }
@@ -385,6 +455,15 @@ export function Popup() {
     try {
       const prompts = await getPromptShortcuts();
       setPromptShortcuts(prompts);
+
+      // Also sync to chrome.storage.local for content script access
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        try {
+          await chrome.storage.local.set({ promptShortcuts: prompts });
+        } catch (error) {
+          console.warn('Could not sync prompt shortcuts to chrome.storage.local:', error);
+        }
+      }
     } catch (error) {
       console.error('Failed to load prompt shortcuts:', error);
     }
@@ -625,69 +704,24 @@ export function Popup() {
         }
       }
 
-      // Check for slash commands (e.g., /fix) - updated to use configurable prefix
+      // Check for slash commands (e.g., /fix) - updated to use individual prompt shortcuts
       if (e.key === 'Enter') {
-        // Since we can't use async operations in event handler directly, we'll try to get the prefix from our local state first
-        // If not available, we'll use the default underscore
-        let commandPrefix = '_'; // Default prefix
+        const trimmedInput = input.trim();
 
-        // First try to get from localStorage
-        try {
-          const settings = localStorage.getItem('displaySettings');
-          if (settings) {
-            const parsedSettings = JSON.parse(settings);
-            if (parsedSettings.commandPrefix) {
-              commandPrefix = parsedSettings.commandPrefix;
-            }
-          }
-        } catch (e) {
-          console.warn('Could not parse display settings from localStorage');
-        }
+        // Look for a prompt with shortcutKey that matches the entire input
+        const prompt = promptShortcuts.find(p => p.shortcutKey === trimmedInput);
 
-        // If localStorage doesn't have it, continue using the default
-
-        const commandPattern = new RegExp(`^\\${commandPrefix}([a-zA-Z0-9_]+)`);
-        const match = input.trim().match(commandPattern);
-
-        if (match) {
+        if (prompt) {
           e.preventDefault(); // Prevent sending the message
-          const command = match[0]; // Full command with prefix (e.g., "_fix")
-          const commandName = match[1]; // Command name without prefix (e.g., "fix")
 
-          // First try to find a prompt with a custom prefix that matches the input
-          let prompt = null;
+          // Replace the command with the prompt content
+          const newInput = prompt.content;
+          setInput(newInput);
 
-          // Find a prompt where the input starts with the prompt's custom prefix followed by the command name
-          for (const p of promptShortcuts) {
-            if (p.customPrefix) {
-              const customCommandPattern = new RegExp(`^\\${p.customPrefix}${commandName}`);
-              if (customCommandPattern.test(input.trim())) {
-                prompt = p;
-                break;
-              }
-            }
-          }
-
-          // If no custom prefix prompt found, try finding with the global prefix
-          if (!prompt) {
-            // Look for prompt with shortcutKey matching the command (e.g., "_fix")
-            prompt = promptShortcuts.find(p => p.shortcutKey === command);
-          }
-
-          if (prompt) {
-            // Replace the command with the prompt content
-            const remainingText = input.substring(command.length).trim();
-            const newInput = prompt.content + (remainingText ? ' ' + remainingText : '');
-            setInput(newInput);
-
-            // After updating the input, send the message
-            setTimeout(() => {
-              sendMessage();
-            }, 0);
-          } else {
-            // If it's a command but not found, send the message as is
+          // After updating the input, send the message
+          setTimeout(() => {
             sendMessage();
-          }
+          }, 0);
         }
       }
 
@@ -977,27 +1011,43 @@ export function Popup() {
     let selectedText = '';
     let pageContents = '';
 
-    if (sendSelectedText) {
+    // Check if any mode is active and include the appropriate content
+    if (sendSelectedText || textSelectionMode) {
       selectedText = await getSelectedText();
       if (selectedText) {
         additionalContext += `\n--- Selected Text ---\n${selectedText}\n`;
       }
     }
 
-    if (sendPageContents) {
+    if (sendPageContents || pageContextMode) {
       pageContents = await getPageContents();
       if (pageContents) {
         additionalContext += `\n--- Page Contents ---\n${pageContents}\n`;
       }
     }
 
-    if (sendScreenshot) {
+    if (sendScreenshot || pageScreenshotMode) {
       const screenshot = await getScreenshot();
       if (screenshot) {
         // For now, we'll just add a note that a screenshot was taken
         // In a real implementation, you'd send the image data to the AI
         additionalContext += `\n--- Screenshot Attached ---\n`;
       }
+    }
+
+    if (clipboardMode) {
+      try {
+        const clipboardText = await navigator.clipboard.readText();
+        if (clipboardText) {
+          additionalContext += `\n--- Clipboard Content ---\n${clipboardText}\n`;
+        }
+      } catch (error) {
+        console.warn('Could not read clipboard content:', error);
+      }
+    }
+
+    if (pageInfoMode) {
+      additionalContext += `\n--- Page Info ---\nURL: ${window.location.href}\nTitle: ${document.title}\n`;
     }
 
     // Combine input and context
@@ -1026,38 +1076,26 @@ export function Popup() {
     dispatch(addMessage(userMessage));
     setInput('');
     setUploadedImages([]); // Clear uploaded images after sending
+    // Reset all mode states after sending
+    setTextSelectionMode(false);
+    setPageContextMode(false);
+    setPageScreenshotMode(false);
+    setClipboardMode(false);
+    setPageInfoMode(false);
     // Save to database before attempting to send, ensuring offline persistence
     await saveCurrentChatToDB([...messages, userMessage]);
 
     try {
-      // Check network status and use appropriate method
-      const isCurrentlyOnline = networkStatusService.isCurrentlyOnline();
-
       // Update the client with the current AI config (including model)
       client.updateAIConfig(reduxAIConfig);
 
-      let response;
-      if (isCurrentlyOnline) {
-        // Try to send via the background script when online
-        response = await chrome.runtime.sendMessage({
-          type: 'SEND_MESSAGE',
-          data: {
-            content: fullInput,
-            images: uploadedImages.length > 0 ? [...uploadedImages] : undefined,
-            context: freshContext,
-            conversationHistory: messages, // Pass the current conversation history
-            aiConfig: reduxAIConfig // Include current AI config for the message
-          }
-        });
-      } else {
-        // When offline, try to use local models directly
-        response = await client.sendMessage(fullInput, freshContext, currentSessionId, uploadedImages.length > 0 ? [...uploadedImages] : undefined);
-      }
+      // Try to send the message using the client (which handles online/offline)
+      const response = await client.sendMessage(fullInput, freshContext, currentSessionId, uploadedImages.length > 0 ? [...uploadedImages] : undefined);
 
       if (response && response.success && response.data) {
         dispatch(addMessage(response.data));
 
-        // Save to database to ensure persistence
+        // Save to local IndexedDB to ensure persistence
         await saveCurrentChatToDB([...messages, userMessage, response.data]);
       } else {
         // Handle error response
@@ -1710,25 +1748,65 @@ export function Popup() {
       <div className="input-container">
         <div className="input-actions">
           <button
-            className={`action-btn ${sendSelectedText ? 'active' : ''}`}
-            onClick={() => setSendSelectedText(!sendSelectedText)}
-            title="Include selected text in your message (Ctrl+Shift+T)"
+            className={`action-btn ${sendSelectedText || textSelectionMode ? 'active' : ''}`}
+            onClick={() => {
+              setSendSelectedText(!sendSelectedText);
+              setTextSelectionMode(!textSelectionMode);
+            }}
+            title="Include selected text in your message (Ctrl+Shift+T or Shift+1)"
           >
             📝
           </button>
           <button
-            className={`action-btn ${sendPageContents ? 'active' : ''}`}
-            onClick={() => setSendPageContents(!sendPageContents)}
-            title="Include page contents in your message (Ctrl+Shift+P)"
+            className={`action-btn ${sendPageContents || pageContextMode ? 'active' : ''}`}
+            onClick={() => {
+              setSendPageContents(!sendPageContents);
+              setPageContextMode(!pageContextMode);
+            }}
+            title="Include page contents in your message (Ctrl+Shift+P or Shift+2)"
           >
             📄
           </button>
           <button
-            className={`action-btn ${sendScreenshot ? 'active' : ''}`}
-            onClick={() => setSendScreenshot(!sendScreenshot)}
-            title="Include screenshot in your message (Ctrl+Shift+S)"
+            className={`action-btn ${sendScreenshot || pageScreenshotMode ? 'active' : ''}`}
+            onClick={() => {
+              setSendScreenshot(!sendScreenshot);
+              setPageScreenshotMode(!pageScreenshotMode);
+            }}
+            title="Include screenshot in your message (Ctrl+Shift+S or Shift+3)"
           >
             📷
+          </button>
+          <button
+            className="action-btn"
+            onClick={() => {
+              // Toggle clipboard mode
+              setClipboardMode(!clipboardMode);
+              // Add clipboard content to input
+              if (!clipboardMode) {
+                navigator.clipboard.readText().then(text => {
+                  setInput(prev => prev + (prev ? ' ' : '') + text);
+                });
+              }
+            }}
+            title="Include clipboard content in your message (Shift+4)"
+          >
+            📋
+          </button>
+          <button
+            className="action-btn"
+            onClick={() => {
+              // Toggle page info mode
+              setPageInfoMode(!pageInfoMode);
+              // Add page info to input
+              if (!pageInfoMode) {
+                const pageInfo = `URL: ${window.location.href}\nTitle: ${document.title}`;
+                setInput(prev => prev + (prev ? '\n' : '') + pageInfo);
+              }
+            }}
+            title="Include page info in your message (Shift+5)"
+          >
+            ℹ️
           </button>
           <button
             className="action-btn"
@@ -1784,9 +1862,11 @@ export function Popup() {
         />
         <div className="input-footer">
           <div className="send-options">
-            {sendSelectedText && <span className="send-option active" title="Ctrl+Shift+T to toggle">📝</span>}
-            {sendPageContents && <span className="send-option active" title="Ctrl+Shift+P to toggle">📄</span>}
-            {sendScreenshot && <span className="send-option active" title="Ctrl+Shift+S to toggle">📷</span>}
+            {(sendSelectedText || textSelectionMode) && <span className="send-option active" title="Ctrl+Shift+T or Shift+1 to toggle">📝</span>}
+            {(sendPageContents || pageContextMode) && <span className="send-option active" title="Ctrl+Shift+P or Shift+2 to toggle">📄</span>}
+            {(sendScreenshot || pageScreenshotMode) && <span className="send-option active" title="Ctrl+Shift+S or Shift+3 to toggle">📷</span>}
+            {clipboardMode && <span className="send-option active" title="Shift+4 to toggle">📋</span>}
+            {pageInfoMode && <span className="send-option active" title="Shift+5 to toggle">ℹ️</span>}
             {uploadedImages.length > 0 && <span className="send-option active" title="Uploaded images">🖼️ {uploadedImages.length}</span>}
           </div>
           <button

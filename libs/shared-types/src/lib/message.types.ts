@@ -23,9 +23,8 @@ export interface PromptShortcut {
   name: string;
   content: string;
   category: string;
-  shortcutKey?: string;        // Global shortcut key like /fix
+  shortcutKey?: string;        // Text-based shortcut key like /fix
   keyboardShortcut?: string;   // Keyboard shortcut like Ctrl+Shift+F
-  customPrefix?: string;       // Optional custom prefix for this shortcut
   createdAt: number;
 }
 
@@ -88,5 +87,11 @@ export interface ExtensionSettings {
   defaultProvider: AIProvider;
   pageContentTokenLimit?: number;  // Token limit for page content (default 20000)
   totalMessageTokenLimit?: number; // Total token limit for message + context (default 20000)
-  commandPrefix?: string;          // Global command prefix (default is underscore '_')
+  buttonPosition?: { top: number; right: number };  // Position of the floating button
+  buttonSensitivityAreaPercentage?: number;         // Percentage of screen area that triggers button visibility
+  textSelectionKey?: string;        // Key to toggle text selection mode (default: '1')
+  pageContextKey?: string;          // Key to toggle page context mode (default: '2')
+  pageScreenshotKey?: string;       // Key to toggle page screenshot mode (default: '3')
+  clipboardKey?: string;            // Key to toggle clipboard mode (default: '4')
+  pageInfoKey?: string;             // Key to toggle page info mode (default: '5')
 }

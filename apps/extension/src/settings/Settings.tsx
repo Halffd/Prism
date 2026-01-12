@@ -1,12 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { AIConfig, ExtensionSettings, PopupDisplayMode } from '@prism/shared-types';
+import { AIConfig, ExtensionSettings, PopupDisplayMode, PromptShortcut } from '@prism/shared-types';
 import { UnifiedAIClient } from '@prism/api-client';
-import {
-  getPromptShortcuts,
-  savePromptShortcut,
-  deletePromptShortcut,
-  PromptShortcut
-} from '@prism/shared-db';
 import './Settings.scss';
 
 // Initialize with default settings - will be overridden by stored settings
@@ -36,8 +30,7 @@ export function Settings({ onClose }: SettingsProps) {
     name: '',
     content: '',
     category: '',
-    shortcutKey: '',
-    customPrefix: ''
+    shortcutKey: ''
   });
   const [loading, setLoading] = useState<boolean>(true);
   const [fetchingModels, setFetchingModels] = useState<boolean>(false);
@@ -47,11 +40,31 @@ export function Settings({ onClose }: SettingsProps) {
   const [sidebarWidth, setSidebarWidth] = useState<number>(350);
   const [pageContentTokenLimit, setPageContentTokenLimit] = useState<number>(20000);
   const [totalMessageTokenLimit, setTotalMessageTokenLimit] = useState<number>(20000);
-  const [commandPrefix, setCommandPrefix] = useState<string>('_');
+  // Removed commandPrefix state as we're using individual prompt shortcuts instead of global prefix
+  const [buttonPositionTop, setButtonPositionTop] = useState<number>(20);
+  const [buttonPositionRight, setButtonPositionRight] = useState<number>(20);
+  const [textSelectionKey, setTextSelectionKey] = useState<string>('1');
+  const [pageContextKey, setPageContextKey] = useState<string>('2');
+  const [pageScreenshotKey, setPageScreenshotKey] = useState<string>('3');
+  const [clipboardKey, setClipboardKey] = useState<string>('4');
+  const [pageInfoKey, setPageInfoKey] = useState<string>('5');
+  const [buttonSensitivityAreaPercentage, setButtonSensitivityAreaPercentage] = useState<number>(10);
   const [saveTimeout, setSaveTimeout] = useState<NodeJS.Timeout | null>(null);
+  const [apiClient, setApiClient] = useState<UnifiedAIClient | null>(null);
 
   useEffect(() => {
-    loadSettings();
+    // Initialize API client with current settings
+    const initializeApiClient = async () => {
+      const result = await chrome.storage.local.get(['aiConfig']);
+      const client = new UnifiedAIClient({
+        aiConfig: result.aiConfig,
+        prismApiUrl: result.aiConfig?.providerKeys?.['prism-api'] || 'http://localhost:3000/api'
+      });
+      setApiClient(client);
+      loadSettings(client);
+    };
+
+    initializeApiClient();
   }, []);
 
   // Auto-save settings when any setting changes
@@ -76,7 +89,7 @@ export function Settings({ onClose }: SettingsProps) {
     };
   }, [aiConfig, imageGenerationApiKey, imageGenerationModel, excludedSites, whitelistedSites, displayMode, sidebarPosition, sidebarWidth]);
 
-  const loadSettings = async () => {
+  const loadSettings = async (client: UnifiedAIClient) => {
     try {
       // Load AI configuration from chrome storage
       const result = await chrome.storage.local.get([
@@ -137,7 +150,15 @@ export function Settings({ onClose }: SettingsProps) {
         setSidebarWidth(displaySettings.sidebarWidth || 350);
         setPageContentTokenLimit(displaySettings.pageContentTokenLimit || 20000);
         setTotalMessageTokenLimit(displaySettings.totalMessageTokenLimit || 20000);
-        setCommandPrefix(displaySettings.commandPrefix || '_');
+        // Removed commandPrefix loading as we're using individual prompt shortcuts instead of global prefix
+        setButtonPositionTop(displaySettings.buttonPosition?.top || 20);
+        setButtonPositionRight(displaySettings.buttonPosition?.right || 20);
+        setTextSelectionKey(displaySettings.textSelectionKey || '1');
+        setPageContextKey(displaySettings.pageContextKey || '2');
+        setPageScreenshotKey(displaySettings.pageScreenshotKey || '3');
+        setClipboardKey(displaySettings.clipboardKey || '4');
+        setPageInfoKey(displaySettings.pageInfoKey || '5');
+        setButtonSensitivityAreaPercentage(displaySettings.buttonSensitivityAreaPercentage || 10);
       } else {
         // Set defaults
         setDisplayMode('popup');
@@ -145,15 +166,43 @@ export function Settings({ onClose }: SettingsProps) {
         setSidebarWidth(350);
         setPageContentTokenLimit(20000);
         setTotalMessageTokenLimit(20000);
-        setCommandPrefix('_'); // Default underscore
+        // Removed commandPrefix initialization as we're using individual prompt shortcuts instead of global prefix
+        setButtonPositionTop(20);
+        setButtonPositionRight(20);
+        setTextSelectionKey('1');
+        setPageContextKey('2');
+        setPageScreenshotKey('3');
+        setClipboardKey('4');
+        setPageInfoKey('5');
+        setButtonSensitivityAreaPercentage(10);
       }
 
-      // Load prompt shortcuts
-      const shortcuts = await getPromptShortcuts();
-      setPromptShortcuts(shortcuts);
+      // Load prompt shortcuts from API
+      if (client) {
+        const response = await client.getSyncedData();
+        if (response.success && response.data?.prompts) {
+          setPromptShortcuts(response.data.prompts);
+
+          // Also sync to chrome.storage.local for content script access
+          if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+            try {
+              await chrome.storage.local.set({ promptShortcuts: response.data.prompts });
+            } catch (error) {
+              console.warn('Could not sync prompt shortcuts to chrome.storage.local:', error);
+            }
+          }
+        } else {
+          // Fallback to empty array if API call fails
+          setPromptShortcuts([]);
+        }
+      } else {
+        // Fallback to empty array if no client
+        setPromptShortcuts([]);
+      }
     } catch (error) {
       console.error('Failed to load settings:', error);
       setAiConfig(defaultAIConfig);
+      setPromptShortcuts([]);
     } finally {
       setLoading(false);
     }
@@ -234,7 +283,17 @@ export function Settings({ onClose }: SettingsProps) {
           enableSidebar: displayMode === 'sidebar',
           pageContentTokenLimit: pageContentTokenLimit,
           totalMessageTokenLimit: totalMessageTokenLimit,
-          commandPrefix: commandPrefix  // Save command prefix
+          // Removed commandPrefix as we're using individual prompt shortcuts instead of global prefix
+          textSelectionKey: textSelectionKey,
+          pageContextKey: pageContextKey,
+          pageScreenshotKey: pageScreenshotKey,
+          clipboardKey: clipboardKey,
+          pageInfoKey: pageInfoKey,
+          buttonPosition: {
+            top: buttonPositionTop,
+            right: buttonPositionRight
+          },
+          buttonSensitivityAreaPercentage: buttonSensitivityAreaPercentage
         } as ExtensionSettings
       });
 
@@ -249,6 +308,18 @@ export function Settings({ onClose }: SettingsProps) {
           totalMessageTokenLimit: totalMessageTokenLimit
         }
       });
+
+      // Sync prompt shortcuts to the API if available
+      if (apiClient) {
+        try {
+          const response = await apiClient.syncPrompts(promptShortcuts);
+          if (!response.success) {
+            console.error('Failed to sync prompt shortcuts:', response.error);
+          }
+        } catch (error) {
+          console.error('Error syncing prompt shortcuts:', error);
+        }
+      }
 
       if (onClose) onClose();
     } catch (error) {
@@ -303,7 +374,17 @@ export function Settings({ onClose }: SettingsProps) {
           enableSidebar: displayMode === 'sidebar',
           pageContentTokenLimit: pageContentTokenLimit,
           totalMessageTokenLimit: totalMessageTokenLimit,
-          commandPrefix: commandPrefix  // Save command prefix
+          // Removed commandPrefix as we're using individual prompt shortcuts instead of global prefix
+          textSelectionKey: textSelectionKey,
+          pageContextKey: pageContextKey,
+          pageScreenshotKey: pageScreenshotKey,
+          clipboardKey: clipboardKey,
+          pageInfoKey: pageInfoKey,
+          buttonPosition: {
+            top: buttonPositionTop,
+            right: buttonPositionRight
+          },
+          buttonSensitivityAreaPercentage: buttonSensitivityAreaPercentage
         } as ExtensionSettings
       });
 
@@ -318,6 +399,18 @@ export function Settings({ onClose }: SettingsProps) {
           totalMessageTokenLimit: totalMessageTokenLimit
         }
       });
+
+      // Sync prompt shortcuts to the API if available
+      if (apiClient) {
+        try {
+          const response = await apiClient.syncPrompts(promptShortcuts);
+          if (!response.success) {
+            console.error('Failed to sync prompt shortcuts:', response.error);
+          }
+        } catch (error) {
+          console.error('Error syncing prompt shortcuts:', error);
+        }
+      }
     } catch (error) {
       console.error('Failed to auto-save settings:', error);
     }
@@ -349,42 +442,89 @@ export function Settings({ onClose }: SettingsProps) {
     setWhitelistedSites(newSites);
   };
 
-  const addNewPrompt = () => {
-    if (newPrompt.name && newPrompt.content) {
+  const addNewPrompt = async () => {
+    if (newPrompt.name && newPrompt.content && apiClient) {
       const prompt: PromptShortcut = {
         id: `prompt_${Date.now()}`,
         name: newPrompt.name,
         content: newPrompt.content,
         category: newPrompt.category || 'General',
         shortcutKey: newPrompt.shortcutKey || undefined,
-        customPrefix: newPrompt.customPrefix || undefined,
         createdAt: Date.now()
       };
-      savePromptShortcutToDB(prompt);
-      setNewPrompt({ name: '', content: '', category: '', shortcutKey: '', customPrefix: '' });
+      await savePromptShortcutToAPI(prompt);
+      setNewPrompt({ name: '', content: '', category: '', shortcutKey: '' });
     }
   };
 
-  const savePromptShortcutToDB = async (prompt: PromptShortcut) => {
+  const savePromptShortcutToAPI = async (prompt: PromptShortcut) => {
+    if (!apiClient) {
+      console.error('API client not initialized');
+      return;
+    }
+
     try {
-      await savePromptShortcut(prompt);
-      // Refresh the list
-      const shortcuts = await getPromptShortcuts();
-      setPromptShortcuts(shortcuts);
+      // Add the new prompt to the current list
+      const updatedPrompts = [...promptShortcuts, prompt];
+
+      // Sync all prompts to the API
+      const response = await apiClient.syncPrompts(updatedPrompts);
+      if (response.success) {
+        // Refresh the list from the API response to ensure consistency
+        const syncResponse = await apiClient.getSyncedData();
+        if (syncResponse.success && syncResponse.data?.prompts) {
+          setPromptShortcuts(syncResponse.data.prompts);
+
+          // Also sync to chrome.storage.local for content script access
+          if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+            try {
+              await chrome.storage.local.set({ promptShortcuts: syncResponse.data.prompts });
+            } catch (error) {
+              console.warn('Could not sync prompt shortcuts to chrome.storage.local:', error);
+            }
+          }
+        }
+      } else {
+        console.error('Failed to sync prompt shortcut:', response.error);
+      }
     } catch (error) {
-      console.error('Failed to save prompt shortcut:', error);
+      console.error('Failed to save prompt shortcut to API:', error);
     }
   };
 
-  const deletePromptShortcutFromDB = async (promptId: string) => {
+  const deletePromptShortcutFromAPI = async (promptId: string) => {
+    if (!apiClient) {
+      console.error('API client not initialized');
+      return;
+    }
+
     if (window.confirm('Are you sure you want to delete this prompt shortcut?')) {
       try {
-        await deletePromptShortcut(promptId);
-        // Refresh the list
-        const shortcuts = await getPromptShortcuts();
-        setPromptShortcuts(shortcuts);
+        // Remove the prompt from the current list
+        const updatedPrompts = promptShortcuts.filter(prompt => prompt.id !== promptId);
+
+        // Sync all prompts to the API
+        const response = await apiClient.syncPrompts(updatedPrompts);
+        if (response.success) {
+          // Refresh the list from the API response to ensure consistency
+          const syncResponse = await apiClient.getSyncedData();
+          if (syncResponse.success && syncResponse.data?.prompts) {
+            setPromptShortcuts(syncResponse.data.prompts);
+
+            // Also sync to chrome.storage.local for content script access
+            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+              try {
+                await chrome.storage.local.set({ promptShortcuts: syncResponse.data.prompts });
+              } catch (error) {
+                console.warn('Could not sync prompt shortcuts to chrome.storage.local:', error);
+              }
+            }
+          }
+        } else {
+          console.error('Failed to sync prompt shortcuts after deletion:', response.error);
+        }
       } catch (error) {
-        console.error('Failed to delete prompt shortcut:', error);
+        console.error('Failed to delete prompt shortcut from API:', error);
       }
     }
   };
@@ -785,18 +925,69 @@ export function Settings({ onClose }: SettingsProps) {
 
         <div className="settings-section">
           <h3>Command Settings</h3>
+        </div>
+
+        <div className="settings-section">
+          <h3>Mode Toggle Keys</h3>
           <div className="form-group">
-            <label>Command Prefix</label>
+            <label>Text Selection (Shift + Key)</label>
             <input
               type="text"
-              value={commandPrefix}
-              onChange={(e) => setCommandPrefix(e.target.value)}
+              value={textSelectionKey}
+              onChange={(e) => setTextSelectionKey(e.target.value)}
               className="form-control"
-              placeholder="e.g., _ (underscore)"
+              placeholder="e.g., 1"
               maxLength={1}
-              minLength={1}
             />
-            <small className="form-hint">Set the global command prefix (default is underscore '_'). This is used for slash commands like _fix, _explain, etc.</small>
+            <small className="form-hint">Key to toggle text selection mode (default: 1)</small>
+          </div>
+          <div className="form-group">
+            <label>Page Context (Shift + Key)</label>
+            <input
+              type="text"
+              value={pageContextKey}
+              onChange={(e) => setPageContextKey(e.target.value)}
+              className="form-control"
+              placeholder="e.g., 2"
+              maxLength={1}
+            />
+            <small className="form-hint">Key to toggle page context mode (default: 2)</small>
+          </div>
+          <div className="form-group">
+            <label>Page Screenshot (Shift + Key)</label>
+            <input
+              type="text"
+              value={pageScreenshotKey}
+              onChange={(e) => setPageScreenshotKey(e.target.value)}
+              className="form-control"
+              placeholder="e.g., 3"
+              maxLength={1}
+            />
+            <small className="form-hint">Key to toggle page screenshot mode (default: 3)</small>
+          </div>
+          <div className="form-group">
+            <label>Clipboard (Shift + Key)</label>
+            <input
+              type="text"
+              value={clipboardKey}
+              onChange={(e) => setClipboardKey(e.target.value)}
+              className="form-control"
+              placeholder="e.g., 4"
+              maxLength={1}
+            />
+            <small className="form-hint">Key to toggle clipboard mode (default: 4)</small>
+          </div>
+          <div className="form-group">
+            <label>Page Info (Shift + Key)</label>
+            <input
+              type="text"
+              value={pageInfoKey}
+              onChange={(e) => setPageInfoKey(e.target.value)}
+              className="form-control"
+              placeholder="e.g., 5"
+              maxLength={1}
+            />
+            <small className="form-hint">Key to toggle page info mode (default: 5)</small>
           </div>
         </div>
 
@@ -916,6 +1107,48 @@ export function Settings({ onClose }: SettingsProps) {
         </div>
 
         <div className="settings-section">
+          <h3>Floating Button Settings</h3>
+          <div className="form-group">
+            <label>Button Top Position (px)</label>
+            <input
+              type="number"
+              value={buttonPositionTop}
+              onChange={(e) => setButtonPositionTop(Number(e.target.value))}
+              min="0"
+              max="100"
+              className="form-control"
+            />
+            <small className="form-hint">Distance from the top of the screen in pixels</small>
+          </div>
+
+          <div className="form-group">
+            <label>Button Right Position (px)</label>
+            <input
+              type="number"
+              value={buttonPositionRight}
+              onChange={(e) => setButtonPositionRight(Number(e.target.value))}
+              min="0"
+              max="100"
+              className="form-control"
+            />
+            <small className="form-hint">Distance from the right of the screen in pixels</small>
+          </div>
+
+          <div className="form-group">
+            <label>Sensitivity Area Percentage</label>
+            <input
+              type="number"
+              value={buttonSensitivityAreaPercentage}
+              onChange={(e) => setButtonSensitivityAreaPercentage(Number(e.target.value))}
+              min="1"
+              max="50"
+              className="form-control"
+            />
+            <small className="form-hint">Percentage of screen width/height that triggers button visibility when mouse enters (default: 10%)</small>
+          </div>
+        </div>
+
+        <div className="settings-section">
           <h3>Prompt Shortcuts</h3>
           <div className="form-group">
             <div className="prompt-form">
@@ -947,14 +1180,6 @@ export function Settings({ onClose }: SettingsProps) {
                 onChange={(e) => setNewPrompt({...newPrompt, category: e.target.value})}
                 className="prompt-input form-control"
               />
-              <input
-                type="text"
-                placeholder="Custom prefix (optional, e.g. #)"
-                value={newPrompt.customPrefix}
-                onChange={(e) => setNewPrompt({...newPrompt, customPrefix: e.target.value})}
-                className="prompt-input form-control"
-                maxLength={1}
-              />
               <button
                 onClick={addNewPrompt}
                 className="prompt-add-btn"
@@ -977,7 +1202,7 @@ export function Settings({ onClose }: SettingsProps) {
                   </div>
                   <div className="prompt-actions">
                     <button
-                      onClick={() => deletePromptShortcutFromDB(prompt.id)}
+                      onClick={() => deletePromptShortcutFromAPI(prompt.id)}
                       className="prompt-delete-btn"
                       title="Delete this prompt"
                     >

@@ -16,8 +16,8 @@ export interface PromptShortcut {
   content: string;
   createdAt: number;
   category?: string;
-  shortcutKey?: string; // Optional keyboard shortcut
-  customPrefix?: string; // Optional custom prefix for this shortcut
+  shortcutKey?: string; // Optional text-based shortcut key
+  keyboardShortcut?: string; // Optional keyboard shortcut
 }
 
 
@@ -162,19 +162,73 @@ export async function savePromptShortcut(prompt: PromptShortcut): Promise<void> 
 
   await store.put(prompt);
   await tx.done;
+
+  // Also sync to chrome.storage.local for content script access (if in extension context)
+  // Only execute if chrome is defined (in browser extension environment)
+  if (typeof globalThis !== 'undefined' && 'chrome' in globalThis) {
+    const chromeGlobal = globalThis.chrome as any;
+    if (chromeGlobal && chromeGlobal.storage && chromeGlobal.storage.local) {
+      try {
+        const result = await chromeGlobal.storage.local.get(['promptShortcuts']);
+        const promptShortcuts = result.promptShortcuts || [];
+        const updatedPrompts = [...promptShortcuts.filter((p: PromptShortcut) => p.id !== prompt.id), prompt];
+        await chromeGlobal.storage.local.set({ promptShortcuts: updatedPrompts });
+      } catch (error) {
+        console.warn('Could not sync prompt shortcut to chrome.storage.local:', error);
+      }
+    }
+  }
 }
 
 export async function getPromptShortcuts(category?: string): Promise<PromptShortcut[]> {
-  const db = await getDatabase();
-  const tx = db.transaction(PROMPTS_STORE, 'readonly');
-  const store = tx.objectStore(PROMPTS_STORE);
+  let prompts: PromptShortcut[] = [];
 
-  let prompts: PromptShortcut[];
-  if (category) {
-    const index = store.index('category');
-    prompts = await index.getAll(IDBKeyRange.only(category));
-  } else {
-    prompts = await store.getAll();
+  // First try to get from IndexedDB (primary storage)
+  try {
+    const db = await getDatabase();
+    const tx = db.transaction(PROMPTS_STORE, 'readonly');
+    const store = tx.objectStore(PROMPTS_STORE);
+
+    if (category) {
+      const index = store.index('category');
+      prompts = await index.getAll(IDBKeyRange.only(category));
+    } else {
+      prompts = await store.getAll();
+    }
+  } catch (error) {
+    console.warn('Could not get prompt shortcuts from IndexedDB:', error);
+  }
+
+  // Also try to get from chrome.storage.local (for content script access)
+  // Only execute if chrome is defined (in browser extension environment)
+  if (typeof globalThis !== 'undefined' && 'chrome' in globalThis) {
+    const chromeGlobal = globalThis.chrome as any;
+    if (chromeGlobal && chromeGlobal.storage && chromeGlobal.storage.local) {
+      try {
+        const result = await chromeGlobal.storage.local.get(['promptShortcuts']);
+        const chromePrompts = result.promptShortcuts || [];
+
+        // Merge with IndexedDB results, preferring newer entries
+        const allPromptsMap = new Map<string, PromptShortcut>();
+
+        // Add IndexedDB prompts first
+        prompts.forEach(prompt => {
+          allPromptsMap.set(prompt.id, prompt);
+        });
+
+        // Add chrome.storage prompts, potentially overriding older entries
+        chromePrompts.forEach((prompt: PromptShortcut) => {
+          const existing = allPromptsMap.get(prompt.id);
+          if (!existing || (prompt.createdAt && existing.createdAt && prompt.createdAt > existing.createdAt)) {
+            allPromptsMap.set(prompt.id, prompt);
+          }
+        });
+
+        prompts = Array.from(allPromptsMap.values());
+      } catch (error) {
+        console.warn('Could not get prompt shortcuts from chrome.storage.local:', error);
+      }
+    }
   }
 
   return prompts.sort((a, b) => b.createdAt - a.createdAt);
@@ -184,9 +238,25 @@ export async function deletePromptShortcut(promptId: string): Promise<void> {
   const db = await getDatabase();
   const tx = db.transaction(PROMPTS_STORE, 'readwrite');
   const store = tx.objectStore(PROMPTS_STORE);
-  
+
   await store.delete(promptId);
   await tx.done;
+
+  // Also sync to chrome.storage.local for content script access (if in extension context)
+  // Only execute if chrome is defined (in browser extension environment)
+  if (typeof globalThis !== 'undefined' && 'chrome' in globalThis) {
+    const chromeGlobal = globalThis.chrome as any;
+    if (chromeGlobal && chromeGlobal.storage && chromeGlobal.storage.local) {
+      try {
+        const result = await chromeGlobal.storage.local.get(['promptShortcuts']);
+        const promptShortcuts = result.promptShortcuts || [];
+        const updatedPrompts = promptShortcuts.filter((p: PromptShortcut) => p.id !== promptId);
+        await chromeGlobal.storage.local.set({ promptShortcuts: updatedPrompts });
+      } catch (error) {
+        console.warn('Could not sync prompt shortcut deletion to chrome.storage.local:', error);
+      }
+    }
+  }
 }
 
 // Caching functions

@@ -8,7 +8,18 @@ import {
   PromptShortcut
 } from '@prism/shared-types';
 import { networkStatusService } from './network-status';
-import { getFirebaseIdToken } from '@prism/firebase-auth';
+import { getFirebaseIdToken } from '@prism/firebase-auth/src/utils';
+
+// We'll access the supabase client dynamically to avoid build issues
+let _supabaseClient: any = null;
+
+async function getSupabaseClient() {
+  if (!_supabaseClient) {
+    const module: any = await import('@prism/supabase-client');
+    _supabaseClient = module.supabaseClient;
+  }
+  return _supabaseClient;
+}
 
 export interface UnifiedAIClientOptions {
   aiConfig?: AIConfig;
@@ -26,6 +37,11 @@ export class UnifiedAIClient {
     this.aiConfig = options.aiConfig;
     this.prismApiUrl = options.prismApiUrl;
     this.prismApiKey = options.prismApiKey;
+
+    // Update the network status service with the API URL if provided
+    if (this.prismApiUrl) {
+      networkStatusService.updateApiUrl(this.prismApiUrl);
+    }
 
     if (options.aiConfig) {
       // Ensure proper configuration for local providers
@@ -117,18 +133,27 @@ export class UnifiedAIClient {
     // If we're online and have Prism API configured, try the API
     if (isOnline && this.prismApiUrl) {
       try {
-        // Get Firebase ID token to include in the request
+        // Get tokens from authentication providers - prioritize Supabase, then Firebase, then API key
+        const supabase = await getSupabaseClient();
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        let supabaseToken: string | null = null;
+        if (!sessionError && session) {
+          supabaseToken = session.access_token;
+        }
+
         const firebaseToken = await getFirebaseIdToken();
 
         const headers: Record<string, string> = {
           'Content-Type': 'application/json'
         };
 
-        // Add Firebase token if available
-        if (firebaseToken) {
+        // Add authentication token in priority order
+        if (supabaseToken) {
+          headers['Authorization'] = `Bearer ${supabaseToken}`;
+        } else if (firebaseToken) {
           headers['Authorization'] = `Bearer ${firebaseToken}`;
         } else if (this.prismApiKey) {
-          // Fall back to API key if no Firebase token
+          // Fall back to API key if no authentication token
           headers['Authorization'] = `Bearer ${this.prismApiKey}`;
         }
 
@@ -220,6 +245,11 @@ export class UnifiedAIClient {
       const configForService = this.prepareConfigForService(config);
       this.aiService = new AIService(configForService);
     }
+
+    // Update the network status service with the API URL if it's in the provider keys
+    if (config.providerKeys && config.providerKeys['prism-api']) {
+      networkStatusService.updateApiUrl(config.providerKeys['prism-api']);
+    }
   }
 
   getCurrentAIConfig(): AIConfig | undefined {
@@ -278,18 +308,27 @@ export class UnifiedAIClient {
     }
 
     try {
-      // Get Firebase ID token to include in the request
+      // Get tokens from authentication providers - prioritize Supabase, then Firebase, then API key
+      const supabase = await getSupabaseClient();
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      let supabaseToken: string | null = null;
+      if (!sessionError && session) {
+        supabaseToken = session.access_token;
+      }
+
       const firebaseToken = await getFirebaseIdToken();
 
       const headers: Record<string, string> = {
         'Content-Type': 'application/json'
       };
 
-      // Add Firebase token if available
-      if (firebaseToken) {
+      // Add authentication token in priority order
+      if (supabaseToken) {
+        headers['Authorization'] = `Bearer ${supabaseToken}`;
+      } else if (firebaseToken) {
         headers['Authorization'] = `Bearer ${firebaseToken}`;
       } else if (this.prismApiKey) {
-        // Fall back to API key if no Firebase token
+        // Fall back to API key if no authentication token
         headers['Authorization'] = `Bearer ${this.prismApiKey}`;
       }
 
@@ -317,18 +356,27 @@ export class UnifiedAIClient {
     }
 
     try {
-      // Get Firebase ID token to include in the request
+      // Get tokens from authentication providers - prioritize Supabase, then Firebase, then API key
+      const supabase = await getSupabaseClient();
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      let supabaseToken: string | null = null;
+      if (!sessionError && session) {
+        supabaseToken = session.access_token;
+      }
+
       const firebaseToken = await getFirebaseIdToken();
 
       const headers: Record<string, string> = {
         'Content-Type': 'application/json'
       };
 
-      // Add Firebase token if available
-      if (firebaseToken) {
+      // Add authentication token in priority order
+      if (supabaseToken) {
+        headers['Authorization'] = `Bearer ${supabaseToken}`;
+      } else if (firebaseToken) {
         headers['Authorization'] = `Bearer ${firebaseToken}`;
       } else if (this.prismApiKey) {
-        // Fall back to API key if no Firebase token
+        // Fall back to API key if no authentication token
         headers['Authorization'] = `Bearer ${this.prismApiKey}`;
       }
 
@@ -356,18 +404,27 @@ export class UnifiedAIClient {
     }
 
     try {
-      // Get Firebase ID token to include in the request
+      // Get tokens from authentication providers - prioritize Supabase, then Firebase, then API key
+      const supabase = await getSupabaseClient();
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      let supabaseToken: string | null = null;
+      if (!sessionError && session) {
+        supabaseToken = session.access_token;
+      }
+
       const firebaseToken = await getFirebaseIdToken();
 
       const headers: Record<string, string> = {
         'Content-Type': 'application/json'
       };
 
-      // Add Firebase token if available
-      if (firebaseToken) {
+      // Add authentication token in priority order
+      if (supabaseToken) {
+        headers['Authorization'] = `Bearer ${supabaseToken}`;
+      } else if (firebaseToken) {
         headers['Authorization'] = `Bearer ${firebaseToken}`;
       } else if (this.prismApiKey) {
-        // Fall back to API key if no Firebase token
+        // Fall back to API key if no authentication token
         headers['Authorization'] = `Bearer ${this.prismApiKey}`;
       }
 
@@ -399,18 +456,27 @@ export class UnifiedAIClient {
     }
 
     try {
-      // Get Firebase ID token to include in the request
+      // Get tokens from authentication providers - prioritize Supabase, then Firebase, then API key
+      const supabase = await getSupabaseClient();
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      let supabaseToken: string | null = null;
+      if (!sessionError && session) {
+        supabaseToken = session.access_token;
+      }
+
       const firebaseToken = await getFirebaseIdToken();
 
       const headers: Record<string, string> = {
         'Content-Type': 'application/json'
       };
 
-      // Add Firebase token if available
-      if (firebaseToken) {
+      // Add authentication token in priority order
+      if (supabaseToken) {
+        headers['Authorization'] = `Bearer ${supabaseToken}`;
+      } else if (firebaseToken) {
         headers['Authorization'] = `Bearer ${firebaseToken}`;
       } else if (this.prismApiKey) {
-        // Fall back to API key if no Firebase token
+        // Fall back to API key if no authentication token
         headers['Authorization'] = `Bearer ${this.prismApiKey}`;
       }
 
@@ -441,18 +507,27 @@ export class UnifiedAIClient {
     }
 
     try {
-      // Get Firebase ID token to include in the request
+      // Get tokens from authentication providers - prioritize Supabase, then Firebase, then API key
+      const supabase = await getSupabaseClient();
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      let supabaseToken: string | null = null;
+      if (!sessionError && session) {
+        supabaseToken = session.access_token;
+      }
+
       const firebaseToken = await getFirebaseIdToken();
 
       const headers: Record<string, string> = {
         'Content-Type': 'application/json'
       };
 
-      // Add Firebase token if available
-      if (firebaseToken) {
+      // Add authentication token in priority order
+      if (supabaseToken) {
+        headers['Authorization'] = `Bearer ${supabaseToken}`;
+      } else if (firebaseToken) {
         headers['Authorization'] = `Bearer ${firebaseToken}`;
       } else if (this.prismApiKey) {
-        // Fall back to API key if no Firebase token
+        // Fall back to API key if no authentication token
         headers['Authorization'] = `Bearer ${this.prismApiKey}`;
       }
 

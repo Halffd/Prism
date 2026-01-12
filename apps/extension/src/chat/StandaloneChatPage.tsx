@@ -513,13 +513,14 @@ export function StandaloneChatPage() {
       // Update the client with current AI config
       client.updateAIConfig(aiConfig);
 
+      // Try to send the message using the client (which handles online/offline)
       const response = await client.sendMessage(input, context, currentSessionId, uploadedImages.length > 0 ? uploadedImages : undefined);
 
       if (response.success && response.data) {
         const updatedMessages = [...newMessages, response.data];
         setMessages(updatedMessages);
 
-        // Save to database
+        // Save to local IndexedDB to ensure persistence
         await saveCurrentChatToDB(updatedMessages);
       } else {
         // If API call fails, add an error message to the chat
@@ -690,6 +691,12 @@ export function StandaloneChatPage() {
                   placeholder="Prompt name"
                   value={newPrompt.name}
                   onChange={(e) => setNewPrompt({...newPrompt, name: e.target.value})}
+                />
+                <input
+                  type="text"
+                  placeholder="Slash command (e.g. /fix)"
+                  value={newPrompt.shortcutKey}
+                  onChange={(e) => setNewPrompt({...newPrompt, shortcutKey: e.target.value})}
                 />
                 <input
                   type="text"
@@ -1008,62 +1015,22 @@ export function StandaloneChatPage() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
-                // Check for commands with configurable prefix (default to '_')
-                const settings = localStorage.getItem('displaySettings');
-                let commandPrefix = '_';
-                if (settings) {
-                  try {
-                    const parsedSettings = JSON.parse(settings);
-                    if (parsedSettings.commandPrefix) {
-                      commandPrefix = parsedSettings.commandPrefix;
-                    }
-                  } catch (e) {
-                    console.warn('Could not parse display settings from localStorage');
-                  }
-                }
+                const trimmedInput = input.trim();
 
-                const commandPattern = new RegExp(`^\\${commandPrefix}([a-zA-Z0-9_]+)`);
-                const match = input.trim().match(commandPattern);
+                // Look for a prompt with shortcutKey that matches the entire input
+                const prompt = promptShortcuts.find(p => p.shortcutKey === trimmedInput);
 
-                if (match) {
+                if (prompt) {
                   e.preventDefault(); // Prevent sending the message
-                  const command = match[0]; // Full command with prefix (e.g., "_fix")
-                  const commandName = match[1]; // Command name without prefix (e.g., "fix")
 
-                  // First try to find a prompt with a custom prefix that matches the input
-                  let prompt = null;
+                  // Replace the command with the prompt content
+                  const newInput = prompt.content;
+                  setInput(newInput);
 
-                  // Find a prompt where the input starts with the prompt's custom prefix followed by the command name
-                  for (const p of promptShortcuts) {
-                    if (p.customPrefix) {
-                      const customCommandPattern = new RegExp(`^\\${p.customPrefix}${commandName}`);
-                      if (customCommandPattern.test(input.trim())) {
-                        prompt = p;
-                        break;
-                      }
-                    }
-                  }
-
-                  // If no custom prefix prompt found, try finding with the global prefix
-                  if (!prompt) {
-                    // Look for prompt with shortcutKey matching the command (e.g., "_fix")
-                    prompt = promptShortcuts.find(p => p.shortcutKey === command);
-                  }
-
-                  if (prompt) {
-                    // Replace the command with the prompt content
-                    const remainingText = input.substring(command.length).trim();
-                    const newInput = prompt.content + (remainingText ? ' ' + remainingText : '');
-                    setInput(newInput);
-
-                    // After updating the input, send the message
-                    setTimeout(() => {
-                      sendMessage();
-                    }, 0);
-                  } else {
-                    // If it's a command but not found, send the message as is
+                  // After updating the input, send the message
+                  setTimeout(() => {
                     sendMessage();
-                  }
+                  }, 0);
                 } else {
                   e.preventDefault();
                   sendMessage();

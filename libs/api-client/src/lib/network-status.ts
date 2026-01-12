@@ -9,8 +9,10 @@ class NetworkStatusService {
   private isOnline: boolean = true;
   private listeners: Array<(status: NetworkStatus) => void> = [];
   private timerId: NodeJS.Timeout | null = null;
+  private apiUrl: string | null = null;
 
-  constructor() {
+  constructor(apiUrl?: string) {
+    this.apiUrl = apiUrl;
     // Initialize network detection
     this.setupNetworkDetection();
   }
@@ -40,8 +42,28 @@ class NetworkStatusService {
   private async performPingCheck(): Promise<boolean> {
     // Perform a simple ping to check connectivity
     try {
-      // Try to ping a reliable endpoint
-      const response = await fetch('/api/status', { 
+      let pingUrl = 'https://httpbin.org/get'; // Default fallback
+
+      // If we have an API URL, try to ping the status endpoint first
+      if (this.apiUrl) {
+        try {
+          const response = await fetch(`${this.apiUrl}/status`, {
+            method: 'GET',
+            cache: 'no-cache',
+            timeout: 5000 // 5 second timeout
+          });
+
+          if (response.ok) {
+            return true;
+          }
+        } catch (error) {
+          // If the API URL ping fails, fall back to the external check
+          console.debug('API URL ping failed, falling back to external check:', error);
+        }
+      }
+
+      // Try to ping a reliable external endpoint as fallback
+      const response = await fetch(pingUrl, {
         method: 'GET',
         cache: 'no-cache',
         timeout: 5000 // 5 second timeout
@@ -54,7 +76,7 @@ class NetworkStatusService {
           img.src = `data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==?t=${Date.now()}`;
         });
       });
-      
+
       return response.ok === true;
     } catch (error) {
       return false;
@@ -103,6 +125,11 @@ class NetworkStatusService {
         console.error('Error in network status listener:', error);
       }
     });
+  }
+
+  // Method to update the API URL
+  public updateApiUrl(apiUrl: string) {
+    this.apiUrl = apiUrl;
   }
 
   // Clean up when needed

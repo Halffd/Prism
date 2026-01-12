@@ -33,6 +33,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.type === 'INJECT_IFRAME_CHAT') {
+    injectChatPopup();
+    sendResponse({ success: true });
+    return true;
+  }
+
   if (request.type === 'UPDATE_DISPLAY_MODE') {
     updateDisplaySettings(request.data);
     sendResponse({ success: true });
@@ -81,6 +87,19 @@ function updateDisplaySettings(settings: Partial<ExtensionSettings>) {
   }
   if (settings.sidebarWidth !== undefined) {
     currentSidebarWidth = settings.sidebarWidth;
+  }
+
+  // Update button settings if they exist
+  if (settings.buttonPosition || settings.buttonSensitivityAreaPercentage !== undefined) {
+    // Update button position and sensitivity if the button exists
+    const button = document.getElementById('prism-floating-button');
+    if (button && settings.buttonPosition) {
+      button.style.top = `${settings.buttonPosition.top}px`;
+      button.style.right = `${settings.buttonPosition.right}px`;
+    }
+
+    // We can't update the sensitivity area percentage here since it's captured in the closure
+    // The next mouse movement will use the updated values from storage
   }
 }
 
@@ -417,16 +436,22 @@ function truncateToTokenLimit(text: string, tokenLimit: number): string {
 }
 
 // Open chat interface based on current display mode
-function openChatInterface() {
+async function openChatInterface() {
+  // Get current display settings from storage to determine the mode
+  const result = await chrome.storage.local.get(['displaySettings']);
+  const settings = result.displaySettings;
+  const displayMode = settings?.popupDisplayMode || 'popup';
+
   // Remove any existing interfaces
   removeExistingInterfaces();
 
-  switch (currentDisplayMode) {
+  switch (displayMode) {
     case 'sidebar':
       injectSidebar();
       break;
     case 'iframe':
-      injectIframePopup();
+      // For iframe mode, inject the iframe popup using shadow DOM
+      injectChatPopup();
       break;
     case 'floating':
       injectFloatingPopup();
@@ -721,6 +746,8 @@ function injectFloatingButton() {
     z-index: 999999;
     transition: transform 0.2s, opacity 0.2s;
     user-select: none;
+    opacity: 0;
+    pointer-events: none;
   `;
 
   button.addEventListener('mouseenter', () => {
@@ -731,6 +758,7 @@ function injectFloatingButton() {
     button.style.transform = 'scale(1)';
   });
 
+  // Fixed click handler to properly open the chat interface
   button.addEventListener('click', () => {
     // Send message to open popup or sidebar
     chrome.runtime.sendMessage({ type: 'OPEN_CHAT' });
@@ -748,6 +776,241 @@ function injectFloatingButton() {
   });
 
   document.body.appendChild(button);
+
+  // Add mouse tracking to show/hide button based on mouse position
+  setupMouseTracking(button);
+}
+
+// Function to inject the chat popup iframe using shadow DOM
+function injectChatPopup() {
+  // Check if popup already exists to avoid duplicates
+  if (document.getElementById('prism-chat-popup-container')) {
+    return;
+  }
+
+  // Create the container
+  const container = document.createElement('div');
+  container.id = 'prism-chat-popup-container';
+  document.body.appendChild(container);
+
+  // Create Shadow DOM to isolate styles
+  const shadow = container.attachShadow({ mode: 'open' });
+
+  // Create the iframe
+  const iframe = document.createElement('iframe');
+  iframe.src = chrome.runtime.getURL('chat.html'); // Points to your React chat page
+  iframe.id = 'prism-chat-iframe';
+  iframe.style.cssText = `
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    width: 400px;
+    height: 600px;
+    z-index: 2147483647;
+    border: none;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    background: white;
+  `;
+
+  // Add close button to the iframe container
+  const closeButton = document.createElement('button');
+  closeButton.innerHTML = '✕';
+  closeButton.style.cssText = `
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: #ff4757;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 25px;
+    height: 25px;
+    cursor: pointer;
+    z-index: 2147483648;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  `;
+  closeButton.addEventListener('click', () => {
+    removeChatPopup();
+  });
+
+  // Add the iframe and close button to the shadow DOM
+  shadow.appendChild(iframe);
+  shadow.appendChild(closeButton);
+
+  // Add resize handle
+  const resizeHandle = document.createElement('div');
+  resizeHandle.style.cssText = `
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 15px;
+    height: 15px;
+    background: transparent;
+    cursor: se-resize;
+    z-index: 2147483648;
+  `;
+  resizeHandle.innerHTML = `
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path d="M10 15L15 15L15 10" stroke="#ccc" stroke-width="1"/>
+      <path d="M5 15L10 15L10 10" stroke="#ccc" stroke-width="1"/>
+      <path d="M0 15L5 15L5 10" stroke="#ccc" stroke-width="1"/>
+    </svg>
+  `;
+
+  // Add resize functionality
+  let isResizing = false;
+  let initialX: number, initialY: number;
+  let initialWidth: number, initialHeight: number;
+
+  resizeHandle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    isResizing = true;
+    initialX = e.clientX;
+    initialY = e.clientY;
+    initialWidth = parseInt(document.defaultView!.getComputedStyle(iframe).width, 10);
+    initialHeight = parseInt(document.defaultView!.getComputedStyle(iframe).height, 10);
+
+    document.addEventListener('mousemove', resizeIframe);
+    document.addEventListener('mouseup', stopResize);
+  });
+
+  function resizeIframe(e: MouseEvent) {
+    if (!isResizing) return;
+
+    const width = initialWidth + (e.clientX - initialX);
+    const height = initialHeight + (e.clientY - initialY);
+
+    // Set minimum size
+    iframe.style.width = Math.max(300, width) + 'px';
+    iframe.style.height = Math.max(200, height) + 'px';
+  }
+
+  function stopResize() {
+    isResizing = false;
+    document.removeEventListener('mousemove', resizeIframe);
+    document.removeEventListener('mouseup', stopResize);
+  }
+
+  shadow.appendChild(resizeHandle);
+
+  // Add drag functionality
+  let isDragging = false;
+  let currentX: number, currentY: number;
+  let initialXDrag: number, initialYDrag: number;
+  let xOffset = 0;
+  let yOffset = 0;
+
+  // Use mousedown on the iframe to start dragging
+  iframe.addEventListener('mousedown', (e) => {
+    // Only start dragging if not clicking on resize handle or close button
+    if (!(e.target as HTMLElement).classList.contains('resize-handle') &&
+        !(e.target as HTMLElement).classList.contains('close-button')) {
+      isDragging = true;
+      initialXDrag = e.clientX - xOffset;
+      initialYDrag = e.clientY - yOffset;
+    }
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (isDragging) {
+      e.preventDefault();
+      currentX = e.clientX - initialXDrag;
+      currentY = e.clientY - initialYDrag;
+
+      xOffset = currentX;
+      yOffset = currentY;
+
+      setTranslate(currentX, currentY, iframe);
+    }
+  });
+
+  document.addEventListener('mouseup', () => {
+    isDragging = false;
+  });
+
+  function setTranslate(xPos: number, yPos: number, el: HTMLElement) {
+    el.style.transform = `translate3d(${xPos}px, ${yPos}px, 0)`;
+  }
+}
+
+// Function to remove the chat popup
+function removeChatPopup() {
+  const container = document.getElementById('prism-chat-popup-container');
+  if (container) {
+    container.remove();
+  }
+}
+
+// Function to toggle the chat popup
+function toggleChatPopup() {
+  const container = document.getElementById('prism-chat-popup-container');
+  if (container) {
+    removeChatPopup();
+  } else {
+    injectChatPopup();
+  }
+}
+
+// Mouse tracking function to show/hide button based on mouse position
+function setupMouseTracking(button: HTMLElement) {
+  // Default settings
+  let buttonPosition: { top: number; right: number } = { top: 20, right: 20 };
+  let sensitivityAreaPercentage: number = 10; // 10% of screen width/height
+
+  // Load settings from storage
+  loadButtonSettings().then(settings => {
+    if (settings) {
+      buttonPosition = settings.position || buttonPosition;
+      sensitivityAreaPercentage = settings.sensitivityAreaPercentage || sensitivityAreaPercentage;
+    }
+
+    // Update button position based on settings
+    button.style.top = `${buttonPosition.top}px`;
+    button.style.right = `${buttonPosition.right}px`;
+  });
+
+  // Track mouse movement
+  document.addEventListener('mousemove', (event) => {
+    const windowWidth = window.innerWidth;
+    const windowHeight = window.innerHeight;
+
+    // Calculate sensitivity area dimensions
+    const sensitivityWidth = (windowWidth * sensitivityAreaPercentage) / 100;
+    const sensitivityHeight = (windowHeight * sensitivityAreaPercentage) / 100;
+
+    // Check if mouse is in the top-right corner sensitivity area
+    const isInTopRightCorner =
+      event.clientX >= windowWidth - sensitivityWidth &&
+      event.clientX <= windowWidth &&
+      event.clientY >= 0 &&
+      event.clientY <= sensitivityHeight;
+
+    // Show or hide the button based on mouse position
+    if (isInTopRightCorner) {
+      button.style.opacity = '1';
+      button.style.pointerEvents = 'auto';
+    } else {
+      button.style.opacity = '0';
+      button.style.pointerEvents = 'none';
+    }
+  });
+}
+
+// Load button settings from storage
+async function loadButtonSettings() {
+  try {
+    const result = await chrome.storage.local.get(['buttonSettings']);
+    return result.buttonSettings || null;
+  } catch (error) {
+    console.warn('Could not load button settings:', error);
+    return null;
+  }
 }
 
 // Enable floating button
@@ -771,6 +1034,23 @@ if (document.readyState === 'loading') {
 
 // Check if button was previously removed by the user
 let buttonRemovedByUser = localStorage.getItem('prismButtonRemoved') === 'true';
+
+// Initialize prompt shortcuts in chrome.storage.local when content script loads
+async function initializePromptShortcuts() {
+  try {
+    // Get all prompt shortcuts from storage and sync them to chrome.storage.local
+    // This is needed for the keyboard shortcut detection in the content script
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      // We'll sync from the extension's main storage when the popup sends us the updated list
+      // For now, we rely on the popup to sync the prompt shortcuts to chrome.storage.local
+    }
+  } catch (error) {
+    console.error('Error initializing prompt shortcuts:', error);
+  }
+}
+
+// Call initialization function
+initializePromptShortcuts();
 
 const observer = new MutationObserver((mutationsList) => {
   if (!document.getElementById('prism-floating-button') && !buttonRemovedByUser) {
@@ -828,7 +1108,7 @@ function decreaseFontSize() {
 
 // Add hotkey listener for Ctrl+'
 function setupHotkeyListener() {
-  document.addEventListener('keydown', (event) => {
+  document.addEventListener('keydown', async (event) => {
     // Check if Ctrl key is pressed and the apostrophe key (' or `) is pressed
     if (event.ctrlKey && (event.key === "'" || event.key === '`' || event.code === 'Quote')) {
       event.preventDefault();
@@ -854,15 +1134,187 @@ function setupHotkeyListener() {
       }
     }
 
-    // Check for + or - keys (with or without Shift for +) for font size adjustment
-    if (event.key === '+' || event.key === '=' || event.key === 'Add') {
-      event.preventDefault();
-      increaseFontSize();
-    } else if (event.key === '-' || event.key === 'Subtract') {
-      event.preventDefault();
-      decreaseFontSize();
+    // Check if the target is an input field (input, textarea, or contenteditable)
+    const target = event.target as HTMLElement;
+    const isInputElement = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA';
+    const isContentEditable = target.isContentEditable;
+
+    // Only handle mode toggles and other shortcuts if not in an input field or contenteditable element
+    if (!isInputElement && !isContentEditable) {
+      // Check for + or - keys (with or without Shift for +) for font size adjustment
+      if (event.key === '+' || event.key === '=' || event.key === 'Add') {
+        event.preventDefault();
+        increaseFontSize();
+      } else if (event.key === '-' || event.key === 'Subtract') {
+        event.preventDefault();
+        decreaseFontSize();
+      }
+
+      // Check for mode toggle keys (Shift + number keys)
+      if (event.shiftKey) {
+        // Get extension settings to check for custom key bindings
+        try {
+          const result = await chrome.storage.local.get(['displaySettings']);
+          const settings = result.displaySettings || {};
+
+          // Default key bindings
+          const textSelectionKey = settings.textSelectionKey || '1';
+          const pageContextKey = settings.pageContextKey || '2';
+          const pageScreenshotKey = settings.pageScreenshotKey || '3';
+          const clipboardKey = settings.clipboardKey || '4';
+          const pageInfoKey = settings.pageInfoKey || '5';
+
+          // Check which mode key was pressed
+          if (event.key === textSelectionKey) {
+            event.preventDefault();
+            // Toggle text selection mode
+            chrome.runtime.sendMessage({
+              type: 'TOGGLE_MODE',
+              mode: 'textSelection',
+              value: true
+            });
+            showToast('Text selection mode enabled');
+          } else if (event.key === pageContextKey) {
+            event.preventDefault();
+            // Toggle page context mode
+            chrome.runtime.sendMessage({
+              type: 'TOGGLE_MODE',
+              mode: 'pageContext',
+              value: true
+            });
+            showToast('Page context mode enabled');
+          } else if (event.key === pageScreenshotKey) {
+            event.preventDefault();
+            // Toggle page screenshot mode
+            chrome.runtime.sendMessage({
+              type: 'TOGGLE_MODE',
+              mode: 'pageScreenshot',
+              value: true
+            });
+            showToast('Page screenshot mode enabled');
+          } else if (event.key === clipboardKey) {
+            event.preventDefault();
+            // Toggle clipboard mode
+            chrome.runtime.sendMessage({
+              type: 'TOGGLE_MODE',
+              mode: 'clipboard',
+              value: true
+            });
+            showToast('Clipboard mode enabled');
+          } else if (event.key === pageInfoKey) {
+            event.preventDefault();
+            // Toggle page info mode
+            chrome.runtime.sendMessage({
+              type: 'TOGGLE_MODE',
+              mode: 'pageInfo',
+              value: true
+            });
+            showToast('Page info mode enabled');
+          }
+        } catch (error) {
+          console.error('Error checking mode toggle keys:', error);
+        }
+      }
+
+      // Check for registered keyboard shortcuts for prompt shortcuts
+      // Only do this if not in an input field or contenteditable element
+      // (already checked at the beginning of the function)
+      // Get all registered prompt shortcuts from storage
+      try {
+        const result = await chrome.storage.local.get(['promptShortcuts']);
+        const promptShortcuts = result.promptShortcuts || [];
+
+        // Check if any prompt shortcut matches the current key combination
+        for (const prompt of promptShortcuts) {
+          if (prompt.keyboardShortcut) {
+            // Parse the keyboard shortcut (e.g., "Ctrl+Shift+F")
+            const keys = prompt.keyboardShortcut.split('+');
+            let matches = true;
+
+            // Check modifier keys
+            if (keys.includes('Ctrl') && !event.ctrlKey) matches = false;
+            if (keys.includes('Cmd') && !event.metaKey) matches = false;  // For Mac
+            if (keys.includes('Alt') && !event.altKey) matches = false;
+            if (keys.includes('Shift') && !event.shiftKey) matches = false;
+
+            // Check the actual key
+            const actualKey = keys[keys.length - 1].toLowerCase();
+            if (event.key.toLowerCase() !== actualKey) matches = false;
+
+            if (matches) {
+              event.preventDefault();
+
+              // Send a message to the popup to insert the prompt content
+              chrome.runtime.sendMessage({
+                type: 'INSERT_PROMPT_SHORTCUT',
+                content: prompt.content
+              });
+
+              break; // Stop checking other shortcuts once one is found
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error checking keyboard shortcuts:', error);
+      }
     }
   });
+}
+
+// Function to show toast notifications
+function showToast(message: string) {
+  // Remove any existing toasts
+  const existingToast = document.getElementById('prism-toast');
+  if (existingToast) {
+    existingToast.remove();
+  }
+
+  // Create toast element
+  const toast = document.createElement('div');
+  toast.id = 'prism-toast';
+  toast.textContent = message;
+  toast.style.cssText = `
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: #333;
+    color: white;
+    padding: 12px 20px;
+    border-radius: 4px;
+    z-index: 2147483647;
+    font-size: 14px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    animation: prismToastSlideIn 0.3s ease-out;
+  `;
+
+  // Add CSS animation
+  if (!document.getElementById('prism-toast-styles')) {
+    const style = document.createElement('style');
+    style.id = 'prism-toast-styles';
+    style.textContent = `
+      @keyframes prismToastSlideIn {
+        from {
+          transform: translateX(100%);
+          opacity: 0;
+        }
+        to {
+          transform: translateX(0);
+          opacity: 1;
+        }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  // Add toast to the page
+  document.body.appendChild(toast);
+
+  // Remove toast after 3 seconds
+  setTimeout(() => {
+    if (toast.parentNode) {
+      toast.remove();
+    }
+  }, 3000);
 }
 
 // Load display settings from storage
