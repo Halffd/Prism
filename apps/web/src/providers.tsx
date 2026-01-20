@@ -1,6 +1,6 @@
 'use client';
 import { Provider } from 'react-redux';
-import { store } from '@prism/redux-store';
+import { store } from '../../../libs/redux-store/src/store';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return <Provider store={store}>{children}</Provider>;

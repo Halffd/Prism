@@ -36,6 +36,9 @@
       "path": "../../libs/image-gen/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/redux-store/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/shared-db/tsconfig.lib.json"
     },
     {
@@ -43,6 +46,9 @@
     },
     {
       "path": "../../libs/api-client/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/supabase-client/tsconfig.lib.json"
     }
   ]
 }

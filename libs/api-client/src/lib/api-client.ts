@@ -79,7 +79,8 @@ export class UnifiedAIClient {
     content: string,
     context?: ContextData,
     sessionId?: string,
-    images?: string[]
+    images?: string[],
+    conversationHistory?: Message[]
   ): Promise<ApiResponse<Message>> {
     // Check network status
     const isOnline = networkStatusService.isCurrentlyOnline();
@@ -102,8 +103,11 @@ export class UnifiedAIClient {
             timestamp: Date.now()
           };
 
+          // Prepare the messages array with conversation history if provided
+          const messagesToSend = conversationHistory ? [...conversationHistory, userMessage] : [userMessage];
+
           const request: ChatCompletionRequest = {
-            messages: [userMessage],
+            messages: messagesToSend,
             context,
             config: this.aiConfig
           };
@@ -157,14 +161,30 @@ export class UnifiedAIClient {
           headers['Authorization'] = `Bearer ${this.prismApiKey}`;
         }
 
+        // Prepare the messages array with conversation history if provided
+        const messagesToSend = conversationHistory ? [...conversationHistory, {
+          id: Date.now().toString(),
+          role: 'user',
+          content,
+          images,
+          context,
+          timestamp: Date.now()
+        }] : [{
+          id: Date.now().toString(),
+          role: 'user',
+          content,
+          images,
+          context,
+          timestamp: Date.now()
+        }];
+
         const response = await fetch(`${this.prismApiUrl}/api/chat`, {
           method: 'POST',
           headers,
           body: JSON.stringify({
-            content,
+            messages: messagesToSend,
             context,
-            sessionId,
-            images
+            sessionId
           })
         });
 

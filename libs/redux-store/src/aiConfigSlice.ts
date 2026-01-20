@@ -2,10 +2,13 @@ import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 import { AIConfigState } from './types';
 import type { AIConfig } from '@prism/shared-types';
 
+// Add type declaration for window in Node.js environment
+declare const window: any;
+
 const initialState: AIConfigState = {
   config: {
     provider: 'prism-api',
-    apiUrl: typeof window !== 'undefined' 
+    apiUrl: typeof window !== 'undefined' && typeof window.document !== 'undefined'
       ? (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api')
       : 'http://localhost:3000/api',
   },

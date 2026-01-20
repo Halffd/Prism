@@ -25,7 +25,8 @@
       "@prism/shared-types": ["libs/shared-types/src/index.ts"],
       "@prism/image-gen": ["libs/image-gen/src/index.ts"],
       "@prism/llm-service": ["libs/llm-service/src/index.ts"],
-      "@prism/firebase-auth": ["libs/firebase-auth/src/index.ts"]
+      "@prism/firebase-auth": ["libs/firebase-auth/src/index.ts"],
+      "@prism/supabase-client": ["libs/supabase-client/src/index.ts"]
     }
   }
 }

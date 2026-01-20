@@ -94,4 +94,6 @@ export interface ExtensionSettings {
   pageScreenshotKey?: string;       // Key to toggle page screenshot mode (default: '3')
   clipboardKey?: string;            // Key to toggle clipboard mode (default: '4')
   pageInfoKey?: string;             // Key to toggle page info mode (default: '5')
+  iframeToggleKey?: string;         // Key to toggle iframe show/hide (default: '`')
+  systemPrompt?: string;            // System prompt applied to all conversations (default: '')
 }

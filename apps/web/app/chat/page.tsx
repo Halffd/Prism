@@ -30,7 +30,7 @@ import {
   setAIConfig,
   updateAIConfig,
   RootState
-} from '@prism/redux-store';
+} from '../../../libs/redux-store/src/store';
 import { useAuth } from '@/src/auth-provider';
 import { networkStatusService } from '@prism/api-client';
 

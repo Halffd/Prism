@@ -21,18 +21,31 @@ import { UnifiedAIClient, networkStatusService } from '@prism/api-client';
 import { ImageGenerationService } from '@prism/image-gen';
 import type { Message, ContextData, AIConfig } from '@prism/shared-types';
 import {
-  setMessages,
   addMessage,
+  setMessages,
   setLoading,
   setCurrentSessionId,
   setSessions,
-  setSelectedProvider,
   setAIConfig,
   updateAIConfig,
   setContext,
-  updateSession,
-  removeSession,
-  RootState
+  setDisplayMode,
+  setFontSize,
+  setChatOpen,
+  setShowPrompts,
+  setShowMenu,
+  increaseFontSize,
+  decreaseFontSize,
+  setDisplaySettings,
+  setSystemPrompt,
+  setPromptShortcuts,
+  addPromptShortcut,
+  updatePromptShortcut as updatePromptShortcutAction,
+  deletePromptShortcut as deleteReduxPromptShortcut,
+  setPromptsLoading,
+  setOnlineStatus,
+  RootState,
+  AppDispatch
 } from '@prism/redux-store';
 import './Popup.scss';
 
@@ -51,9 +64,9 @@ const defaultAIConfig: AIConfig = {
 let client = new UnifiedAIClient({ aiConfig: defaultAIConfig });
 
 export function Popup() {
-  const dispatch = useDispatch();
-  const { messages, loading, currentSessionId, sessions } = useSelector((state: RootState) => state.chat);
-  const { config: reduxAIConfig, availableModels, fetchingModels } = useSelector((state: RootState) => state.aiConfig);
+  const dispatch = useDispatch<AppDispatch>();
+  const { messages, currentSessionId, sessions, loading } = useSelector((state: RootState) => state.chat);
+  const { config: reduxAIConfig, availableModels, isFetchingModels } = useSelector((state: RootState) => state.aiConfig);
   const { context: reduxContext } = useSelector((state: RootState) => state.context);
   const { user, isAuthenticated, loading: authLoading, signInWithGoogle, signOut } = useAuth();
 
@@ -64,7 +77,6 @@ export function Popup() {
   const [showMenu, setShowMenu] = useState(false);
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
   const [autoSyncIntervalId, setAutoSyncIntervalId] = useState<NodeJS.Timeout | null>(null);
-  const [promptShortcuts, setPromptShortcuts] = useState<PromptShortcut[]>([]);
   const [isOnline, setIsOnline] = useState(true); // Track network status
 
   // Monitor network status
@@ -241,6 +253,18 @@ export function Popup() {
           case 'pageInfo':
             setPageInfoMode(request.value);
             break;
+        }
+        return true;
+      }
+      if (request.type === 'CLEAR_CHAT') {
+        setMessages([]);
+        return true;
+      }
+      if (request.type === 'RETRY_LAST_MESSAGE') {
+        // Retry the last user message
+        const lastUserMessage = [...messages].reverse().find(msg => msg.role === 'user');
+        if (lastUserMessage) {
+          setInput(lastUserMessage.content);
         }
         return true;
       }
@@ -454,7 +478,7 @@ export function Popup() {
   const loadPromptShortcuts = async () => {
     try {
       const prompts = await getPromptShortcuts();
-      setPromptShortcuts(prompts);
+      dispatch(setPromptShortcuts(prompts));
 
       // Also sync to chrome.storage.local for content script access
       if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
@@ -472,7 +496,8 @@ export function Popup() {
   const savePromptShortcutToDB = async (prompt: PromptShortcut) => {
     try {
       await savePromptShortcut(prompt);
-      loadPromptShortcuts(); // Refresh the list
+      dispatch(addPromptShortcut(prompt)); // Add to Redux store
+      loadPromptShortcuts(); // Refresh the list to sync with storage
     } catch (error) {
       console.error('Failed to save prompt shortcut:', error);
     }
@@ -482,7 +507,8 @@ export function Popup() {
     if (window.confirm('Are you sure you want to delete this prompt shortcut?')) {
       try {
         await deletePromptShortcut(promptId);
-        loadPromptShortcuts(); // Refresh the list
+        dispatch(deleteReduxPromptShortcut(promptId)); // Remove from Redux store
+        loadPromptShortcuts(); // Refresh the list to sync with storage
       } catch (error) {
         console.error('Failed to delete prompt shortcut:', error);
       }
@@ -511,7 +537,9 @@ export function Popup() {
       if (!currentPrompt) return;
 
       const updatedPrompt = { ...currentPrompt, ...updates };
-      await savePromptShortcutToDB(updatedPrompt);
+      await savePromptShortcut(updatedPrompt);
+      dispatch(updatePromptShortcutAction(id, updates)); // Update in Redux store (action creator)
+      loadPromptShortcuts(); // Refresh the list to sync with storage
     } catch (error) {
       console.error('Failed to update prompt shortcut:', error);
     }
@@ -1077,20 +1105,47 @@ export function Popup() {
     setInput('');
     setUploadedImages([]); // Clear uploaded images after sending
     // Reset all mode states after sending
-    setTextSelectionMode(false);
-    setPageContextMode(false);
-    setPageScreenshotMode(false);
-    setClipboardMode(false);
-    setPageInfoMode(false);
+    dispatch(setTextSelectionMode(false));
+    dispatch(setPageContextMode(false));
+    dispatch(setPageScreenshotMode(false));
+    dispatch(setClipboardMode(false));
+    dispatch(setPageInfoMode(false));
     // Save to database before attempting to send, ensuring offline persistence
     await saveCurrentChatToDB([...messages, userMessage]);
 
     try {
+      // Load extension settings to get system prompt
+      const settingsResult = await chrome.storage.local.get(['displaySettings']);
+      const systemPrompt = settingsResult.displaySettings?.systemPrompt || '';
+
+      // Prepare the conversation history with system prompt if available
+      let conversationHistory = [...messages];
+
+      // Add system prompt as the first message if it exists and not already present
+      if (systemPrompt && messages.length === 0) {
+        const systemMessage: Message = {
+          id: 'system-prompt',
+          role: 'system',
+          content: systemPrompt,
+          timestamp: Date.now(),
+        };
+        conversationHistory = [systemMessage, ...conversationHistory];
+      } else if (systemPrompt && messages[0]?.role !== 'system') {
+        // If system prompt exists but is not the first message, add it
+        const systemMessage: Message = {
+          id: 'system-prompt',
+          role: 'system',
+          content: systemPrompt,
+          timestamp: Date.now(),
+        };
+        conversationHistory = [systemMessage, ...conversationHistory];
+      }
+
       // Update the client with the current AI config (including model)
       client.updateAIConfig(reduxAIConfig);
 
       // Try to send the message using the client (which handles online/offline)
-      const response = await client.sendMessage(fullInput, freshContext, currentSessionId, uploadedImages.length > 0 ? [...uploadedImages] : undefined);
+      const response = await client.sendMessage(fullInput, freshContext, currentSessionId, uploadedImages.length > 0 ? [...uploadedImages] : undefined, conversationHistory);
 
       if (response && response.success && response.data) {
         dispatch(addMessage(response.data));

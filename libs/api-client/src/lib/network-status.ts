@@ -1,5 +1,10 @@
 // Network status detection for offline-first functionality
 
+// Type declarations for browser globals
+declare const navigator: any;
+declare const window: any;
+declare const Image: any;
+
 export interface NetworkStatus {
   online: boolean;
   lastCheck: Date;
@@ -12,19 +17,26 @@ class NetworkStatusService {
   private apiUrl: string | null = null;
 
   constructor(apiUrl?: string) {
-    this.apiUrl = apiUrl;
+    this.apiUrl = apiUrl || process.env.PRISM_API_URL || null;
     // Initialize network detection
     this.setupNetworkDetection();
   }
 
   private setupNetworkDetection() {
-    // Initial check
-    this.isOnline = navigator.onLine;
-    
-    // Listen to online/offline events
-    window.addEventListener('online', this.handleOnline.bind(this));
-    window.addEventListener('offline', this.handleOffline.bind(this));
-    
+    // Initial check - only in browser environment
+    if (typeof navigator !== 'undefined' && 'onLine' in navigator) {
+      this.isOnline = Boolean((navigator as any).onLine);
+    } else {
+      // Default to true if we can't determine
+      this.isOnline = true;
+    }
+
+    // Listen to online/offline events - only in browser environment
+    if (typeof window !== 'undefined') {
+      (window as any).addEventListener?.('online', this.handleOnline.bind(this));
+      (window as any).addEventListener?.('offline', this.handleOffline.bind(this));
+    }
+
     // Set up periodic checks for more robust detection
     this.startPeriodicCheck();
   }
@@ -47,11 +59,15 @@ class NetworkStatusService {
       // If we have an API URL, try to ping the status endpoint first
       if (this.apiUrl) {
         try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
           const response = await fetch(`${this.apiUrl}/status`, {
             method: 'GET',
-            cache: 'no-cache',
-            timeout: 5000 // 5 second timeout
+            signal: controller.signal
           });
+
+          clearTimeout(timeoutId);
 
           if (response.ok) {
             return true;
@@ -63,22 +79,30 @@ class NetworkStatusService {
       }
 
       // Try to ping a reliable external endpoint as fallback
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
       const response = await fetch(pingUrl, {
         method: 'GET',
-        cache: 'no-cache',
-        timeout: 5000 // 5 second timeout
-      }).catch(() => {
-        // If fetch is not available, try a simple image request
-        return new Promise((resolve) => {
-          const img = new Image();
-          img.onload = () => resolve({ ok: true } as Response);
-          img.onerror = () => resolve({ ok: false } as Response);
-          img.src = `data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==?t=${Date.now()}`;
-        });
+        signal: controller.signal
+      }).catch((error) => {
+        // If fetch is not available, try a simple image request (only in browser)
+        if (typeof window !== 'undefined' && typeof Image !== 'undefined') {
+          return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => resolve({ ok: true } as Response);
+            img.onerror = () => resolve({ ok: false } as Response);
+            img.src = `data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==?t=${Date.now()}`;
+          }) as Promise<Response>;
+        } else {
+          // In Node.js environment, return a failure response
+          return { ok: false } as Response;
+        }
       });
 
+      clearTimeout(timeoutId);
       return response.ok === true;
-    } catch (error) {
+    } catch (error: any) {
       return false;
     }
   }

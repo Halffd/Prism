@@ -1,6 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { AIConfig, ExtensionSettings, PopupDisplayMode, PromptShortcut } from '@prism/shared-types';
 import { UnifiedAIClient } from '@prism/api-client';
+import {
+  getSetting,
+  saveSetting,
+  getSiteFilters,
+  addSiteFilter,
+  removeSiteFilter,
+  getImageGenConfig,
+  saveImageGenConfig
+} from '@prism/shared-db';
 import './Settings.scss';
 
 // Initialize with default settings - will be overridden by stored settings
@@ -48,6 +57,8 @@ export function Settings({ onClose }: SettingsProps) {
   const [pageScreenshotKey, setPageScreenshotKey] = useState<string>('3');
   const [clipboardKey, setClipboardKey] = useState<string>('4');
   const [pageInfoKey, setPageInfoKey] = useState<string>('5');
+  const [iframeToggleKey, setIframeToggleKey] = useState<string>('`');
+  const [systemPrompt, setSystemPrompt] = useState<string>('');
   const [buttonSensitivityAreaPercentage, setButtonSensitivityAreaPercentage] = useState<number>(10);
   const [saveTimeout, setSaveTimeout] = useState<NodeJS.Timeout | null>(null);
   const [apiClient, setApiClient] = useState<UnifiedAIClient | null>(null);
@@ -55,10 +66,18 @@ export function Settings({ onClose }: SettingsProps) {
   useEffect(() => {
     // Initialize API client with current settings
     const initializeApiClient = async () => {
-      const result = await chrome.storage.local.get(['aiConfig']);
+      // Try to get AI config from local database first, fallback to chrome.storage
+      let aiConfig = await getSetting<AIConfig>('aiConfig');
+
+      if (!aiConfig) {
+        // Fallback to chrome.storage if not found in local DB
+        const result = await chrome.storage.local.get(['aiConfig']);
+        aiConfig = result.aiConfig;
+      }
+
       const client = new UnifiedAIClient({
-        aiConfig: result.aiConfig,
-        prismApiUrl: result.aiConfig?.providerKeys?.['prism-api'] || 'http://localhost:3000/api'
+        aiConfig: aiConfig,
+        prismApiUrl: aiConfig?.providerKeys?.['prism-api'] || 'http://localhost:3000/api'
       });
       setApiClient(client);
       loadSettings(client);
@@ -91,17 +110,17 @@ export function Settings({ onClose }: SettingsProps) {
 
   const loadSettings = async (client: UnifiedAIClient) => {
     try {
-      // Load AI configuration from chrome storage
-      const result = await chrome.storage.local.get([
-        'aiConfig',
-        'imageGenApiKey',
-        'imageGenModel',
-        'excludedSites',
-        'whitelistedSites'
-      ]);
+      // Load AI configuration from local database first, fallback to chrome.storage
+      let aiConfig = await getSetting<AIConfig>('aiConfig');
 
-      if (result.aiConfig) {
-        let config = result.aiConfig as AIConfig;
+      if (!aiConfig) {
+        // Fallback to chrome.storage if not found in local DB
+        const result = await chrome.storage.local.get(['aiConfig']);
+        aiConfig = result.aiConfig;
+      }
+
+      if (aiConfig) {
+        let config = aiConfig as AIConfig;
 
         // Ensure providerKeys exists and has all providers
         if (!config.providerKeys) {
@@ -126,25 +145,32 @@ export function Settings({ onClose }: SettingsProps) {
         setAiConfig(defaultAIConfig);
       }
 
-      if (result.imageGenApiKey) {
-        setImageGenerationApiKey(result.imageGenApiKey);
+      // Load image generation config from local database
+      const imageGenConfig = await getImageGenConfig();
+      if (imageGenConfig) {
+        setImageGenerationApiKey(imageGenConfig.apiKey);
+        setImageGenerationModel(imageGenConfig.model);
+      } else {
+        // Fallback to chrome.storage
+        const result = await chrome.storage.local.get(['imageGenApiKey', 'imageGenModel']);
+        if (result.imageGenApiKey) {
+          setImageGenerationApiKey(result.imageGenApiKey);
+        }
+        if (result.imageGenModel) {
+          setImageGenerationModel(result.imageGenModel);
+        }
       }
 
-      if (result.imageGenModel) {
-        setImageGenerationModel(result.imageGenModel);
-      }
+      // Load site filters from local database
+      const excludedFilters = await getSiteFilters('exclude');
+      setExcludedSites(excludedFilters.map(f => f.urlPattern));
 
-      if (result.excludedSites) {
-        setExcludedSites(result.excludedSites);
-      }
+      const whitelistedFilters = await getSiteFilters('whitelist');
+      setWhitelistedSites(whitelistedFilters.map(f => f.urlPattern));
 
-      if (result.whitelistedSites) {
-        setWhitelistedSites(result.whitelistedSites);
-      }
-
-      // Load display preferences
-      if (result.displaySettings) {
-        const displaySettings = result.displaySettings as ExtensionSettings;
+      // Load display preferences from local database
+      const displaySettings = await getSetting<ExtensionSettings>('displaySettings');
+      if (displaySettings) {
         setDisplayMode(displaySettings.popupDisplayMode || 'popup');
         setSidebarPosition(displaySettings.sidebarPosition || 'right');
         setSidebarWidth(displaySettings.sidebarWidth || 350);
@@ -158,23 +184,49 @@ export function Settings({ onClose }: SettingsProps) {
         setPageScreenshotKey(displaySettings.pageScreenshotKey || '3');
         setClipboardKey(displaySettings.clipboardKey || '4');
         setPageInfoKey(displaySettings.pageInfoKey || '5');
+        setIframeToggleKey(displaySettings.iframeToggleKey || '`');
+        setSystemPrompt(displaySettings.systemPrompt || '');
         setButtonSensitivityAreaPercentage(displaySettings.buttonSensitivityAreaPercentage || 10);
       } else {
-        // Set defaults
-        setDisplayMode('popup');
-        setSidebarPosition('right');
-        setSidebarWidth(350);
-        setPageContentTokenLimit(20000);
-        setTotalMessageTokenLimit(20000);
-        // Removed commandPrefix initialization as we're using individual prompt shortcuts instead of global prefix
-        setButtonPositionTop(20);
-        setButtonPositionRight(20);
-        setTextSelectionKey('1');
-        setPageContextKey('2');
-        setPageScreenshotKey('3');
-        setClipboardKey('4');
-        setPageInfoKey('5');
-        setButtonSensitivityAreaPercentage(10);
+        // Fallback to chrome.storage
+        const result = await chrome.storage.local.get(['displaySettings']);
+        if (result.displaySettings) {
+          const settings = result.displaySettings as ExtensionSettings;
+          setDisplayMode(settings.popupDisplayMode || 'popup');
+          setSidebarPosition(settings.sidebarPosition || 'right');
+          setSidebarWidth(settings.sidebarWidth || 350);
+          setPageContentTokenLimit(settings.pageContentTokenLimit || 20000);
+          setTotalMessageTokenLimit(settings.totalMessageTokenLimit || 20000);
+          // Removed commandPrefix loading as we're using individual prompt shortcuts instead of global prefix
+          setButtonPositionTop(settings.buttonPosition?.top || 20);
+          setButtonPositionRight(settings.buttonPosition?.right || 20);
+          setTextSelectionKey(settings.textSelectionKey || '1');
+          setPageContextKey(settings.pageContextKey || '2');
+          setPageScreenshotKey(settings.pageScreenshotKey || '3');
+          setClipboardKey(settings.clipboardKey || '4');
+          setPageInfoKey(settings.pageInfoKey || '5');
+          setIframeToggleKey(settings.iframeToggleKey || '`');
+          setSystemPrompt(settings.systemPrompt || '');
+          setButtonSensitivityAreaPercentage(settings.buttonSensitivityAreaPercentage || 10);
+        } else {
+          // Set defaults
+          setDisplayMode('popup');
+          setSidebarPosition('right');
+          setSidebarWidth(350);
+          setPageContentTokenLimit(20000);
+          setTotalMessageTokenLimit(20000);
+          // Removed commandPrefix initialization as we're using individual prompt shortcuts instead of global prefix
+          setButtonPositionTop(20);
+          setButtonPositionRight(20);
+          setTextSelectionKey('1');
+          setPageContextKey('2');
+          setPageScreenshotKey('3');
+          setClipboardKey('4');
+          setPageInfoKey('5');
+          setIframeToggleKey('`');
+          setSystemPrompt('');
+          setButtonSensitivityAreaPercentage(10);
+        }
       }
 
       // Load prompt shortcuts from API
@@ -251,7 +303,10 @@ export function Settings({ onClose }: SettingsProps) {
         }
       }
 
-      // Save AI configuration
+      // Save AI configuration to local database
+      await saveSetting('aiConfig', updatedConfig);
+
+      // Also save to chrome.storage for compatibility
       await chrome.storage.local.set({
         aiConfig: updatedConfig
       });
@@ -261,40 +316,65 @@ export function Settings({ onClose }: SettingsProps) {
         data: updatedConfig
       });
 
-      // Save image generation settings
+      // Save image generation settings to local database
+      await saveImageGenConfig(imageGenerationApiKey, imageGenerationModel);
+
+      // Also save to chrome.storage for compatibility
       await chrome.storage.local.set({
         imageGenApiKey: imageGenerationApiKey,
         imageGenModel: imageGenerationModel
       });
 
-      // Save excluded and whitelisted sites
+      // Save excluded and whitelisted sites to local database
+      // First, remove all existing filters
+      const allFilters = await getSiteFilters();
+      for (const filter of allFilters) {
+        await removeSiteFilter(filter.id!);
+      }
+
+      // Then add the current filters
+      for (const site of excludedSites) {
+        await addSiteFilter(site, 'exclude');
+      }
+      for (const site of whitelistedSites) {
+        await addSiteFilter(site, 'whitelist');
+      }
+
+      // Also save to chrome.storage for compatibility
       await chrome.storage.local.set({
         excludedSites: excludedSites,
         whitelistedSites: whitelistedSites
       });
 
-      // Save display preferences
+      // Save display preferences to local database
+      const displaySettingsObj: ExtensionSettings = {
+        popupDisplayMode: displayMode,
+        sidebarPosition: sidebarPosition as 'left' | 'right',
+        sidebarWidth: sidebarWidth,
+        enablePopupIframe: displayMode === 'iframe',
+        enableSidebar: displayMode === 'sidebar',
+        defaultProvider: updatedConfig.provider,
+        pageContentTokenLimit: pageContentTokenLimit,
+        totalMessageTokenLimit: totalMessageTokenLimit,
+        textSelectionKey: textSelectionKey,
+        pageContextKey: pageContextKey,
+        pageScreenshotKey: pageScreenshotKey,
+        clipboardKey: clipboardKey,
+        pageInfoKey: pageInfoKey,
+        iframeToggleKey: iframeToggleKey,
+        systemPrompt: systemPrompt,
+        buttonPosition: {
+          top: buttonPositionTop,
+          right: buttonPositionRight
+        },
+        buttonSensitivityAreaPercentage: buttonSensitivityAreaPercentage
+      };
+
+      await saveSetting('displaySettings', displaySettingsObj);
+
+      // Also save to chrome.storage for compatibility
       await chrome.storage.local.set({
-        displaySettings: {
-          popupDisplayMode: displayMode,
-          sidebarPosition: sidebarPosition,
-          sidebarWidth: sidebarWidth,
-          enablePopupIframe: displayMode === 'iframe',
-          enableSidebar: displayMode === 'sidebar',
-          pageContentTokenLimit: pageContentTokenLimit,
-          totalMessageTokenLimit: totalMessageTokenLimit,
-          // Removed commandPrefix as we're using individual prompt shortcuts instead of global prefix
-          textSelectionKey: textSelectionKey,
-          pageContextKey: pageContextKey,
-          pageScreenshotKey: pageScreenshotKey,
-          clipboardKey: clipboardKey,
-          pageInfoKey: pageInfoKey,
-          buttonPosition: {
-            top: buttonPositionTop,
-            right: buttonPositionRight
-          },
-          buttonSensitivityAreaPercentage: buttonSensitivityAreaPercentage
-        } as ExtensionSettings
+        displaySettings: displaySettingsObj
       });
 
       // Send a message to update the display mode across the extension
@@ -342,7 +422,10 @@ export function Settings({ onClose }: SettingsProps) {
         }
       }
 
-      // Save AI configuration
+      // Save AI configuration to local database
+      await saveSetting('aiConfig', updatedConfig);
+
+      // Also save to chrome.storage for compatibility
       await chrome.storage.local.set({
         aiConfig: updatedConfig
       });
@@ -352,40 +435,65 @@ export function Settings({ onClose }: SettingsProps) {
         data: updatedConfig
       });
 
-      // Save image generation settings
+      // Save image generation settings to local database
+      await saveImageGenConfig(imageGenerationApiKey, imageGenerationModel);
+
+      // Also save to chrome.storage for compatibility
       await chrome.storage.local.set({
         imageGenApiKey: imageGenerationApiKey,
         imageGenModel: imageGenerationModel
       });
 
-      // Save excluded and whitelisted sites
+      // Save excluded and whitelisted sites to local database
+      // First, remove all existing filters
+      const allFilters = await getSiteFilters();
+      for (const filter of allFilters) {
+        await removeSiteFilter(filter.id!);
+      }
+
+      // Then add the current filters
+      for (const site of excludedSites) {
+        await addSiteFilter(site, 'exclude');
+      }
+      for (const site of whitelistedSites) {
+        await addSiteFilter(site, 'whitelist');
+      }
+
+      // Also save to chrome.storage for compatibility
       await chrome.storage.local.set({
         excludedSites: excludedSites,
         whitelistedSites: whitelistedSites
       });
 
-      // Save display preferences
+      // Save display preferences to local database
+      const displaySettingsObj: ExtensionSettings = {
+        popupDisplayMode: displayMode,
+        sidebarPosition: sidebarPosition as 'left' | 'right',
+        sidebarWidth: sidebarWidth,
+        enablePopupIframe: displayMode === 'iframe',
+        enableSidebar: displayMode === 'sidebar',
+        defaultProvider: updatedConfig.provider,
+        pageContentTokenLimit: pageContentTokenLimit,
+        totalMessageTokenLimit: totalMessageTokenLimit,
+        textSelectionKey: textSelectionKey,
+        pageContextKey: pageContextKey,
+        pageScreenshotKey: pageScreenshotKey,
+        clipboardKey: clipboardKey,
+        pageInfoKey: pageInfoKey,
+        iframeToggleKey: iframeToggleKey,
+        systemPrompt: systemPrompt,
+        buttonPosition: {
+          top: buttonPositionTop,
+          right: buttonPositionRight
+        },
+        buttonSensitivityAreaPercentage: buttonSensitivityAreaPercentage
+      };
+
+      await saveSetting('displaySettings', displaySettingsObj);
+
+      // Also save to chrome.storage for compatibility
       await chrome.storage.local.set({
-        displaySettings: {
-          popupDisplayMode: displayMode,
-          sidebarPosition: sidebarPosition,
-          sidebarWidth: sidebarWidth,
-          enablePopupIframe: displayMode === 'iframe',
-          enableSidebar: displayMode === 'sidebar',
-          pageContentTokenLimit: pageContentTokenLimit,
-          totalMessageTokenLimit: totalMessageTokenLimit,
-          // Removed commandPrefix as we're using individual prompt shortcuts instead of global prefix
-          textSelectionKey: textSelectionKey,
-          pageContextKey: pageContextKey,
-          pageScreenshotKey: pageScreenshotKey,
-          clipboardKey: clipboardKey,
-          pageInfoKey: pageInfoKey,
-          buttonPosition: {
-            top: buttonPositionTop,
-            right: buttonPositionRight
-          },
-          buttonSensitivityAreaPercentage: buttonSensitivityAreaPercentage
-        } as ExtensionSettings
+        displaySettings: displaySettingsObj
       });
 
       // Send a message to update the display mode across the extension
@@ -416,30 +524,66 @@ export function Settings({ onClose }: SettingsProps) {
     }
   };
 
-  const addExcludedSite = () => {
+  const addExcludedSite = async () => {
     const site = prompt('Enter site URL to exclude (e.g., example.com or www.example.com):');
     if (site && !excludedSites.includes(site)) {
-      setExcludedSites([...excludedSites, site]);
+      // Add to local state
+      const newExcludedSites = [...excludedSites, site];
+      setExcludedSites(newExcludedSites);
+
+      // Add to local database
+      await addSiteFilter(site, 'exclude');
+
+      // Update chrome.storage for compatibility
+      await chrome.storage.local.set({ excludedSites: newExcludedSites });
     }
   };
 
-  const removeExcludedSite = (index: number) => {
+  const removeExcludedSite = async (index: number) => {
     const newSites = [...excludedSites];
-    newSites.splice(index, 1);
+    const removedSite = newSites.splice(index, 1)[0];
     setExcludedSites(newSites);
+
+    // Remove from local database
+    const allFilters = await getSiteFilters('exclude');
+    const filterToRemove = allFilters.find(f => f.urlPattern === removedSite);
+    if (filterToRemove) {
+      await removeSiteFilter(filterToRemove.id!);
+    }
+
+    // Update chrome.storage for compatibility
+    await chrome.storage.local.set({ excludedSites: newSites });
   };
 
-  const addWhitelistedSite = () => {
+  const addWhitelistedSite = async () => {
     const site = prompt('Enter site URL to whitelist (e.g., example.com or www.example.com):');
     if (site && !whitelistedSites.includes(site)) {
-      setWhitelistedSites([...whitelistedSites, site]);
+      // Add to local state
+      const newWhitelistedSites = [...whitelistedSites, site];
+      setWhitelistedSites(newWhitelistedSites);
+
+      // Add to local database
+      await addSiteFilter(site, 'whitelist');
+
+      // Update chrome.storage for compatibility
+      await chrome.storage.local.set({ whitelistedSites: newWhitelistedSites });
     }
   };
 
-  const removeWhitelistedSite = (index: number) => {
+  const removeWhitelistedSite = async (index: number) => {
     const newSites = [...whitelistedSites];
-    newSites.splice(index, 1);
+    const removedSite = newSites.splice(index, 1)[0];
     setWhitelistedSites(newSites);
+
+    // Remove from local database
+    const allFilters = await getSiteFilters('whitelist');
+    const filterToRemove = allFilters.find(f => f.urlPattern === removedSite);
+    if (filterToRemove) {
+      await removeSiteFilter(filterToRemove.id!);
+    }
+
+    // Update chrome.storage for compatibility
+    await chrome.storage.local.set({ whitelistedSites: newSites });
   };
 
   const addNewPrompt = async () => {
@@ -988,6 +1132,37 @@ export function Settings({ onClose }: SettingsProps) {
               maxLength={1}
             />
             <small className="form-hint">Key to toggle page info mode (default: 5)</small>
+          </div>
+        </div>
+
+        <div className="settings-section">
+          <h3>Iframe Toggle Key</h3>
+          <div className="form-group">
+            <label>Iframe Toggle (Ctrl + Key)</label>
+            <input
+              type="text"
+              value={iframeToggleKey}
+              onChange={(e) => setIframeToggleKey(e.target.value)}
+              className="form-control"
+              placeholder="e.g., ` (backtick)"
+              maxLength={1}
+            />
+            <small className="form-hint">Key to toggle iframe show/hide (default: backtick `)</small>
+          </div>
+        </div>
+
+        <div className="settings-section">
+          <h3>System Prompt</h3>
+          <div className="form-group">
+            <label>System Prompt</label>
+            <textarea
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              className="form-control"
+              placeholder="Enter a system prompt that will be applied to all conversations (e.g., 'You are a helpful assistant')"
+              rows={4}
+            />
+            <small className="form-hint">This prompt will be applied to all conversations as a system message. Leave blank to disable.</small>
           </div>
         </div>
 

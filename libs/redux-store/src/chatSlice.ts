@@ -1,6 +1,6 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 import { ChatState } from './types';
-import type { Message } from '@prism/shared-types';
+import type { Message, AIConfig } from '@prism/shared-types';
 
 const initialState: ChatState = {
   messages: [],

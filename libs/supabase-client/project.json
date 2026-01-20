@@ -1,0 +1,28 @@
+{
+  "name": "supabase-client",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceFrom": ["libs/supabase-client"],
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}"],
+      "options": {
+        "outputPath": "dist/libs/supabase-client",
+        "main": "libs/supabase-client/src/index.ts",
+        "tsConfig": "libs/supabase-client/tsconfig.lib.json",
+        "assets": [
+          "libs/supabase-client/*.md"
+        ]
+      }
+    },
+    "lint": {
+      "executor": "@nx/eslint:eslint",
+      "outputs": ["{options.outputFile}"],
+      "options": {
+        "lintFilePatterns": ["libs/supabase-client/**/*.ts"]
+      }
+    }
+  },
+  "tags": []
+}

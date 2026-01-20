@@ -95,7 +95,7 @@ async function handleSendMessage(data: {
   content: string;
   context?: ContextData;
   images?: string[];
-  conversationHistory?: any[];
+  conversationHistory?: Message[];
   aiConfig?: AIConfig;
 }) {
   try {
@@ -108,7 +108,7 @@ async function handleSendMessage(data: {
     }
 
     // Pass the conversation history to the AI client
-    const response = await client.sendMessage(data.content, data.context, data.conversationHistory, data.images);
+    const response = await client.sendMessage(data.content, data.context, undefined, data.images, data.conversationHistory);
 
     // Store in chrome.storage for history
     if (response.success && response.data) {

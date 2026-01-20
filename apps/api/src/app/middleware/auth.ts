@@ -1,7 +1,9 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import admin from 'firebase-admin';
-import { User } from '../models/mongo-schemas';
+import { createClient } from '@supabase/supabase-js';
+import { Database } from '../../../../libs/supabase-client/src/database.types';
+import { User as MongoUser } from '../models/mongo-schemas';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'prism-demo-secret';
 
@@ -24,6 +26,19 @@ if (!admin.apps.length) {
     admin.initializeApp();
   }
 }
+
+// Initialize Supabase client
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+const supabaseClient = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
+  ? createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: {
+        autoRefreshToken: false, // Server-side operations
+        persistSession: false,
+      }
+    })
+  : null;
 
 interface JwtPayload {
   userId: string;
@@ -51,10 +66,58 @@ export const authenticate = async (req: AuthenticatedRequest, res: Response, nex
       return next();
     }
 
-    // First, try to verify as a Firebase ID token
-    let decodedFirebaseUser;
+    // First, try to verify as a Supabase JWT token
+    if (supabaseClient) {
+      try {
+        const { data: { user }, error } = await supabaseClient.auth.getUser(token);
+
+        if (!error && user) {
+          // Supabase authentication succeeded
+          req.user = {
+            id: user.id,
+            email: user.email || '',
+            name: user.user_metadata?.display_name || user.email?.split('@')[0] || 'Supabase User'
+          };
+
+          return next();
+        }
+      } catch (supabaseError) {
+        // If Supabase authentication fails, proceed to try other methods
+        console.debug('Supabase auth failed, trying other methods:', supabaseError);
+      }
+    }
+
+    // Second, try to verify as a Firebase ID token
     try {
-      decodedFirebaseUser = await admin.auth().verifyIdToken(token);
+      const decodedFirebaseUser = await admin.auth().verifyIdToken(token);
+
+      // If Firebase token verification succeeds
+      // Create or update user in database based on Firebase user
+      let user = await User.findOne({ externalId: decodedFirebaseUser.uid });
+
+      if (!user) {
+        // Create new user if doesn't exist
+        user = new User({
+          externalId: decodedFirebaseUser.uid,
+          email: decodedFirebaseUser.email,
+          name: decodedFirebaseUser.name || decodedFirebaseUser.email?.split('@')[0] || 'Firebase User',
+          password: '' // No password for Firebase-authenticated users
+        });
+        await user.save();
+      } else {
+        // Update user info if needed
+        user.email = decodedFirebaseUser.email;
+        user.name = decodedFirebaseUser.name || decodedFirebaseUser.email?.split('@')[0] || 'Firebase User';
+        await user.save();
+      }
+
+      req.user = {
+        id: user._id.toString(),
+        email: user.email,
+        name: user.name
+      };
+
+      return next();
     } catch (firebaseError) {
       // If Firebase token verification fails, fall back to JWT verification
       try {
@@ -77,41 +140,13 @@ export const authenticate = async (req: AuthenticatedRequest, res: Response, nex
 
         return next();
       } catch (jwtError) {
-        console.error('Authentication error - both Firebase and JWT verification failed:', firebaseError, jwtError);
+        console.error('Authentication error - all methods failed:', firebaseError, jwtError);
         return res.status(401).json({
           success: false,
           error: 'Invalid or expired token'
         });
       }
     }
-
-    // If Firebase token verification succeeds
-    // Create or update user in database based on Firebase user
-    let user = await User.findOne({ externalId: decodedFirebaseUser.uid });
-
-    if (!user) {
-      // Create new user if doesn't exist
-      user = new User({
-        externalId: decodedFirebaseUser.uid,
-        email: decodedFirebaseUser.email,
-        name: decodedFirebaseUser.name || decodedFirebaseUser.email?.split('@')[0] || 'Anonymous User',
-        password: '' // No password for Firebase-authenticated users
-      });
-      await user.save();
-    } else {
-      // Update user info if needed
-      user.email = decodedFirebaseUser.email;
-      user.name = decodedFirebaseUser.name || decodedFirebaseUser.email?.split('@')[0] || 'Anonymous User';
-      await user.save();
-    }
-
-    req.user = {
-      id: user._id.toString(),
-      email: user.email,
-      name: user.name
-    };
-
-    next();
   } catch (error: any) {
     console.error('Authentication error:', error);
     return res.status(401).json({
@@ -134,10 +169,58 @@ export const requireAuth = async (req: AuthenticatedRequest, res: Response, next
       });
     }
 
-    // First, try to verify as a Firebase ID token
-    let decodedFirebaseUser;
+    // First, try to verify as a Supabase JWT token
+    if (supabaseClient) {
+      try {
+        const { data: { user }, error } = await supabaseClient.auth.getUser(token);
+
+        if (!error && user) {
+          // Supabase authentication succeeded
+          req.user = {
+            id: user.id,
+            email: user.email || '',
+            name: user.user_metadata?.display_name || user.email?.split('@')[0] || 'Supabase User'
+          };
+
+          return next();
+        }
+      } catch (supabaseError) {
+        // If Supabase authentication fails, proceed to try other methods
+        console.debug('Supabase auth failed, trying other methods:', supabaseError);
+      }
+    }
+
+    // Second, try to verify as a Firebase ID token
     try {
-      decodedFirebaseUser = await admin.auth().verifyIdToken(token);
+      const decodedFirebaseUser = await admin.auth().verifyIdToken(token);
+
+      // If Firebase token verification succeeds
+      // Create or update user in database based on Firebase user
+      let user = await User.findOne({ externalId: decodedFirebaseUser.uid });
+
+      if (!user) {
+        // Create new user if doesn't exist
+        user = new User({
+          externalId: decodedFirebaseUser.uid,
+          email: decodedFirebaseUser.email,
+          name: decodedFirebaseUser.name || decodedFirebaseUser.email?.split('@')[0] || 'Firebase User',
+          password: '' // No password for Firebase-authenticated users
+        });
+        await user.save();
+      } else {
+        // Update user info if needed
+        user.email = decodedFirebaseUser.email;
+        user.name = decodedFirebaseUser.name || decodedFirebaseUser.email?.split('@')[0] || 'Firebase User';
+        await user.save();
+      }
+
+      req.user = {
+        id: user._id.toString(),
+        email: user.email,
+        name: user.name
+      };
+
+      return next();
     } catch (firebaseError) {
       // If Firebase token verification fails, fall back to JWT verification
       try {
@@ -160,41 +243,13 @@ export const requireAuth = async (req: AuthenticatedRequest, res: Response, next
 
         return next();
       } catch (jwtError) {
-        console.error('Authentication error - both Firebase and JWT verification failed:', firebaseError, jwtError);
+        console.error('Authentication error - all methods failed:', firebaseError, jwtError);
         return res.status(401).json({
           success: false,
           error: 'Invalid or expired token'
         });
       }
     }
-
-    // If Firebase token verification succeeds
-    // Create or update user in database based on Firebase user
-    let user = await User.findOne({ externalId: decodedFirebaseUser.uid });
-
-    if (!user) {
-      // Create new user if doesn't exist
-      user = new User({
-        externalId: decodedFirebaseUser.uid,
-        email: decodedFirebaseUser.email,
-        name: decodedFirebaseUser.name || decodedFirebaseUser.email?.split('@')[0] || 'Anonymous User',
-        password: '' // No password for Firebase-authenticated users
-      });
-      await user.save();
-    } else {
-      // Update user info if needed
-      user.email = decodedFirebaseUser.email;
-      user.name = decodedFirebaseUser.name || decodedFirebaseUser.email?.split('@')[0] || 'Anonymous User';
-      await user.save();
-    }
-
-    req.user = {
-      id: user._id.toString(),
-      email: user.email,
-      name: user.name
-    };
-
-    return next();
   } catch (error: any) {
     console.error('Authentication error:', error);
     return res.status(401).json({

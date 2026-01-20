@@ -784,7 +784,7 @@ function injectFloatingButton() {
 // Function to inject the chat popup iframe using shadow DOM
 function injectChatPopup() {
   // Check if popup already exists to avoid duplicates
-  if (document.getElementById('prism-chat-popup-container')) {
+  if (document.getElementById('prism-chat-iframe')) {
     return;
   }
 
@@ -802,32 +802,85 @@ function injectChatPopup() {
   iframe.id = 'prism-chat-iframe';
   iframe.style.cssText = `
     position: fixed;
-    top: 10px;
-    right: 10px;
-    width: 400px;
-    height: 600px;
+    top: 0;
+    left: 5%;
+    width: 90%;
+    height: 100%;
     z-index: 2147483647;
     border: none;
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     background: white;
   `;
 
-  // Add close button to the iframe container
-  const closeButton = document.createElement('button');
-  closeButton.innerHTML = '✕';
-  closeButton.style.cssText = `
+  // Add the iframe to the shadow DOM
+  shadow.appendChild(iframe);
+
+  // Add controls container
+  const controlsContainer = document.createElement('div');
+  controlsContainer.style.cssText = `
     position: absolute;
-    top: 5px;
-    right: 5px;
+    top: 10px;
+    right: 10px;
+    z-index: 2147483648;
+    display: flex;
+    gap: 5px;
+  `;
+
+  // Add clear button
+  const clearButton = document.createElement('button');
+  clearButton.innerHTML = '🗑️';
+  clearButton.title = 'Clear chat';
+  clearButton.style.cssText = `
     background: #ff4757;
     color: white;
     border: none;
-    border-radius: 50%;
-    width: 25px;
-    height: 25px;
+    border-radius: 4px;
+    width: 30px;
+    height: 30px;
     cursor: pointer;
-    z-index: 2147483648;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  `;
+  clearButton.addEventListener('click', () => {
+    // Send message to clear the chat in the iframe
+    iframe.contentWindow?.postMessage({ type: 'CLEAR_CHAT' }, '*');
+  });
+
+  // Add retry button
+  const retryButton = document.createElement('button');
+  retryButton.innerHTML = '🔄';
+  retryButton.title = 'Retry last message';
+  retryButton.style.cssText = `
+    background: #374151;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    width: 30px;
+    height: 30px;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  `;
+  retryButton.addEventListener('click', () => {
+    // Send message to retry the last message in the iframe
+    iframe.contentWindow?.postMessage({ type: 'RETRY_LAST_MESSAGE' }, '*');
+  });
+
+  // Add close button
+  const closeButton = document.createElement('button');
+  closeButton.innerHTML = '✕';
+  closeButton.title = 'Close iframe';
+  closeButton.style.cssText = `
+    background: #4f46e5;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    width: 30px;
+    height: 30px;
+    cursor: pointer;
     font-size: 14px;
     display: flex;
     align-items: center;
@@ -837,125 +890,16 @@ function injectChatPopup() {
     removeChatPopup();
   });
 
-  // Add the iframe and close button to the shadow DOM
-  shadow.appendChild(iframe);
-  shadow.appendChild(closeButton);
+  // Add all buttons to the controls container
+  controlsContainer.appendChild(clearButton);
+  controlsContainer.appendChild(retryButton);
+  controlsContainer.appendChild(closeButton);
 
-  // Add resize handle
-  const resizeHandle = document.createElement('div');
-  resizeHandle.style.cssText = `
-    position: absolute;
-    bottom: 0;
-    right: 0;
-    width: 15px;
-    height: 15px;
-    background: transparent;
-    cursor: se-resize;
-    z-index: 2147483648;
-  `;
-  resizeHandle.innerHTML = `
-    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-      <path d="M10 15L15 15L15 10" stroke="#ccc" stroke-width="1"/>
-      <path d="M5 15L10 15L10 10" stroke="#ccc" stroke-width="1"/>
-      <path d="M0 15L5 15L5 10" stroke="#ccc" stroke-width="1"/>
-    </svg>
-  `;
-
-  // Add resize functionality
-  let isResizing = false;
-  let initialX: number, initialY: number;
-  let initialWidth: number, initialHeight: number;
-
-  resizeHandle.addEventListener('mousedown', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    isResizing = true;
-    initialX = e.clientX;
-    initialY = e.clientY;
-    initialWidth = parseInt(document.defaultView!.getComputedStyle(iframe).width, 10);
-    initialHeight = parseInt(document.defaultView!.getComputedStyle(iframe).height, 10);
-
-    document.addEventListener('mousemove', resizeIframe);
-    document.addEventListener('mouseup', stopResize);
-  });
-
-  function resizeIframe(e: MouseEvent) {
-    if (!isResizing) return;
-
-    const width = initialWidth + (e.clientX - initialX);
-    const height = initialHeight + (e.clientY - initialY);
-
-    // Set minimum size
-    iframe.style.width = Math.max(300, width) + 'px';
-    iframe.style.height = Math.max(200, height) + 'px';
-  }
-
-  function stopResize() {
-    isResizing = false;
-    document.removeEventListener('mousemove', resizeIframe);
-    document.removeEventListener('mouseup', stopResize);
-  }
-
-  shadow.appendChild(resizeHandle);
-
-  // Add drag functionality
-  let isDragging = false;
-  let currentX: number, currentY: number;
-  let initialXDrag: number, initialYDrag: number;
-  let xOffset = 0;
-  let yOffset = 0;
-
-  // Use mousedown on the iframe to start dragging
-  iframe.addEventListener('mousedown', (e) => {
-    // Only start dragging if not clicking on resize handle or close button
-    if (!(e.target as HTMLElement).classList.contains('resize-handle') &&
-        !(e.target as HTMLElement).classList.contains('close-button')) {
-      isDragging = true;
-      initialXDrag = e.clientX - xOffset;
-      initialYDrag = e.clientY - yOffset;
-    }
-  });
-
-  document.addEventListener('mousemove', (e) => {
-    if (isDragging) {
-      e.preventDefault();
-      currentX = e.clientX - initialXDrag;
-      currentY = e.clientY - initialYDrag;
-
-      xOffset = currentX;
-      yOffset = currentY;
-
-      setTranslate(currentX, currentY, iframe);
-    }
-  });
-
-  document.addEventListener('mouseup', () => {
-    isDragging = false;
-  });
-
-  function setTranslate(xPos: number, yPos: number, el: HTMLElement) {
-    el.style.transform = `translate3d(${xPos}px, ${yPos}px, 0)`;
-  }
+  // Add controls to shadow DOM
+  shadow.appendChild(controlsContainer);
 }
 
-// Function to remove the chat popup
-function removeChatPopup() {
-  const container = document.getElementById('prism-chat-popup-container');
-  if (container) {
-    container.remove();
-  }
-}
 
-// Function to toggle the chat popup
-function toggleChatPopup() {
-  const container = document.getElementById('prism-chat-popup-container');
-  if (container) {
-    removeChatPopup();
-  } else {
-    injectChatPopup();
-  }
-}
 
 // Mouse tracking function to show/hide button based on mouse position
 function setupMouseTracking(button: HTMLElement) {
@@ -1088,7 +1032,7 @@ function applyFontScale() {
   }
 
   // Also update the root font size
-  const baseFontSize = 16 * currentFontScale; // 16px base * scale
+  const baseFontSize = 32 * currentFontScale; // 32px base * scale (default font size is 32px)
   document.documentElement.style.fontSize = `${baseFontSize}px`;
 }
 
@@ -1108,6 +1052,7 @@ function decreaseFontSize() {
 
 // Add hotkey listener for Ctrl+'
 function setupHotkeyListener() {
+  // Listen in the capture phase to intercept keys before the website
   document.addEventListener('keydown', async (event) => {
     // Check if Ctrl key is pressed and the apostrophe key (' or `) is pressed
     if (event.ctrlKey && (event.key === "'" || event.key === '`' || event.code === 'Quote')) {
@@ -1134,6 +1079,28 @@ function setupHotkeyListener() {
       }
     }
 
+    // Check if Ctrl+key is pressed to toggle iframe (configurable)
+    // Get extension settings to check for custom key binding
+    try {
+      const result = await chrome.storage.local.get(['displaySettings']);
+      const settings = result.displaySettings || {};
+      const iframeToggleKey = settings.iframeToggleKey || '`';
+
+      if (event.ctrlKey && event.key === iframeToggleKey) {
+        event.preventDefault();
+        toggleChatPopup();
+        return;
+      }
+    } catch (error) {
+      console.error('Error checking iframe toggle key:', error);
+      // Fallback to default key if settings can't be loaded
+      if (event.ctrlKey && event.key === '`') {
+        event.preventDefault();
+        toggleChatPopup();
+        return;
+      }
+    }
+
     // Check if the target is an input field (input, textarea, or contenteditable)
     const target = event.target as HTMLElement;
     const isInputElement = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA';
@@ -1141,13 +1108,13 @@ function setupHotkeyListener() {
 
     // Only handle mode toggles and other shortcuts if not in an input field or contenteditable element
     if (!isInputElement && !isContentEditable) {
-      // Check for + or - keys (with or without Shift for +) for font size adjustment
-      if (event.key === '+' || event.key === '=' || event.key === 'Add') {
-        event.preventDefault();
-        increaseFontSize();
-      } else if (event.key === '-' || event.key === 'Subtract') {
+      // Check for Shift+- or Shift+= keys for font size adjustment
+      if (event.shiftKey && event.key === '-') {
         event.preventDefault();
         decreaseFontSize();
+      } else if (event.shiftKey && (event.key === '=' || event.key === '+')) {
+        event.preventDefault();
+        increaseFontSize();
       }
 
       // Check for mode toggle keys (Shift + number keys)
@@ -1258,7 +1225,238 @@ function setupHotkeyListener() {
         console.error('Error checking keyboard shortcuts:', error);
       }
     }
+  }, true); // Use capture phase to intercept keys before the website
+
+  // Listen for prompt sequence shortcuts in capture phase
+  let inputBuffer = "";
+  const PROMPT_SHORTCUT = "/prompt"; // The sequence to trigger
+  const PARTIAL_TRIGGER = "/p"; // Start blocking propagation at this point
+
+  document.addEventListener('keydown', (event) => {
+    const target = event.target as HTMLElement;
+
+    // Only care if the user is typing in an input or textarea
+    if (!(target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+      return;
+    }
+
+    const char = event.key;
+
+    // 1. Check for Partial Match to block Search Bar interference
+    const potentialBuffer = inputBuffer + char;
+
+    if (PROMPT_SHORTCUT.startsWith(potentialBuffer)) {
+      // This stops YouTube/X from seeing the key and triggering their own shortcuts
+      event.stopPropagation();
+      inputBuffer = potentialBuffer;
+
+      // 2. Check for Full Match
+      if (inputBuffer === PROMPT_SHORTCUT) {
+        event.preventDefault(); // Stop the last character from being typed
+
+        deleteTypedSequence(target, PROMPT_SHORTCUT.length - 1); // Delete the prefix
+        launchIframe();
+        inputBuffer = ""; // Reset
+      }
+    } else {
+      inputBuffer = ""; // Reset if user types something else
+    }
+  }, true); // The 'true' here is CRITICAL: it enables the Capture Phase
+
+  // Global sequence detection for anywhere on the page
+  let keyBuffer = "";
+  const GLOBAL_SHORTCUT = "prompt"; // No slash needed if you want it purely global
+  const MAX_BUFFER_LENGTH = 20;
+
+  document.addEventListener('keydown', (event) => {
+    // 1. Ignore modifier keys (Shift, Control, etc.)
+    if (event.key.length > 1 && event.key !== "Backspace") return;
+
+    // 2. Handle Backspace (optional: allows users to correct typos in the sequence)
+    if (event.key === "Backspace") {
+      keyBuffer = keyBuffer.slice(0, -1);
+      return;
+    }
+
+    keyBuffer += event.key.toLowerCase();
+
+    // 3. Keep buffer lean
+    if (keyBuffer.length > MAX_BUFFER_LENGTH) {
+      keyBuffer = keyBuffer.substring(keyBuffer.length - MAX_BUFFER_LENGTH);
+    }
+
+    // 4. Check for Partial Match to block site hotkeys
+    // If the user starts typing "pro...", we stop the site from reacting.
+    if (GLOBAL_SHORTCUT.startsWith(keyBuffer) && keyBuffer.length > 0) {
+      event.stopPropagation();
+
+      // 5. Check for Full Match
+      if (keyBuffer === GLOBAL_SHORTCUT) {
+        event.preventDefault();
+        launchIframe();
+        keyBuffer = ""; // Reset
+      }
+    } else {
+      // If the sequence is broken (e.g., they typed "prx"), reset
+      keyBuffer = event.key.toLowerCase();
+    }
+  }, true); // Capture phase is still mandatory
+}
+
+// Function to delete the typed sequence from the input
+function deleteTypedSequence(element: HTMLElement, length: number) {
+  if (element.isContentEditable) {
+    // For sites like Gmail or Twitter/X composer
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      for (let i = 0; i < length; i++) {
+        document.execCommand("delete", false, null);
+      }
+    }
+  } else {
+    // For standard inputs (YouTube search, etc.)
+    const inputElement = element as HTMLInputElement | HTMLTextAreaElement;
+    const start = inputElement.selectionStart || 0;
+    const end = inputElement.selectionEnd || 0;
+    const value = inputElement.value;
+
+    inputElement.value = value.slice(0, start - length) + value.slice(end);
+    // Restore cursor position
+    inputElement.selectionStart = inputElement.selectionEnd = start - length;
+  }
+}
+
+// Function to launch the iframe
+function launchIframe() {
+  // Check if iframe already exists to avoid duplicates
+  if (document.getElementById('prism-chat-iframe')) {
+    return;
+  }
+
+  // Create the container
+  const container = document.createElement('div');
+  container.id = 'prism-chat-popup-container';
+  document.body.appendChild(container);
+
+  // Create Shadow DOM to isolate styles
+  const shadow = container.attachShadow({ mode: 'open' });
+
+  // Create the iframe
+  const iframe = document.createElement('iframe');
+  iframe.src = chrome.runtime.getURL('chat.html'); // Points to your React chat page
+  iframe.id = 'prism-chat-iframe';
+  iframe.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 5%;
+    width: 90%;
+    height: 100%;
+    z-index: 2147483647;
+    border: none;
+    background: white;
+  `;
+
+  // Add the iframe to the shadow DOM
+  shadow.appendChild(iframe);
+
+  // Add controls container
+  const controlsContainer = document.createElement('div');
+  controlsContainer.style.cssText = `
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 2147483648;
+    display: flex;
+    gap: 5px;
+  `;
+
+  // Add clear button
+  const clearButton = document.createElement('button');
+  clearButton.innerHTML = '🗑️';
+  clearButton.title = 'Clear chat';
+  clearButton.style.cssText = `
+    background: #ff4757;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    width: 30px;
+    height: 30px;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  `;
+  clearButton.addEventListener('click', () => {
+    // Send message to clear the chat in the iframe
+    iframe.contentWindow?.postMessage({ type: 'CLEAR_CHAT' }, '*');
   });
+
+  // Add retry button
+  const retryButton = document.createElement('button');
+  retryButton.innerHTML = '🔄';
+  retryButton.title = 'Retry last message';
+  retryButton.style.cssText = `
+    background: #374151;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    width: 30px;
+    height: 30px;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  `;
+  retryButton.addEventListener('click', () => {
+    // Send message to retry the last message in the iframe
+    iframe.contentWindow?.postMessage({ type: 'RETRY_LAST_MESSAGE' }, '*');
+  });
+
+  // Add close button
+  const closeButton = document.createElement('button');
+  closeButton.innerHTML = '✕';
+  closeButton.title = 'Close iframe';
+  closeButton.style.cssText = `
+    background: #4f46e5;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    width: 30px;
+    height: 30px;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  `;
+  closeButton.addEventListener('click', () => {
+    removeChatPopup();
+  });
+
+  // Add escape key listener to close the iframe
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      removeChatPopup();
+    }
+  }, true);
+
+  // Add all buttons to the controls container
+  controlsContainer.appendChild(clearButton);
+  controlsContainer.appendChild(retryButton);
+  controlsContainer.appendChild(closeButton);
+
+  // Add controls to shadow DOM
+  shadow.appendChild(controlsContainer);
+
+  // Focus the iframe so the user can start typing immediately
+  iframe.onload = () => {
+    iframe.focus();
+    // Send a message to the React app to focus its internal input
+    iframe.contentWindow?.postMessage({ action: 'FOCUS_INPUT' }, '*');
+  };
 }
 
 // Function to show toast notifications

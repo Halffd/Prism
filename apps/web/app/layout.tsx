@@ -1,5 +1,5 @@
-import { Providers } from '../../src/providers';
-import { AuthProvider } from '../../src/auth-provider';
+import { Providers } from '../src/providers';
+import { AuthProvider } from '../src/auth-provider';
 
 export default function RootLayout({
   children,
