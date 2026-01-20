@@ -174,18 +174,80 @@ async function getHistory(): Promise<Message[]> {
 
 // Context menu (right-click)
 chrome.runtime.onInstalled.addListener(() => {
+  // Main context menu parent item
+  chrome.contextMenus.create({
+    id: 'prism-main',
+    title: 'Prism AI Assistant',
+    contexts: ['all']
+  });
+
+  // Submenu items
   chrome.contextMenus.create({
     id: 'prism-explain',
-    title: 'Ask Prism about "%s"',
+    parentId: 'prism-main',
+    title: 'Explain "%s"',
+    contexts: ['selection']
+  });
+
+  chrome.contextMenus.create({
+    id: 'prism-summarize',
+    parentId: 'prism-main',
+    title: 'Summarize this page',
+    contexts: ['page']
+  });
+
+  chrome.contextMenus.create({
+    id: 'prism-analyze',
+    parentId: 'prism-main',
+    title: 'Analyze this content',
+    contexts: ['page', 'selection']
+  });
+
+  chrome.contextMenus.create({
+    id: 'prism-translate',
+    parentId: 'prism-main',
+    title: 'Translate selection',
+    contexts: ['selection']
+  });
+
+  chrome.contextMenus.create({
+    id: 'prism-fix-grammar',
+    parentId: 'prism-main',
+    title: 'Fix grammar/spelling',
+    contexts: ['selection']
+  });
+
+  chrome.contextMenus.create({
+    id: 'prism-code-explain',
+    parentId: 'prism-main',
+    title: 'Explain this code',
     contexts: ['selection']
   });
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
+  let prompt = '';
+
   if (info.menuItemId === 'prism-explain' && info.selectionText) {
-    // Open popup or sidebar with selected text
+    prompt = `Explain the following text:\n\n${info.selectionText}`;
+  } else if (info.menuItemId === 'prism-summarize') {
+    prompt = `Please summarize the content of this page: ${tab?.url}`;
+  } else if (info.menuItemId === 'prism-analyze' && info.selectionText) {
+    prompt = `Analyze the following content:\n\n${info.selectionText}`;
+  } else if (info.menuItemId === 'prism-analyze' && !info.selectionText) {
+    prompt = `Analyze the content of this page: ${tab?.url}`;
+  } else if (info.menuItemId === 'prism-translate' && info.selectionText) {
+    prompt = `Translate the following text to English:\n\n${info.selectionText}`;
+  } else if (info.menuItemId === 'prism-fix-grammar' && info.selectionText) {
+    prompt = `Fix grammar and spelling in the following text:\n\n${info.selectionText}`;
+  } else if (info.menuItemId === 'prism-code-explain' && info.selectionText) {
+    prompt = `Explain the following code:\n\n${info.selectionText}`;
+  }
+
+  if (prompt) {
+    // Open popup or sidebar with the constructed prompt
     chrome.storage.local.set({
-      pendingQuery: info.selectionText,
+      pendingQuery: prompt,
       contextUrl: tab?.url,
       contextTitle: tab?.title
     });
