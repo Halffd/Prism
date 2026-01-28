@@ -68,20 +68,21 @@
         "targetName": "e2e"
       }
     },
-    {
-      "plugin": "@nx/vite/plugin",
-      "options": {
-        "buildTargetName": "build",
-        "testTargetName": "test",
-        "serveTargetName": "serve",
-        "devTargetName": "dev",
-        "previewTargetName": "preview",
-        "serveStaticTargetName": "serve-static",
-        "typecheckTargetName": "typecheck",
-        "buildDepsTargetName": "build-deps",
-        "watchDepsTargetName": "watch-deps"
-      }
-    },
+    // Temporarily disabled due to compatibility issue between Nx 22.0.4 and Vite 7.0.0
+    // {
+    //   "plugin": "@nx/vite/plugin",
+    //   "options": {
+    //     "buildTargetName": "build",
+    //     "testTargetName": "test",
+    //     "serveTargetName": "serve",
+    //     "devTargetName": "dev",
+    //     "previewTargetName": "preview",
+    //     "serveStaticTargetName": "serve-static",
+    //     "typecheckTargetName": "typecheck",
+    //     "buildDepsTargetName": "build-deps",
+    //     "watchDepsTargetName": "watch-deps"
+    //   }
+    // },
     {
       "plugin": "@nx/next/plugin",
       "options": {

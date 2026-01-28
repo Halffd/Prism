@@ -7,6 +7,8 @@ let currentSidebarWidth: number = 350;
 
 // Listen for messages from background script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  console.log('Content script received message:', request); // Debug logging
+
   if (request.type === 'EXTRACT_CONTEXT') {
     const tokenLimit = request.pageContentTokenLimit || 20000;
     const context = extractPageContext(tokenLimit);
@@ -56,6 +58,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     applyFontScale();
     return true;
   }
+
+  // Handle any unrecognized message types
+  console.warn('Unrecognized message type:', request.type);
+  sendResponse({ error: `Unrecognized message type: ${request.type}` });
+  return true;
 });
 
 // Simple token estimation function (roughly 1 token = 4 characters or 1 word)
@@ -746,8 +753,8 @@ function injectFloatingButton() {
     z-index: 999999;
     transition: transform 0.2s, opacity 0.2s;
     user-select: none;
-    opacity: 0;
-    pointer-events: none;
+    opacity: 1; /* Changed from 0 to 1 to make it always visible */
+    pointer-events: auto; /* Changed from none to auto to make it clickable */
   `;
 
   button.addEventListener('mouseenter', () => {
@@ -777,8 +784,9 @@ function injectFloatingButton() {
 
   document.body.appendChild(button);
 
-  // Add mouse tracking to show/hide button based on mouse position
-  setupMouseTracking(button);
+  // Add mouse tracking to show/hide button based on mouse position (optional enhancement)
+  // Commenting out the mouse tracking to make the button always visible
+  // setupMouseTracking(button);
 }
 
 // Function to inject the chat popup iframe using shadow DOM
@@ -795,6 +803,20 @@ function injectChatPopup() {
 
   // Create Shadow DOM to isolate styles
   const shadow = container.attachShadow({ mode: 'open' });
+
+  // Add basic styles to the shadow DOM to ensure proper rendering
+  const style = document.createElement('style');
+  style.textContent = `
+    button {
+      font-family: inherit;
+      cursor: pointer;
+    }
+
+    iframe {
+      all: initial; /* Reset all styles for the iframe */
+    }
+  `;
+  shadow.appendChild(style);
 
   // Create the iframe
   const iframe = document.createElement('iframe');
@@ -890,6 +912,16 @@ function injectChatPopup() {
     removeChatPopup();
   });
 
+  // Add escape key listener to close the iframe
+  const handleEscape = (event: KeyboardEvent) => {
+    if (event.key === 'Escape') {
+      removeChatPopup();
+    }
+  };
+
+  // Add the event listener to the shadow root's document
+  shadow.ownerDocument.addEventListener('keydown', handleEscape, true);
+
   // Add all buttons to the controls container
   controlsContainer.appendChild(clearButton);
   controlsContainer.appendChild(retryButton);
@@ -897,6 +929,16 @@ function injectChatPopup() {
 
   // Add controls to shadow DOM
   shadow.appendChild(controlsContainer);
+
+  // Focus the iframe so the user can start typing immediately
+  iframe.onload = () => {
+    // Give the iframe a moment to load before focusing
+    setTimeout(() => {
+      iframe.focus();
+      // Send a message to the React app to focus its internal input
+      iframe.contentWindow?.postMessage({ action: 'FOCUS_INPUT' }, '*');
+    }, 100);
+  };
 }
 
 
@@ -960,17 +1002,21 @@ async function loadButtonSettings() {
 // Enable floating button
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
-    // Reset the button removal flag when we're on a new page
-    localStorage.removeItem('prismButtonRemoved');
-    buttonRemovedByUser = false;
-    injectFloatingButton();
+    // Check if button was previously removed by the user
+    buttonRemovedByUser = localStorage.getItem('prismButtonRemoved') === 'true';
+
+    if (!buttonRemovedByUser) {
+      injectFloatingButton();
+    }
     loadDisplaySettings();
   });
 } else {
-  // Reset the button removal flag when we're on a new page
-  localStorage.removeItem('prismButtonRemoved');
-  buttonRemovedByUser = false;
-  injectFloatingButton();
+  // Check if button was previously removed by the user
+  buttonRemovedByUser = localStorage.getItem('prismButtonRemoved') === 'true';
+
+  if (!buttonRemovedByUser) {
+    injectFloatingButton();
+  }
   loadDisplaySettings();
   initializeFontScale();
   setupHotkeyListener();
@@ -996,17 +1042,23 @@ async function initializePromptShortcuts() {
 // Call initialization function
 initializePromptShortcuts();
 
-const observer = new MutationObserver((mutationsList) => {
-  if (!document.getElementById('prism-floating-button') && !buttonRemovedByUser) {
-    setTimeout(() => injectFloatingButton(), 500); // Small delay to allow page to load
-  }
-});
+// Setup prompt shortcut replacement in text fields
+setupPromptShortcutReplacement();
 
-// Start observing
-observer.observe(document.body, {
-  childList: true,
-  subtree: true
-});
+// Only observe if the button hasn't been removed by the user
+if (!buttonRemovedByUser) {
+  const observer = new MutationObserver((mutationsList) => {
+    if (!document.getElementById('prism-floating-button')) {
+      setTimeout(() => injectFloatingButton(), 500); // Small delay to allow page to load
+    }
+  });
+
+  // Start observing
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+}
 
 // Get initial font scale from storage
 let currentFontScale = 1.0;
@@ -1342,6 +1394,16 @@ function launchIframe() {
   // Create Shadow DOM to isolate styles
   const shadow = container.attachShadow({ mode: 'open' });
 
+  // Add basic styles to the shadow DOM
+  const style = document.createElement('style');
+  style.textContent = `
+    button {
+      font-family: inherit;
+      cursor: pointer;
+    }
+  `;
+  shadow.appendChild(style);
+
   // Create the iframe
   const iframe = document.createElement('iframe');
   iframe.src = chrome.runtime.getURL('chat.html'); // Points to your React chat page
@@ -1437,11 +1499,14 @@ function launchIframe() {
   });
 
   // Add escape key listener to close the iframe
-  document.addEventListener('keydown', (event) => {
+  const handleEscape = (event: KeyboardEvent) => {
     if (event.key === 'Escape') {
       removeChatPopup();
     }
-  }, true);
+  };
+
+  // Add the event listener to the shadow root's document
+  shadow.ownerDocument.addEventListener('keydown', handleEscape, true);
 
   // Add all buttons to the controls container
   controlsContainer.appendChild(clearButton);
@@ -1453,10 +1518,69 @@ function launchIframe() {
 
   // Focus the iframe so the user can start typing immediately
   iframe.onload = () => {
-    iframe.focus();
-    // Send a message to the React app to focus its internal input
-    iframe.contentWindow?.postMessage({ action: 'FOCUS_INPUT' }, '*');
+    // Give the iframe a moment to load before focusing
+    setTimeout(() => {
+      iframe.focus();
+      // Send a message to the React app to focus its internal input
+      iframe.contentWindow?.postMessage({ action: 'FOCUS_INPUT' }, '*');
+    }, 100);
   };
+}
+
+// Function to remove the chat popup
+function removeChatPopup() {
+  const container = document.getElementById('prism-chat-popup-container');
+  if (container) {
+    container.remove();
+  }
+}
+
+// Function to replace prompt shortcuts in text fields
+function setupPromptShortcutReplacement() {
+  // Listen for input events on text fields
+  document.addEventListener('input', async (event) => {
+    const target = event.target as HTMLInputElement | HTMLTextAreaElement | HTMLElement;
+
+    // Only process if the target is an input, textarea, or contenteditable element
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+      const currentValue = target.value || target.textContent || '';
+
+      try {
+        // Get all prompt shortcuts from storage
+        const result = await chrome.storage.local.get(['promptShortcuts']);
+        const promptShortcuts = result.promptShortcuts || [];
+
+        // Check if the current value contains any prompt shortcuts
+        for (const prompt of promptShortcuts) {
+          if (prompt.shortcutKey && currentValue.includes(prompt.shortcutKey)) {
+            // Replace the shortcut with the full prompt content
+            const newValue = currentValue.replace(prompt.shortcutKey, prompt.content);
+
+            if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+              // For input and textarea elements
+              (target as HTMLInputElement | HTMLTextAreaElement).value = newValue;
+
+              // Trigger input event to notify other listeners
+              target.dispatchEvent(new Event('input', { bubbles: true }));
+            } else if (target.isContentEditable) {
+              // For contenteditable elements
+              target.textContent = newValue;
+
+              // Trigger input event to notify other listeners
+              target.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+
+            // Show a notification that the replacement occurred
+            showToast(`Replaced ${prompt.shortcutKey} with prompt`);
+
+            break; // Only replace the first match to avoid conflicts
+          }
+        }
+      } catch (error) {
+        console.error('Error processing prompt shortcuts:', error);
+      }
+    }
+  }, true); // Use capture phase
 }
 
 // Function to show toast notifications

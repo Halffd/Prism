@@ -268,14 +268,56 @@ export function Popup() {
         }
         return true;
       }
+      if (request.action === 'FOCUS_INPUT') {
+        // Focus the input field when requested
+        setTimeout(() => {
+          const inputElement = document.querySelector('textarea') as HTMLTextAreaElement;
+          if (inputElement) {
+            inputElement.focus();
+            inputElement.select();
+          }
+        }, 100);
+        return true;
+      }
       return true;
     };
 
     chrome.runtime.onMessage.addListener(handleMessage);
 
-    // Cleanup function to remove the listener
+    // Listen for postMessage events from the parent frame (when in iframe mode)
+    const handlePostMessage = (event: MessageEvent) => {
+      if (event.source !== window.parent && event.source !== window) return;
+
+      if (event.data && event.data.action === 'FOCUS_INPUT') {
+        // Focus the input field when requested
+        setTimeout(() => {
+          const inputElement = document.querySelector('textarea') as HTMLTextAreaElement;
+          if (inputElement) {
+            inputElement.focus();
+            inputElement.select();
+          }
+        }, 100);
+      }
+
+      if (event.data && event.data.type === 'CLEAR_CHAT') {
+        setMessages([]);
+      }
+
+      if (event.data && event.data.type === 'RETRY_LAST_MESSAGE') {
+        // Retry the last user message
+        const lastUserMessage = [...messages].reverse().find(msg => msg.role === 'user');
+        if (lastUserMessage) {
+          setInput(lastUserMessage.content);
+        }
+      }
+    };
+
+    window.addEventListener('message', handlePostMessage);
+
+    // Cleanup function to remove the listeners
     return () => {
       chrome.runtime.onMessage.removeListener(handleMessage);
+      window.removeEventListener('message', handlePostMessage);
     };
   }, [dispatch]);
 
@@ -1914,6 +1956,11 @@ export function Popup() {
           placeholder="Ask about this page..."
           disabled={loading}
           rows={2}
+          autoFocus
+          onFocus={(e) => {
+            // Ensure the input gets focus when clicked
+            e.target.select();
+          }}
         />
         <div className="input-footer">
           <div className="send-options">

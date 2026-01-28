@@ -49,13 +49,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // For iframe mode, send a message to the content script to inject the iframe
         chrome.tabs.query({active: true, currentWindow: true}).then((tabs) => {
           if (tabs[0]?.id) {
-            chrome.tabs.sendMessage(tabs[0].id, { type: 'INJECT_IFRAME_CHAT' });
+            chrome.tabs.sendMessage(tabs[0].id, { type: 'INJECT_IFRAME_CHAT' })
+              .catch(error => {
+                console.error('Error sending message to content script:', error);
+                // Fallback to opening the popup if content script communication fails
+                chrome.action.openPopup();
+              });
+          } else {
+            // If no active tab, open the popup as fallback
+            chrome.action.openPopup();
           }
         });
       } else {
         // For other modes, open the default popup
         chrome.action.openPopup();
       }
+    }).catch(error => {
+      console.error('Error getting display settings:', error);
+      // Fallback to opening the popup if settings retrieval fails
+      chrome.action.openPopup();
     });
     return;
   }

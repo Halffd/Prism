@@ -231,19 +231,25 @@ export function Settings({ onClose }: SettingsProps) {
 
       // Load prompt shortcuts from API
       if (client) {
-        const response = await client.getSyncedData();
-        if (response.success && response.data?.prompts) {
-          setPromptShortcuts(response.data.prompts);
+        try {
+          const response = await client.getSyncedData();
+          if (response.success && response.data?.prompts) {
+            setPromptShortcuts(response.data.prompts);
 
-          // Also sync to chrome.storage.local for content script access
-          if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-            try {
-              await chrome.storage.local.set({ promptShortcuts: response.data.prompts });
-            } catch (error) {
-              console.warn('Could not sync prompt shortcuts to chrome.storage.local:', error);
+            // Also sync to chrome.storage.local for content script access
+            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+              try {
+                await chrome.storage.local.set({ promptShortcuts: response.data.prompts });
+              } catch (error) {
+                console.warn('Could not sync prompt shortcuts to chrome.storage.local:', error);
+              }
             }
+          } else {
+            // Fallback to empty array if API call fails
+            setPromptShortcuts([]);
           }
-        } else {
+        } catch (error) {
+          console.debug('Backend unavailable, using local storage only');
           // Fallback to empty array if API call fails
           setPromptShortcuts([]);
         }
@@ -397,7 +403,7 @@ export function Settings({ onClose }: SettingsProps) {
             console.error('Failed to sync prompt shortcuts:', response.error);
           }
         } catch (error) {
-          console.error('Error syncing prompt shortcuts:', error);
+          console.debug('Backend unavailable, using local storage only');
         }
       }
 
@@ -516,7 +522,7 @@ export function Settings({ onClose }: SettingsProps) {
             console.error('Failed to sync prompt shortcuts:', response.error);
           }
         } catch (error) {
-          console.error('Error syncing prompt shortcuts:', error);
+          console.debug('Backend unavailable, using local storage only');
         }
       }
     } catch (error) {
@@ -632,7 +638,7 @@ export function Settings({ onClose }: SettingsProps) {
         console.error('Failed to sync prompt shortcut:', response.error);
       }
     } catch (error) {
-      console.error('Failed to save prompt shortcut to API:', error);
+      console.debug('Backend unavailable, using local storage only');
     }
   };
 
@@ -668,7 +674,7 @@ export function Settings({ onClose }: SettingsProps) {
           console.error('Failed to sync prompt shortcuts after deletion:', response.error);
         }
       } catch (error) {
-        console.error('Failed to delete prompt shortcut from API:', error);
+        console.debug('Backend unavailable, using local storage only');
       }
     }
   };

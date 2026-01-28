@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 
+// Export the configuration using default export
 export default defineConfig({
   root: __dirname,
   cacheDir: '../../node_modules/.vite/apps/extension',
@@ -51,7 +52,7 @@ export default defineConfig({
             return 'content.js';
           }
           // For other entries, use the hashed names
-          return '[name]-[hash].js';
+          return `[name]-[hash].js`;
         },
         chunkFileNames: 'assets/[name]-[hash].js',
         assetFileNames: 'assets/[name].[ext]',

@@ -178,7 +178,7 @@ export class UnifiedAIClient {
           timestamp: Date.now()
         }];
 
-        const response = await fetch(`${this.prismApiUrl}/api/chat`, {
+        const response = await fetch(`${this.prismApiUrl}/chat`, {
           method: 'POST',
           headers,
           body: JSON.stringify({
@@ -352,7 +352,7 @@ export class UnifiedAIClient {
         headers['Authorization'] = `Bearer ${this.prismApiKey}`;
       }
 
-      const response = await fetch(`${this.prismApiUrl}/api/sync/messages`, {
+      const response = await fetch(`${this.prismApiUrl}/sync/messages`, {
         method: 'POST',
         headers,
         body: JSON.stringify({ messages })
@@ -400,7 +400,7 @@ export class UnifiedAIClient {
         headers['Authorization'] = `Bearer ${this.prismApiKey}`;
       }
 
-      const response = await fetch(`${this.prismApiUrl}/api/sync/sessions`, {
+      const response = await fetch(`${this.prismApiUrl}/sync/sessions`, {
         method: 'POST',
         headers,
         body: JSON.stringify({ sessions })
@@ -448,7 +448,7 @@ export class UnifiedAIClient {
         headers['Authorization'] = `Bearer ${this.prismApiKey}`;
       }
 
-      const response = await fetch(`${this.prismApiUrl}/api/sync/prompts`, {
+      const response = await fetch(`${this.prismApiUrl}/sync/prompts`, {
         method: 'POST',
         headers,
         body: JSON.stringify({ prompts })
@@ -500,7 +500,7 @@ export class UnifiedAIClient {
         headers['Authorization'] = `Bearer ${this.prismApiKey}`;
       }
 
-      const response = await fetch(`${this.prismApiUrl}/api/sync/data`, {
+      const response = await fetch(`${this.prismApiUrl}/sync/data`, {
         method: 'GET',
         headers
       });
@@ -551,7 +551,7 @@ export class UnifiedAIClient {
         headers['Authorization'] = `Bearer ${this.prismApiKey}`;
       }
 
-      const response = await fetch(`${this.prismApiUrl}/api/sync/clear`, {
+      const response = await fetch(`${this.prismApiUrl}/sync/clear`, {
         method: 'DELETE',
         headers
       });
