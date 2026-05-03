@@ -51,6 +51,18 @@ export class AIService {
         return this.openrouterChatCompletion(request);
       case 'poe':
         return this.poeChatCompletion(request);
+      case 'nvidia-nim':
+        return this.nvidiaNimChatCompletion(request);
+      case 'groq':
+        return this.groqChatCompletion(request);
+      case 'cerebras':
+        return this.cerebrasChatCompletion(request);
+      case 'cloudflare-workers':
+        return this.cloudflareWorkersChatCompletion(request);
+      case 'fireworks':
+        return this.fireworksChatCompletion(request);
+      case 'zai':
+        return this.zaiChatCompletion(request);
       default:
         throw new Error(`Unsupported AI provider: ${this.config.provider}`);
     }
@@ -929,6 +941,173 @@ export class AIService {
       content: "This is a simulated response from POE. In a real implementation, this would connect to POE's API.",
       tokensUsed: 25,
       model: config.model || 'poe'
+    };
+  }
+
+  private async nvidiaNimChatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
+    const { messages, config } = request;
+    const response = await axios.post(
+      config.apiUrl || 'https://integrate.api.nvidia.com/v1/chat/completions',
+      {
+        model: config.model || 'meta/llama3-8b-instruct',
+        messages: messages.map(msg => ({
+          role: msg.role,
+          content: msg.content
+        })),
+        temperature: config.temperature,
+        max_tokens: config.maxTokens,
+        top_p: config.topP
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${config.apiKey}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    return {
+      content: response.data.choices[0].message.content,
+      tokensUsed: response.data.usage?.total_tokens,
+      model: response.data.model
+    };
+  }
+
+  private async groqChatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
+    const { messages, config } = request;
+    const response = await axios.post(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        model: config.model || 'llama3-8b-8192',
+        messages: messages.map(msg => ({
+          role: msg.role,
+          content: msg.content
+        })),
+        temperature: config.temperature,
+        max_tokens: config.maxTokens,
+        top_p: config.topP
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${config.apiKey}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    return {
+      content: response.data.choices[0].message.content,
+      tokensUsed: response.data.usage?.total_tokens,
+      model: response.data.model
+    };
+  }
+
+  private async cerebrasChatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
+    const { messages, config } = request;
+    const response = await axios.post(
+      'https://api.cerebras.ai/v1/chat/completions',
+      {
+        model: config.model || 'llama3.1-8b',
+        messages: messages.map(msg => ({
+          role: msg.role,
+          content: msg.content
+        })),
+        temperature: config.temperature,
+        max_tokens: config.maxTokens
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${config.apiKey}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    return {
+      content: response.data.choices[0].message.content,
+      tokensUsed: response.data.usage?.total_tokens,
+      model: response.data.model
+    };
+  }
+
+  private async cloudflareWorkersChatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
+    const { messages, config } = request;
+    const response = await axios.post(
+      config.apiUrl || 'https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/@cf/meta/llama-3.1-8b-instruct',
+      {
+        messages: messages.map(msg => ({
+          role: msg.role,
+          content: msg.content
+        }))
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${config.apiKey}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    return {
+      content: response.data.result.response,
+      tokensUsed: undefined,
+      model: config.model || '@cf/meta/llama-3.1-8b-instruct'
+    };
+  }
+
+  private async fireworksChatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
+    const { messages, config } = request;
+    const response = await axios.post(
+      'https://api.fireworks.ai/inference/v1/chat/completions',
+      {
+        model: config.model || 'accounts/fireworks/models/llama-v3p1-8b-instruct',
+        messages: messages.map(msg => ({
+          role: msg.role,
+          content: msg.content
+        })),
+        temperature: config.temperature,
+        max_tokens: config.maxTokens
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${config.apiKey}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    return {
+      content: response.data.choices[0].message.content,
+      tokensUsed: response.data.usage?.total_tokens,
+      model: response.data.model
+    };
+  }
+
+  private async zaiChatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
+    const { messages, config } = request;
+    const response = await axios.post(
+      'https://api.z.ai/v1/chat/completions',
+      {
+        model: config.model || 'glm-4-flash',
+        messages: messages.map(msg => ({
+          role: msg.role,
+          content: msg.content
+        })),
+        temperature: config.temperature,
+        max_tokens: config.maxTokens
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${config.apiKey}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    return {
+      content: response.data.choices[0].message.content,
+      tokensUsed: response.data.usage?.total_tokens,
+      model: response.data.model
     };
   }
 }
