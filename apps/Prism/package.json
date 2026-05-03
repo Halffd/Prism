@@ -15,11 +15,13 @@
     "expo-status-bar": "*",
     "expo-system-ui": "*",
     "jest-expo": "*",
+    "mermaid": "^11.14.0",
     "metro-config": "*",
     "metro-resolver": "*",
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "react-native": "0.79.6",
+    "react-native-markdown-display": "^7.0.2",
     "react-native-svg": "*",
     "react-native-svg-transformer": "*",
     "react-native-web": "*"

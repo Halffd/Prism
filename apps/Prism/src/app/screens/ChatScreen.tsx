@@ -10,7 +10,9 @@ import {
   SafeAreaView,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
 } from 'react-native';
+import Markdown from 'react-native-markdown-display';
 import { UnifiedAIClient } from '@prism/api-client';
 import type { Message, AIConfig } from '@prism/shared-types';
 
@@ -308,9 +310,24 @@ export function ChatScreen({ navigateToSettings }: ChatScreenProps = {}) {
                       {getTimeSinceLastMessage(index)}
                     </Text>
                   )}
-                  <Text style={item.role === 'user' ? styles.userText : styles.assistantText}>
-                    {item.content}
-                  </Text>
+                  <View style={item.role === 'user' ? styles.userText : styles.assistantText}>
+                    <Markdown
+                      style={{
+                        body: { color: item.role === 'user' ? '#fff' : '#000' },
+                        heading1: { fontSize: 24, fontWeight: 'bold' },
+                        heading2: { fontSize: 20, fontWeight: 'bold' },
+                        heading3: { fontSize: 18, fontWeight: 'bold' },
+                        code_block: { backgroundColor: '#1e1e1e', padding: 10, borderRadius: 5 },
+                        code_inline: { backgroundColor: '#f0f0f0', padding: 2, borderRadius: 3 },
+                        table: { borderWidth: 1, borderColor: '#ccc' },
+                        th: { backgroundColor: '#e0e0e0', padding: 5, fontWeight: 'bold' },
+                        td: { padding: 5, borderWidth: 1, borderColor: '#ccc' },
+                      }}
+                      onLinkPress={(url) => console.log('Link pressed:', url)}
+                    >
+                      {item.content}
+                    </Markdown>
+                  </View>
                 </View>
               </React.Fragment>
             );
