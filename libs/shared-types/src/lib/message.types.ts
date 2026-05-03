@@ -70,7 +70,7 @@ export interface ApiResponse<T> {
   error?: string;
 }
 
-export type AIProvider = 'openai' | 'gemini' | 'qwen' | 'prism-api' | 'koboldcpp' | 'llamacpp' | 'ollama' | 'sglang' | 'transformers' | 'claude' | 'deepseek' | 'grok' | 'openrouter' | 'poe';
+export type AIProvider = 'openai' | 'gemini' | 'qwen' | 'prism-api' | 'koboldcpp' | 'llamacpp' | 'ollama' | 'sglang' | 'transformers' | 'claude' | 'deepseek' | 'grok' | 'openrouter' | 'poe' | 'nvidia-nim' | 'groq' | 'cerebras' | 'cloudflare-workers' | 'fireworks' | 'zai';
 
 export interface AIConfig {
   provider: AIProvider;
@@ -90,6 +90,12 @@ export interface AIConfig {
     'grok'?: string;
     'openrouter'?: string;
     'poe'?: string;
+    'nvidia-nim'?: string;
+    'groq'?: string;
+    'cerebras'?: string;
+    'cloudflare-workers'?: string;
+    'fireworks'?: string;
+    'zai'?: string;
   };
   apiKey?: string; // Keep for backward compatibility
   apiUrl?: string;
