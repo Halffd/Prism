@@ -34,6 +34,34 @@ export interface ChatSession {
   messages: Message[];
   createdAt: number;
   updatedAt: number;
+  parentSessionId?: string;
+  forkedFromMessageId?: string;
+}
+
+export interface ChatHistoryState {
+  past: Message[][];
+  present: Message[];
+  future: Message[][];
+}
+
+export interface FormField {
+  name: string;
+  value: unknown;
+  error?: string;
+  touched: boolean;
+  dirty: boolean;
+}
+
+export interface FormState {
+  fields: Record<string, FormField>;
+  isValid: boolean;
+  isSubmitting: boolean;
+  submitCount: number;
+  errors: Record<string, string>;
+}
+
+export interface ChatFormData {
+  [formId: string]: FormState;
 }
 
 export interface ApiResponse<T> {
