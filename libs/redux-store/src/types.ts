@@ -1,11 +1,13 @@
-import type { Message, ContextData, AIConfig } from '@prism/shared-types';
+import type { Message, ContextData, AIConfig, ChatHistoryState, ChatFormData } from '@prism/shared-types';
 
 export interface ChatState {
   messages: Message[];
   currentSessionId: string;
-  sessions: any[]; // Using any here since ChatSession type wasn't imported properly in the original code
+  sessions: any[];
   loading: boolean;
   selectedProvider: AIConfig['provider'];
+  history: ChatHistoryState;
+  forms: ChatFormData;
 }
 
 export interface AIConfigState {

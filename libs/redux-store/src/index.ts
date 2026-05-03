@@ -50,13 +50,21 @@ export {
   setCurrentSessionId,
   setSelectedProvider as setChatSelectedProvider,
   updateMessage as updateChatMessage,
-  clearMessages as clearChatMessages
+  clearMessages as clearChatMessages,
+  pushToHistory,
+  undo,
+  redo,
+  clearHistory as clearChatHistory,
+  forkSession,
+  initForm,
+  updateField,
+  setFieldError,
+  setFormSubmitting,
+  resetForm,
+  touchField,
 } from './chatSlice';
-export {
-  setSelectedProvider as setAIProvider,
-  setProviderKey
-} from './aiConfigSlice';
-export {
-  updateContext,
-  clearContext
-} from './contextSlice';
+
+// Export hooks
+export { useChatForm } from './hooks/useChatForm';
+export { useUndoRedo } from './hooks/useUndoRedo';
+export { useForkChat } from './hooks/useForkChat';

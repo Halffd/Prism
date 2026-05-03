@@ -2,6 +2,8 @@ import { configureStore } from '@reduxjs/toolkit';
 import { combineReducers } from '@reduxjs/toolkit';
 import { persistStore, persistReducer } from 'redux-persist';
 import storage from 'redux-persist/lib/storage'; // defaults to localStorage for web
+import type { Message, ChatSession, ContextData, AIConfig, PopupDisplayMode, ExtensionSettings, PromptShortcut, ChatHistoryState, ChatFormData } from '@prism/shared-types';
+import { useDispatch, useSelector, TypedUseSelectorHook } from 'react-redux';
 
 // Define the root state interface
 export interface RootState {
@@ -20,6 +22,8 @@ export interface ChatState {
   sessions: ChatSession[];
   isLoading: boolean;
   context: ContextData | null;
+  history: ChatHistoryState;
+  forms: ChatFormData;
 }
 
 export interface AIConfigState {
@@ -260,7 +264,13 @@ const initialChatState: ChatState = {
   currentSessionId: `session_${Date.now()}`,
   sessions: [],
   isLoading: false,
-  context: null
+  context: null,
+  history: {
+    past: [],
+    present: [],
+    future: [],
+  },
+  forms: {},
 };
 
 const chatReducer = (state = initialChatState, action: any): ChatState => {
@@ -557,3 +567,5 @@ export const store = configureStore({
 export const persistor = persistStore(store);
 
 export type AppDispatch = typeof store.dispatch;
+export const useAppDispatch = () => useDispatch<AppDispatch>();
+export const useAppSelector: TypedUseSelectorHook<RootState> = useSelector;
