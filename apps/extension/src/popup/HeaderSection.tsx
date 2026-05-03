@@ -88,6 +88,12 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
           <option value="grok">Grok</option>
           <option value="openrouter">OpenRouter</option>
           <option value="poe">Poe</option>
+          <option value="nvidia-nim">NVIDIA NIM</option>
+          <option value="groq">Groq</option>
+          <option value="cerebras">Cerebras</option>
+          <option value="cloudflare-workers">Cloudflare Workers</option>
+          <option value="fireworks">Fireworks</option>
+          <option value="zai">Z.AI</option>
         </select>
 
         <select
@@ -196,6 +202,12 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
           {aiConfig.provider === 'grok' && '🤖'}
           {aiConfig.provider === 'openrouter' && '🌐'}
           {aiConfig.provider === 'poe' && '💬'}
+          {aiConfig.provider === 'nvidia-nim' && '🟢'}
+          {aiConfig.provider === 'groq' && '⚡'}
+          {aiConfig.provider === 'cerebras' && '🔥'}
+          {aiConfig.provider === 'cloudflare-workers' && '🟠'}
+          {aiConfig.provider === 'fireworks' && '🎆'}
+          {aiConfig.provider === 'zai' && '🟣'}
           <span className="provider-name">{aiConfig.provider}</span>
         </span>
       </div>

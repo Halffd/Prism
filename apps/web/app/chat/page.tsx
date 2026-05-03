@@ -434,16 +434,32 @@ export default function ChatPage() {
       <div className="space-y-4">
         <div>
           <label className="block text-sm font-medium mb-1">AI Provider</label>
-          <select
-            value={aiConfig.provider}
-            onChange={(e) => handleUpdateAIConfig({ provider: e.target.value as any })}
-            className="w-full p-2 border rounded"
-          >
-            <option value="prism-api">Prism API</option>
-            <option value="openai">OpenAI (ChatGPT)</option>
-            <option value="gemini">Google Gemini</option>
-            <option value="qwen">Alibaba Qwen</option>
-          </select>
+            <select
+              value={aiConfig.provider}
+              onChange={(e) => handleUpdateAIConfig({ provider: e.target.value as any })}
+              className="w-full p-2 border rounded"
+            >
+              <option value="prism-api">Prism API</option>
+              <option value="openai">OpenAI (ChatGPT)</option>
+              <option value="gemini">Google Gemini</option>
+              <option value="qwen">Alibaba Qwen</option>
+              <option value="claude">Anthropic Claude</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="grok">Grok (xAI)</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="poe">Poe</option>
+              <option value="koboldcpp">KoboldCPP</option>
+              <option value="llamacpp">Llama.cpp</option>
+              <option value="ollama">Ollama</option>
+              <option value="sglang">SGLang</option>
+              <option value="transformers">Transformers</option>
+              <option value="nvidia-nim">NVIDIA NIM</option>
+              <option value="groq">Groq</option>
+              <option value="cerebras">Cerebras</option>
+              <option value="cloudflare-workers">Cloudflare Workers</option>
+              <option value="fireworks">Fireworks</option>
+              <option value="zai">Z.AI</option>
+            </select>
         </div>
 
         {aiConfig.provider !== 'prism-api' && (
