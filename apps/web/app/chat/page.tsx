@@ -6,6 +6,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { MermaidRenderer } from '@prism/ui-components';
 import { UnifiedAIClient } from '@prism/api-client';
 import {
   saveChatHistory,
@@ -581,30 +582,73 @@ export default function ChatPage() {
                 : 'mr-auto bg-gray-200'
             }`}
           >
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                code({node, inline, className, children, ...props}) {
-                  const match = /language-(\w+)/.exec(className || '');
-                  return !inline && match ? (
-                    <SyntaxHighlighter
-                      style={atomDark}
-                      language={match[1]}
-                      PreTag="div"
-                      {...props}
-                    >
-                      {String(children).replace(/\n$/, '')}
-                    </SyntaxHighlighter>
-                  ) : (
-                    <code className={className} {...props}>
-                      {children}
-                    </code>
-                  );
-                }
-              }}
-            >
-              {msg.content}
-            </ReactMarkdown>
+             <ReactMarkdown
+               remarkPlugins={[remarkGfm]}
+               components={{
+                 code({node, inline, className, children, ...props}) {
+                   const match = /language-(\w+)/.exec(className || '');
+                   if (!inline && match && match[1] === 'mermaid') {
+                     return (
+                       <div className="mermaid-container my-2 p-4 bg-gray-800 rounded-lg border border-gray-600 overflow-x-auto">
+                         <MermaidRenderer chart={String(children).replace(/\n$/, '')} />
+                       </div>
+                     );
+                   }
+                   return !inline && match ? (
+                     <SyntaxHighlighter
+                       style={atomDark}
+                       language={match[1]}
+                       PreTag="div"
+                       className="rounded-lg my-2"
+                       {...props}
+                     >
+                       {String(children).replace(/\n$/, '')}
+                     </SyntaxHighlighter>
+                   ) : (
+                     <code className={className} {...props}>
+                       {children}
+                     </code>
+                   );
+                 },
+                 table({children, ...props}) {
+                   const handleExport = () => {
+                     const table = props as unknown as HTMLTableElement;
+                     if (!table) return;
+                     const rows = Array.from(table.querySelectorAll('tr'));
+                     const csv = rows.map(row =>
+                       Array.from(row.querySelectorAll('td, th'))
+                         .map(cell => `"${cell.textContent?.replace(/"/g, '""')}"`)
+                         .join(',')
+                     ).join('\n');
+                     
+                     const blob = new Blob([csv], { type: 'text/csv' });
+                     const url = URL.createObjectURL(blob);
+                     const a = document.createElement('a');
+                     a.href = url;
+                     a.download = `table-${Date.now()}.csv`;
+                     document.body.appendChild(a);
+                     a.click();
+                     document.body.removeChild(a);
+                     URL.revokeObjectURL(url);
+                   };
+
+                   return (
+                     <div className="table-container my-2 overflow-x-auto">
+                       <div className="flex justify-end mb-1">
+                         <button onClick={handleExport} className="px-2 py-1 bg-gray-700 text-white text-xs rounded hover:bg-gray-600">
+                           📥 Export CSV
+                         </button>
+                       </div>
+                       <table className="w-full border-collapse text-sm" {...props}>
+                         {children}
+                       </table>
+                     </div>
+                   );
+                 }
+               }}
+             >
+               {msg.content}
+             </ReactMarkdown>
           </div>
         ))}
       </div>
