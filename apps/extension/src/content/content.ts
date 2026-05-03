@@ -1,4 +1,7 @@
 import type { ContextData, ExtensionSettings, PopupDisplayMode } from '@prism/shared-types';
+import { createIframe, createIframeContainer, attachShadowToElement, createButton, removeIframe } from './iframe-manager';
+import { showToast, createFloatingButton } from './ui-controls';
+import { estimateTokenCount, truncateToTokenLimit, isIgnoredElement } from './utils';
 
 // Default settings
 let currentDisplayMode: PopupDisplayMode = 'popup';
@@ -732,44 +735,35 @@ function injectFloatingButton() {
     return;
   }
 
-  const button = document.createElement('div');
-  button.id = 'prism-floating-button';
-  button.innerHTML = '💎';
-  button.style.cssText = `
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    width: 50px;
-    height: 50px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    font-size: 24px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    z-index: 999999;
-    transition: transform 0.2s, opacity 0.2s;
-    user-select: none;
-    opacity: 1; /* Changed from 0 to 1 to make it always visible */
-    pointer-events: auto; /* Changed from none to auto to make it clickable */
-  `;
-
-  button.addEventListener('mouseenter', () => {
-    button.style.transform = 'scale(1.1)';
-  });
-
-  button.addEventListener('mouseleave', () => {
-    button.style.transform = 'scale(1)';
-  });
-
-  // Fixed click handler to properly open the chat interface
-  button.addEventListener('click', () => {
-    // Send message to open popup or sidebar
-    chrome.runtime.sendMessage({ type: 'OPEN_CHAT' });
-  });
+  const button = createFloatingButton(
+    'prism-floating-button',
+    '💎',
+    () => {
+      // Send message to open popup or sidebar
+      chrome.runtime.sendMessage({ type: 'OPEN_CHAT' });
+    },
+    `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 24px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      z-index: 999999;
+      transition: transform 0.2s, opacity 0.2s;
+      user-select: none;
+      opacity: 1; /* Changed from 0 to 1 to make it always visible */
+      pointer-events: auto; /* Changed from none to auto to make it clickable */
+    `
+  );
 
   // Add close button functionality
   button.addEventListener('contextmenu', (e) => {
@@ -797,12 +791,11 @@ function injectChatPopup() {
   }
 
   // Create the container
-  const container = document.createElement('div');
-  container.id = 'prism-chat-popup-container';
+  const container = createIframeContainer('prism-chat-popup-container');
   document.body.appendChild(container);
 
   // Create Shadow DOM to isolate styles
-  const shadow = container.attachShadow({ mode: 'open' });
+  const shadow = attachShadowToElement(container);
 
   // Add basic styles to the shadow DOM to ensure proper rendering
   const style = document.createElement('style');
@@ -819,19 +812,20 @@ function injectChatPopup() {
   shadow.appendChild(style);
 
   // Create the iframe
-  const iframe = document.createElement('iframe');
-  iframe.src = chrome.runtime.getURL('chat.html'); // Points to your React chat page
-  iframe.id = 'prism-chat-iframe';
-  iframe.style.cssText = `
-    position: fixed;
-    top: 0;
-    left: 5%;
-    width: 90%;
-    height: 100%;
-    z-index: 2147483647;
-    border: none;
-    background: white;
-  `;
+  const iframe = createIframe({
+    src: chrome.runtime.getURL('chat.html'), // Points to your React chat page
+    id: 'prism-chat-iframe',
+    style: `
+      position: fixed;
+      top: 0;
+      left: 5%;
+      width: 90%;
+      height: 100%;
+      z-index: 2147483647;
+      border: none;
+      background: white;
+    `
+  });
 
   // Add the iframe to the shadow DOM
   shadow.appendChild(iframe);
@@ -848,69 +842,72 @@ function injectChatPopup() {
   `;
 
   // Add clear button
-  const clearButton = document.createElement('button');
-  clearButton.innerHTML = '🗑️';
-  clearButton.title = 'Clear chat';
-  clearButton.style.cssText = `
-    background: #ff4757;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    width: 30px;
-    height: 30px;
-    cursor: pointer;
-    font-size: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  `;
-  clearButton.addEventListener('click', () => {
-    // Send message to clear the chat in the iframe
-    iframe.contentWindow?.postMessage({ type: 'CLEAR_CHAT' }, '*');
-  });
+  const clearButton = createButton(
+    '🗑️',
+    'Clear chat',
+    `
+      background: #ff4757;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      width: 30px;
+      height: 30px;
+      cursor: pointer;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    `,
+    () => {
+      // Send message to clear the chat in the iframe
+      iframe.contentWindow?.postMessage({ type: 'CLEAR_CHAT' }, '*');
+    }
+  );
 
   // Add retry button
-  const retryButton = document.createElement('button');
-  retryButton.innerHTML = '🔄';
-  retryButton.title = 'Retry last message';
-  retryButton.style.cssText = `
-    background: #374151;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    width: 30px;
-    height: 30px;
-    cursor: pointer;
-    font-size: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  `;
-  retryButton.addEventListener('click', () => {
-    // Send message to retry the last message in the iframe
-    iframe.contentWindow?.postMessage({ type: 'RETRY_LAST_MESSAGE' }, '*');
-  });
+  const retryButton = createButton(
+    '🔄',
+    'Retry last message',
+    `
+      background: #374151;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      width: 30px;
+      height: 30px;
+      cursor: pointer;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    `,
+    () => {
+      // Send message to retry the last message in the iframe
+      iframe.contentWindow?.postMessage({ type: 'RETRY_LAST_MESSAGE' }, '*');
+    }
+  );
 
   // Add close button
-  const closeButton = document.createElement('button');
-  closeButton.innerHTML = '✕';
-  closeButton.title = 'Close iframe';
-  closeButton.style.cssText = `
-    background: #4f46e5;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    width: 30px;
-    height: 30px;
-    cursor: pointer;
-    font-size: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  `;
-  closeButton.addEventListener('click', () => {
-    removeChatPopup();
-  });
+  const closeButton = createButton(
+    '✕',
+    'Close iframe',
+    `
+      background: #4f46e5;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      width: 30px;
+      height: 30px;
+      cursor: pointer;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    `,
+    () => {
+      removeChatPopup();
+    }
+  );
 
   // Add escape key listener to close the iframe
   const handleEscape = (event: KeyboardEvent) => {
@@ -1387,12 +1384,11 @@ function launchIframe() {
   }
 
   // Create the container
-  const container = document.createElement('div');
-  container.id = 'prism-chat-popup-container';
+  const container = createIframeContainer('prism-chat-popup-container');
   document.body.appendChild(container);
 
   // Create Shadow DOM to isolate styles
-  const shadow = container.attachShadow({ mode: 'open' });
+  const shadow = attachShadowToElement(container);
 
   // Add basic styles to the shadow DOM
   const style = document.createElement('style');
@@ -1405,19 +1401,20 @@ function launchIframe() {
   shadow.appendChild(style);
 
   // Create the iframe
-  const iframe = document.createElement('iframe');
-  iframe.src = chrome.runtime.getURL('chat.html'); // Points to your React chat page
-  iframe.id = 'prism-chat-iframe';
-  iframe.style.cssText = `
-    position: fixed;
-    top: 0;
-    left: 5%;
-    width: 90%;
-    height: 100%;
-    z-index: 2147483647;
-    border: none;
-    background: white;
-  `;
+  const iframe = createIframe({
+    src: chrome.runtime.getURL('chat.html'), // Points to your React chat page
+    id: 'prism-chat-iframe',
+    style: `
+      position: fixed;
+      top: 0;
+      left: 5%;
+      width: 90%;
+      height: 100%;
+      z-index: 2147483647;
+      border: none;
+      background: white;
+    `
+  });
 
   // Add the iframe to the shadow DOM
   shadow.appendChild(iframe);
@@ -1434,69 +1431,72 @@ function launchIframe() {
   `;
 
   // Add clear button
-  const clearButton = document.createElement('button');
-  clearButton.innerHTML = '🗑️';
-  clearButton.title = 'Clear chat';
-  clearButton.style.cssText = `
-    background: #ff4757;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    width: 30px;
-    height: 30px;
-    cursor: pointer;
-    font-size: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  `;
-  clearButton.addEventListener('click', () => {
-    // Send message to clear the chat in the iframe
-    iframe.contentWindow?.postMessage({ type: 'CLEAR_CHAT' }, '*');
-  });
+  const clearButton = createButton(
+    '🗑️',
+    'Clear chat',
+    `
+      background: #ff4757;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      width: 30px;
+      height: 30px;
+      cursor: pointer;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    `,
+    () => {
+      // Send message to clear the chat in the iframe
+      iframe.contentWindow?.postMessage({ type: 'CLEAR_CHAT' }, '*');
+    }
+  );
 
   // Add retry button
-  const retryButton = document.createElement('button');
-  retryButton.innerHTML = '🔄';
-  retryButton.title = 'Retry last message';
-  retryButton.style.cssText = `
-    background: #374151;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    width: 30px;
-    height: 30px;
-    cursor: pointer;
-    font-size: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  `;
-  retryButton.addEventListener('click', () => {
-    // Send message to retry the last message in the iframe
-    iframe.contentWindow?.postMessage({ type: 'RETRY_LAST_MESSAGE' }, '*');
-  });
+  const retryButton = createButton(
+    '🔄',
+    'Retry last message',
+    `
+      background: #374151;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      width: 30px;
+      height: 30px;
+      cursor: pointer;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    `,
+    () => {
+      // Send message to retry the last message in the iframe
+      iframe.contentWindow?.postMessage({ type: 'RETRY_LAST_MESSAGE' }, '*');
+    }
+  );
 
   // Add close button
-  const closeButton = document.createElement('button');
-  closeButton.innerHTML = '✕';
-  closeButton.title = 'Close iframe';
-  closeButton.style.cssText = `
-    background: #4f46e5;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    width: 30px;
-    height: 30px;
-    cursor: pointer;
-    font-size: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  `;
-  closeButton.addEventListener('click', () => {
-    removeChatPopup();
-  });
+  const closeButton = createButton(
+    '✕',
+    'Close iframe',
+    `
+      background: #4f46e5;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      width: 30px;
+      height: 30px;
+      cursor: pointer;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    `,
+    () => {
+      removeChatPopup();
+    }
+  );
 
   // Add escape key listener to close the iframe
   const handleEscape = (event: KeyboardEvent) => {

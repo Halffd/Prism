@@ -48,6 +48,10 @@ import {
   AppDispatch
 } from '@prism/redux-store';
 import './Popup.scss';
+import { InputSection } from './InputSection';
+import { HeaderSection } from './HeaderSection';
+import { ImageGenerationSection } from './ImageGenerationSection';
+import { IframeInjectionSection } from './IframeInjectionSection';
 
 // Initialize with default settings - will be overridden by stored settings
 const defaultAIConfig: AIConfig = {
@@ -1536,163 +1540,28 @@ export function Popup() {
 
   return (
     <div className="popup-container">
-      <div className="popup-header">
-        <h1>💎 Prism</h1>
-        <div className="header-actions">
-          <button onClick={() => setShowMenu(true)} className="menu-btn">☰</button>
-          {/* Close button for popup when in browser action mode */}
-          <button
-            onClick={() => {
-              if (typeof window !== 'undefined' && window.close) {
-                window.close();
-              }
-            }}
-            className="close-btn"
-            title="Close popup"
-            style={{ display: typeof window !== 'undefined' && window.location?.pathname?.includes('index.html') ? 'block' : 'none' }}
-          >
-            ✕
-          </button>
-          {reduxContext && (
-            <span className="context-indicator" title={reduxContext.title}>
-              📄 {reduxContext.type}
-            </span>
-          )}
-          <select
-            value={reduxAIConfig.provider}
-            onChange={(e) => {
-              const newProvider = e.target.value as AIConfig['provider'];
-              const updatedConfig = { ...reduxAIConfig, provider: newProvider };
-              dispatch(updateAIConfig(updatedConfig));
-              client.updateAIConfig(updatedConfig);
-            }}
-            className="provider-selector"
-            title="Select AI provider"
-          >
-            <option value="openai">OpenAI</option>
-            <option value="gemini">Gemini</option>
-            <option value="claude">Claude</option>
-            <option value="qwen">Qwen</option>
-            <option value="prism-api">Prism API</option>
-            <option value="koboldcpp">KoboldCPP</option>
-            <option value="llamacpp">Llama.cpp</option>
-            <option value="ollama">Ollama</option>
-            <option value="sglang">SGLang</option>
-            <option value="transformers">Transformers</option>
-            <option value="deepseek">DeepSeek</option>
-            <option value="grok">Grok</option>
-            <option value="openrouter">OpenRouter</option>
-            <option value="poe">Poe</option>
-          </select>
-
-          <select
-            value={reduxAIConfig.model || ''}
-            onChange={(e) => updateModel(e.target.value)}
-            className="model-selector"
-            title="Select AI model"
-            disabled={fetchingModels || availableModels.length === 0}
-          >
-            {fetchingModels ? (
-              <option value="">Loading models...</option>
-            ) : availableModels.length > 0 ? (
-              availableModels.map(model => (
-                <option key={model} value={model}>
-                  {model}
-                </option>
-              ))
-            ) : (
-              <option value="">No models available</option>
-            )}
-          </select>
-
-          <button
-            onClick={() => fetchAvailableModels(aiConfig)}
-            className="refresh-models-btn"
-            title="Refresh available models"
-            disabled={fetchingModels}
-          >
-            {fetchingModels ? '🔄' : '♻️'}
-          </button>
-          <div className={`w-2 h-2 rounded-full mr-2 ${isOnline ? 'bg-green-500' : 'bg-red-500'}`}
-               title={isOnline ? 'Online' : 'Offline'}></div>
-          <button
-            onClick={syncFromAPI}
-            className="sync-from-btn"
-            title="Sync from Prism API"
-            disabled={!isOnline}
-          >
-            📥
-          </button>
-          <button
-            onClick={syncToAPI}
-            className="sync-to-btn"
-            title="Sync to Prism API"
-            disabled={!isOnline}
-          >
-            📤
-          </button>
-          <button
-            onClick={toggleAutoSync}
-            className="autosync-btn"
-            title={autoSyncEnabled ? "Stop Auto-Sync" : "Start Auto-Sync"}
-            disabled={!isOnline}
-          >
-            {autoSyncEnabled ? '⏸️' : '▶️'}
-          </button>
-          <button
-            onClick={() => chrome.runtime.openOptionsPage()}
-            className="settings-btn"
-            title="Settings"
-          >
-            ⚙️
-          </button>
-          <button
-            onClick={clearHistory}
-            className="clear-btn"
-            title="Clear Chat"
-          >
-            🗑️
-          </button>
-          {isAuthenticated ? (
-            <div className="flex items-center gap-2">
-              <span className="text-xs truncate max-w-[100px]">{user?.displayName || user?.email}</span>
-              <button
-                onClick={signOut}
-                className="auth-signout-btn"
-                title="Sign Out"
-              >
-                👤
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={signInWithGoogle}
-              className="auth-signin-btn"
-              title="Sign In with Google"
-              disabled={!isOnline}
-            >
-              🔐
-            </button>
-          )}
-          <span className="provider-indicator" title={`Current provider: ${reduxAIConfig.provider}`}>
-            {reduxAIConfig.provider === 'openai' && '🤖'}
-            {reduxAIConfig.provider === 'gemini' && '⭐'}
-            {reduxAIConfig.provider === 'claude' && '🤝'}
-            {reduxAIConfig.provider === 'qwen' && '☁️'}
-            {reduxAIConfig.provider === 'prism-api' && '💎'}
-            {reduxAIConfig.provider === 'koboldcpp' && '👻'}
-            {reduxAIConfig.provider === 'llamacpp' && '🦙'}
-            {reduxAIConfig.provider === 'ollama' && '🦙'}
-            {reduxAIConfig.provider === 'sglang' && '⚡'}
-            {reduxAIConfig.provider === 'transformers' && '🔄'}
-            {reduxAIConfig.provider === 'deepseek' && '🔍'}
-            {reduxAIConfig.provider === 'grok' && '🤖'}
-            {reduxAIConfig.provider === 'openrouter' && '🌐'}
-            {reduxAIConfig.provider === 'poe' && '💬'}
-            <span className="provider-name">{reduxAIConfig.provider}</span>
-          </span>
-        </div>
-      </div>
+      <HeaderSection
+        context={reduxContext}
+        aiConfig={reduxAIConfig}
+        availableModels={availableModels}
+        fetchingModels={fetchingModels}
+        isOnline={isOnline}
+        setShowMenu={setShowMenu}
+        updateAIConfig={(config) => {
+          dispatch(updateAIConfig(config));
+          client.updateAIConfig(config);
+        }}
+        updateModel={updateModel}
+        fetchAvailableModels={fetchAvailableModels}
+        syncFromAPI={syncFromAPI}
+        syncToAPI={syncToAPI}
+        toggleAutoSync={toggleAutoSync}
+        user={user}
+        isAuthenticated={isAuthenticated}
+        signInWithGoogle={signInWithGoogle}
+        signOut={signOut}
+        autoSyncEnabled={autoSyncEnabled}
+      />
 
       <div className="messages-container">
         {messages.length === 0 ? (
@@ -1760,226 +1629,50 @@ export function Popup() {
         <div ref={messagesEndRef} />
       </div>
 
-      {generatedImage ? (
-        <div className="image-generation-result">
-          <h3>Generated Image</h3>
-          <img src={generatedImage} alt="Generated" style={{ maxWidth: '100%', borderRadius: '8px' }} />
-          <div className="image-actions">
-            <button
-              onClick={() => setGeneratedImage(null)}
-              className="action-btn"
-            >
-              Generate New
-            </button>
-            <button
-              onClick={() => {
-                // Create a download link for the image
-                const link = document.createElement('a');
-                link.href = generatedImage;
-                link.download = `generated-image-${Date.now()}.png`;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-              }}
-              className="action-btn"
-            >
-              Download
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="image-generation-section">
-          <div className="image-generation-controls">
-            <input
-              type="text"
-              value={imageGenerationPrompt}
-              onChange={(e) => setImageGenerationPrompt(e.target.value)}
-              placeholder="Enter image generation prompt..."
-              className="image-prompt-input"
-              disabled={isGeneratingImage}
-            />
-            <button
-              onClick={generateImage}
-              disabled={isGeneratingImage || !imageGenerationPrompt.trim() || !imageGenerationApiKey}
-              className="image-generate-btn"
-            >
-              {isGeneratingImage ? 'Generating...' : 'Generate Image'}
-            </button>
-          </div>
-        </div>
-      )}
+      <ImageGenerationSection
+        generatedImage={generatedImage}
+        imageGenerationPrompt={imageGenerationPrompt}
+        setImageGenerationPrompt={setImageGenerationPrompt}
+        generateImage={generateImage}
+        isGeneratingImage={isGeneratingImage}
+        imageGenerationApiKey={imageGenerationApiKey}
+      />
 
       {/* Iframe Injection Section */}
-      <div className="iframe-injection-section">
-        <div className="iframe-controls">
-          <input
-            type="text"
-            value={iframeUrl}
-            onChange={(e) => setIframeUrl(e.target.value)}
-            placeholder="Enter URL to inject into iframe..."
-            className="iframe-url-input"
-          />
-          <button
-            onClick={injectIframe}
-            disabled={!iframeUrl.trim() || isIframeInjected}
-            className="inject-iframe-btn"
-          >
-            {isIframeInjected ? 'Injected ✓' : 'Inject Iframe'}
-          </button>
-          {isIframeInjected && (
-            <button
-              onClick={removeIframe}
-              className="remove-iframe-btn"
-            >
-              Remove Iframe
-            </button>
-          )}
-        </div>
-        {iframeError && (
-          <div className="iframe-error">
-            Error: {iframeError}
-          </div>
-        )}
-      </div>
+      <IframeInjectionSection
+        iframeUrl={iframeUrl}
+        setIframeUrl={setIframeUrl}
+        injectIframe={injectIframe}
+        isIframeInjected={isIframeInjected}
+        removeIframe={removeIframe}
+        iframeError={iframeError}
+      />
 
-      <div className="input-container">
-        <div className="input-actions">
-          <button
-            className={`action-btn ${sendSelectedText || textSelectionMode ? 'active' : ''}`}
-            onClick={() => {
-              setSendSelectedText(!sendSelectedText);
-              setTextSelectionMode(!textSelectionMode);
-            }}
-            title="Include selected text in your message (Ctrl+Shift+T or Shift+1)"
-          >
-            📝
-          </button>
-          <button
-            className={`action-btn ${sendPageContents || pageContextMode ? 'active' : ''}`}
-            onClick={() => {
-              setSendPageContents(!sendPageContents);
-              setPageContextMode(!pageContextMode);
-            }}
-            title="Include page contents in your message (Ctrl+Shift+P or Shift+2)"
-          >
-            📄
-          </button>
-          <button
-            className={`action-btn ${sendScreenshot || pageScreenshotMode ? 'active' : ''}`}
-            onClick={() => {
-              setSendScreenshot(!sendScreenshot);
-              setPageScreenshotMode(!pageScreenshotMode);
-            }}
-            title="Include screenshot in your message (Ctrl+Shift+S or Shift+3)"
-          >
-            📷
-          </button>
-          <button
-            className="action-btn"
-            onClick={() => {
-              // Toggle clipboard mode
-              setClipboardMode(!clipboardMode);
-              // Add clipboard content to input
-              if (!clipboardMode) {
-                navigator.clipboard.readText().then(text => {
-                  setInput(prev => prev + (prev ? ' ' : '') + text);
-                });
-              }
-            }}
-            title="Include clipboard content in your message (Shift+4)"
-          >
-            📋
-          </button>
-          <button
-            className="action-btn"
-            onClick={() => {
-              // Toggle page info mode
-              setPageInfoMode(!pageInfoMode);
-              // Add page info to input
-              if (!pageInfoMode) {
-                const pageInfo = `URL: ${window.location.href}\nTitle: ${document.title}`;
-                setInput(prev => prev + (prev ? '\n' : '') + pageInfo);
-              }
-            }}
-            title="Include page info in your message (Shift+5)"
-          >
-            ℹ️
-          </button>
-          <button
-            className="action-btn"
-            onClick={addImageToInput}
-            title="Upload an image"
-          >
-            🖼️
-          </button>
-          <button
-            className="action-btn"
-            onClick={() => {
-              // Switch to image generation mode
-              if (!generatedImage) {
-                setImageGenerationPrompt(input);
-              }
-            }}
-            title="Generate an image based on your input"
-          >
-            🎨
-          </button>
-        </div>
-
-        {/* Display uploaded images */}
-        {uploadedImages.length > 0 && (
-          <div className="uploaded-images">
-            {uploadedImages.map((img, index) => (
-              <div key={index} className="image-preview">
-                <img src={img} alt={`Preview ${index}`} />
-                <button
-                  className="remove-image-btn"
-                  onClick={() => removeImage(index)}
-                  title="Remove image"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              sendMessage();
-            }
-          }}
-          placeholder="Ask about this page..."
-          disabled={loading}
-          rows={2}
-          autoFocus
-          onFocus={(e) => {
-            // Ensure the input gets focus when clicked
-            e.target.select();
-          }}
-        />
-        <div className="input-footer">
-          <div className="send-options">
-            {(sendSelectedText || textSelectionMode) && <span className="send-option active" title="Ctrl+Shift+T or Shift+1 to toggle">📝</span>}
-            {(sendPageContents || pageContextMode) && <span className="send-option active" title="Ctrl+Shift+P or Shift+2 to toggle">📄</span>}
-            {(sendScreenshot || pageScreenshotMode) && <span className="send-option active" title="Ctrl+Shift+S or Shift+3 to toggle">📷</span>}
-            {clipboardMode && <span className="send-option active" title="Shift+4 to toggle">📋</span>}
-            {pageInfoMode && <span className="send-option active" title="Shift+5 to toggle">ℹ️</span>}
-            {uploadedImages.length > 0 && <span className="send-option active" title="Uploaded images">🖼️ {uploadedImages.length}</span>}
-          </div>
-          <button
-            onClick={sendMessage}
-            disabled={loading || (!input.trim() && uploadedImages.length === 0)}
-            className="send-btn"
-          >
-            {loading ? '⏳' : '🚀'}
-          </button>
-        </div>
-      </div>
+      <InputSection
+        input={input}
+        setInput={setInput}
+        loading={loading}
+        uploadedImages={uploadedImages}
+        removeImage={removeImage}
+        sendMessage={sendMessage}
+        sendSelectedText={sendSelectedText}
+        setSendSelectedText={setSendSelectedText}
+        textSelectionMode={textSelectionMode}
+        setTextSelectionMode={setTextSelectionMode}
+        sendPageContents={sendPageContents}
+        setSendPageContents={setSendPageContents}
+        pageContextMode={pageContextMode}
+        setPageContextMode={setPageContextMode}
+        sendScreenshot={sendScreenshot}
+        setSendScreenshot={setSendScreenshot}
+        pageScreenshotMode={pageScreenshotMode}
+        setPageScreenshotMode={setPageScreenshotMode}
+        clipboardMode={clipboardMode}
+        setClipboardMode={setClipboardMode}
+        pageInfoMode={pageInfoMode}
+        setPageInfoMode={setPageInfoMode}
+        addImageToInput={addImageToInput}
+      />
 
       {showMenu && renderMenu()}
       {showPrompts && renderPromptShortcuts()}
