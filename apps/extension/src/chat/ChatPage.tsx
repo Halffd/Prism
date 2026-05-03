@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { MermaidRenderer } from '@prism/ui-components';
 import { UnifiedAIClient } from '@prism/api-client';
 import {
   saveChatHistory,
@@ -471,6 +472,11 @@ export function ChatPage() {
                       components={{
                         code({node, inline, className, children, ...props}) {
                           const match = /language-(\w+)/.exec(className || '');
+                          if (!inline && match && match[1] === 'mermaid') {
+                            return (
+                              <MermaidRenderer chart={String(children).replace(/\n$/, '')} />
+                            );
+                          }
                           return !inline && match ? (
                             <div className="code-block-wrapper">
                               <div className="code-header">
@@ -496,6 +502,41 @@ export function ChatPage() {
                             <code className={className} {...props}>
                               {children}
                             </code>
+                          );
+                        },
+                        table({children, ...props}) {
+                          const handleExport = () => {
+                            const tableElement = props as unknown as HTMLTableElement;
+                            if (!tableElement) return;
+                            const rows = Array.from(tableElement.querySelectorAll('tr'));
+                            const csv = rows.map(row =>
+                              Array.from(row.querySelectorAll('td, th'))
+                                .map(cell => `"${cell.textContent?.replace(/"/g, '""')}"`)
+                                .join(',')
+                            ).join('\n');
+                            
+                            const blob = new Blob([csv], { type: 'text/csv' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `table-${Date.now()}.csv`;
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            URL.revokeObjectURL(url);
+                          };
+
+                          return (
+                            <div className="table-container">
+                              <div className="table-actions">
+                                <button onClick={handleExport} title="Export CSV">
+                                  📥 Export CSV
+                                </button>
+                              </div>
+                              <table {...props}>
+                                {children}
+                              </table>
+                            </div>
                           );
                         }
                       }}

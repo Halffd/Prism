@@ -496,9 +496,110 @@
             text-align: center;
             color: var(--text-muted);
             padding: var(--spacing-2xl);
-          }
         }
       }
     }
   }
+}
+
+.mermaid-container {
+  margin: var(--spacing-sm) 0;
+  padding: var(--spacing-md);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-primary);
+  overflow-x: auto;
+
+  .mermaid-diagram {
+    svg {
+      max-width: 100%;
+      height: auto;
+    }
+  }
+
+  .export-mermaid-btn {
+    margin-top: var(--spacing-sm);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    background: var(--btn-primary-bg);
+    color: white;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: var(--font-xs);
+
+    &:hover {
+      background: var(--btn-primary-hover);
+    }
+  }
+}
+
+.mermaid-error {
+  margin: var(--spacing-sm) 0;
+  padding: var(--spacing-md);
+  background: var(--bg-secondary);
+  border: 1px solid var(--accent-red);
+  border-radius: var(--radius-md);
+
+  pre {
+    margin: var(--spacing-sm) 0;
+    white-space: pre-wrap;
+    color: var(--text-secondary);
+  }
+
+  .error-text {
+    color: var(--accent-red);
+    font-size: var(--font-sm);
+  }
+}
+
+.table-container {
+  margin: var(--spacing-sm) 0;
+  overflow-x: auto;
+
+  .table-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: var(--spacing-xs);
+
+    button {
+      padding: var(--spacing-xs) var(--spacing-sm);
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      border: 1px solid var(--border-primary);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: var(--font-xs);
+
+      &:hover {
+        background: var(--bg-hover);
+      }
+    }
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--font-sm);
+
+    th, td {
+      padding: var(--spacing-sm);
+      border: 1px solid var(--border-primary);
+      text-align: left;
+    }
+
+    th {
+      background: var(--bg-tertiary);
+      font-weight: bold;
+      color: var(--text-primary);
+    }
+
+    td {
+      color: var(--text-secondary);
+    }
+
+    tr:nth-child(even) {
+      background: var(--bg-secondary);
+    }
+  }
+}
 }
