@@ -72,6 +72,34 @@ export class UnifiedAIClient {
       serviceConfig.apiUrl = 'https://openrouter.ai/api/v1';
     }
 
+    // Set API URLs for new providers
+    if (serviceConfig.provider === 'nvidia-nim') {
+      serviceConfig.apiUrl = serviceConfig.apiUrl || 'https://integrate.api.nvidia.com/v1';
+    }
+
+    if (serviceConfig.provider === 'groq') {
+      serviceConfig.apiUrl = 'https://api.groq.com/openai/v1';
+    }
+
+    if (serviceConfig.provider === 'cerebras') {
+      serviceConfig.apiUrl = 'https://api.cerebras.ai/v1';
+    }
+
+    if (serviceConfig.provider === 'cloudflare-workers') {
+      // Cloudflare Workers AI requires account ID in URL
+      // Format: https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/...
+      // The account_id should be set in the apiUrl or providerKey
+      serviceConfig.apiUrl = serviceConfig.apiUrl || 'https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run';
+    }
+
+    if (serviceConfig.provider === 'fireworks') {
+      serviceConfig.apiUrl = 'https://api.fireworks.ai/inference/v1';
+    }
+
+    if (serviceConfig.provider === 'zai') {
+      serviceConfig.apiUrl = 'https://api.z.ai/v1';
+    }
+
     return serviceConfig;
   }
 
