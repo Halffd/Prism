@@ -8,17 +8,18 @@ services:
     environment:
       POSTGRES_DB: postgres
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
       - '5432:5432'
     volumes:
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U postgres']
       interval: 10s
       timeout: 5s
       retries: 10
-  
+
   supabase-auth:
     image: supabase/gotrue:v2
     depends_on:
@@ -26,20 +27,20 @@ services:
         condition: service_healthy
     restart: always
     environment:
-      GOTRUE_JWT_SECRET: your-super-secret-jwt-token-with-at-least-32-characters-long
-      GOTRUE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5NTAwMDExMDB9.ImIH1KrPX73Yd4uVw3f7A_13iF_6N6d696000000000
-      GOTRUE_SERVICE_ROLE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InN1cGFiYXNlX3NlcnZpY2Vfcm9sZSIsImV4cCI6MTk1MDAwMTEwMH0.2VkSq4bM8YpVS2Laq4TZQ5OaEhiuNYk0RkX_3F14w00
+      GOTRUE_JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-token-with-at-least-32-characters-long}
+      GOTRUE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
+      GOTRUE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
       GOTRUE_EXTERNAL_EMAIL_ENABLED: 'true'
-      GOTRUE_MAILER_HOST: smtp.gmail.com
-      GOTRUE_MAILER_PORT: '587'
-      GOTRUE_MAILER_USER: ''
-      GOTRUE_MAILER_PASS: ''
+      GOTRUE_MAILER_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      GOTRUE_MAILER_PORT: ${SMTP_PORT:-587}
+      GOTRUE_MAILER_USER: ${SMTP_USER:-}
+      GOTRUE_MAILER_PASS: ${SMTP_PASS:-}
       GOTRUE_MAILER_SECURE: 'false'
-      GOTRUE_SITE_URL: 'http://localhost:3000'
+      GOTRUE_SITE_URL: ${SITE_URL:-http://localhost:3000}
     labels:
       - 'com.supabase.enabled=false'
 
-  # Prism backend API
+  # Prism backend API (NestJS)
   prism-api:
     build:
       context: .
@@ -50,13 +51,57 @@ services:
       - '3000:3000'
     environment:
       - NEXT_PUBLIC_SUPABASE_URL=http://supabase-db:5432
-      - SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InN1cGFiYXNlX3NlcnZpY2Vfcm9sZSIsImV4cCI6MTk1MDAwMTEwMH0.2VkSq4bM8YpVS2Laq4TZQ5OaEhiuNYk0RkX_3F14w00
-      - DATABASE_URL=postgresql://postgres:postgres@supabase-db:5432/postgres
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@supabase-db:5432/postgres}
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      - LLM_MODEL=${LLM_MODEL:-gpt-3.5-turbo}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - GROK_API_KEY=${GROK_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - NVIDIA_NIM_API_KEY=${NVIDIA_NIM_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY:-}
+      - CLOUDFLARE_WORKERS_API_KEY=${CLOUDFLARE_WORKERS_API_KEY:-}
+      - FIREWORKS_API_KEY=${FIREWORKS_API_KEY:-}
+      - ZAI_API_KEY=${ZAI_API_KEY:-}
+      - OLLAMA_API_URL=http://ollama:11434
     restart: always
     labels:
       - 'traefik.enable=true'
-      - 'traefik.http.routers.prism-api.rule=Host(`api.yourdomain.com`)'
+      - 'traefik.http.routers.prism-api.rule=Host(`api.${DOMAIN:-localhost}`)'
       - 'traefik.http.services.prism-api.loadbalancer.server.port=3000'
+
+  # Prism Hono backend (lightweight edge API)
+  prism-hono:
+    build:
+      context: .
+      dockerfile: Dockerfile.hono
+    depends_on:
+      - supabase-db
+      - redis
+    ports:
+      - '3002:3002'
+    environment:
+      - PORT=3002
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@supabase-db:5432/postgres}
+      - REDIS_URL=redis://redis:6379
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      - LLM_MODEL=${LLM_MODEL:-gpt-3.5-turbo}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - NVIDIA_NIM_API_KEY=${NVIDIA_NIM_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY:-}
+      - FIREWORKS_API_KEY=${FIREWORKS_API_KEY:-}
+      - OLLAMA_API_URL=http://ollama:11434
+    restart: always
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.http.routers.prism-hono.rule=Host(`hono.${DOMAIN:-localhost}`)'
+      - 'traefik.http.services.prism-hono.loadbalancer.server.port=3002'
 
   # Prism web application
   prism-web:
@@ -68,13 +113,33 @@ services:
     ports:
       - '3001:3000'
     environment:
-      - NEXT_PUBLIC_SUPABASE_URL=http://localhost:54321
-      - NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5NTAwMDExMDB9.ImIH1KrPX73Yd4uVw3f7A_13iF_6N6d696000000000
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL:-http://localhost:54321}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
+      - NEXT_PUBLIC_API_URL=http://prism-api:3000/api
     restart: always
     labels:
       - 'traefik.enable=true'
-      - 'traefik.http.routers.prism-web.rule=Host(`app.yourdomain.com`)'
+      - 'traefik.http.routers.prism-web.rule=Host(`app.${DOMAIN:-localhost}`)'
       - 'traefik.http.services.prism-web.loadbalancer.server.port=3000'
+
+  # Ollama for local LLM inference
+  ollama:
+    image: ollama/ollama:latest
+    restart: always
+    ports:
+      - '11434:11434'
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # Uncomment for CPU-only mode:
+    # deploy:
+    #   resources: {}
 
   # Traefik reverse proxy
   traefik:
@@ -87,18 +152,18 @@ services:
       - '--entrypoints.websecure.address=:443'
       - '--certificatesresolvers.le.acme.httpchallenge=true'
       - '--certificatesresolvers.le.acme.challenge.httpchallenge.entrypoint=web'
-      - '--certificatesresolvers.le.acme.email=your-email@example.com'
+      - '--certificatesresolvers.le.acme.email=${ACME_EMAIL:-your-email@example.com}'
       - '--certificatesresolvers.le.acme.storage=/letsencrypt/acme.json'
     ports:
       - '80:80'
       - '443:443'
-      - '8080:8080'  # Traefik dashboard
+      - '8080:8080' # Traefik dashboard
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./letsencrypt:/letsencrypt
     restart: always
 
-  # Optional: Redis for caching
+  # Redis for caching
   redis:
     image: redis:7-alpine
     restart: always
@@ -111,4 +176,5 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  ollama_data:
   letsencrypt:
