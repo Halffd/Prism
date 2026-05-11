@@ -784,14 +784,32 @@ export class AIService {
   private async claudeChatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
     const { messages, config } = request;
 
-    // Claude API uses Anthropic's API
     const apiUrl = config.localApiUrl || config.apiUrl || 'https://api.anthropic.com/v1';
 
-    // Format messages differently for Claude
-    const claudeMessages = messages.filter(msg => msg.role !== 'system').map(msg => ({
-      role: msg.role === 'user' ? 'user' : 'assistant',
-      content: msg.content
-    }));
+    const claudeMessages = messages.filter(msg => msg.role !== 'system').map(msg => {
+      if (msg.images && msg.images.length > 0) {
+        const content: Array<{type: string; text?: string; source?: {type: string; media_type: string; data: string}}> = [];
+        if (msg.content) {
+          content.push({ type: 'text', text: msg.content });
+        }
+        msg.images.forEach(image => {
+          const matches = image.match(/^data:(image\/[^;]+);base64,(.+)$/);
+          if (matches) {
+            content.push({
+              type: 'image',
+              source: { type: 'base64', media_type: matches[1], data: matches[2] }
+            });
+          } else {
+            content.push({
+              type: 'image',
+              source: { type: 'base64', media_type: 'image/png', data: image.replace(/^data:image\/\w+;base64,/, '') }
+            });
+          }
+        });
+        return { role: msg.role === 'user' ? 'user' : 'assistant', content };
+      }
+      return { role: msg.role === 'user' ? 'user' : 'assistant', content: msg.content };
+    });
 
     const response = await axios.post(
       `${apiUrl}/messages`,
@@ -821,19 +839,13 @@ export class AIService {
   private async deepseekChatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
     const { messages, config } = request;
 
-    // DeepSeek API is similar to OpenAI's API format
     const apiUrl = config.localApiUrl || config.apiUrl || 'https://api.deepseek.com';
-
-    const deepseekMessages = messages.map(msg => ({
-      role: msg.role,
-      content: msg.content
-    }));
 
     const response = await axios.post(
       `${apiUrl}/chat/completions`,
       {
         model: config.model || 'deepseek-chat',
-        messages: deepseekMessages,
+        messages: this.formatOpenAICompatibleMessages(messages),
         temperature: config.temperature || 0.7,
         max_tokens: config.maxTokens || 1024,
         top_p: config.topP || 0.9
@@ -856,19 +868,13 @@ export class AIService {
   private async grokChatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
     const { messages, config } = request;
 
-    // Grok API (x.ai) endpoint
     const apiUrl = config.localApiUrl || config.apiUrl || 'https://api.x.ai/v1';
-
-    const grokMessages = messages.map(msg => ({
-      role: msg.role,
-      content: msg.content
-    }));
 
     const response = await axios.post(
       `${apiUrl}/chat/completions`,
       {
         model: config.model || 'grok-beta',
-        messages: grokMessages,
+        messages: this.formatOpenAICompatibleMessages(messages),
         temperature: config.temperature || 0.7,
         max_tokens: config.maxTokens || 1024,
         top_p: config.topP || 0.9
@@ -891,19 +897,13 @@ export class AIService {
   private async openrouterChatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
     const { messages, config } = request;
 
-    // OpenRouter API endpoint
     const apiUrl = config.localApiUrl || config.apiUrl || 'https://openrouter.ai/api/v1';
-
-    const openrouterMessages = messages.map(msg => ({
-      role: msg.role,
-      content: msg.content
-    }));
 
     const response = await axios.post(
       `${apiUrl}/chat/completions`,
       {
         model: config.model || 'openchat/openchat-7b',
-        messages: openrouterMessages,
+        messages: this.formatOpenAICompatibleMessages(messages),
         temperature: config.temperature || 0.7,
         max_tokens: config.maxTokens || 1024,
         top_p: config.topP || 0.9
@@ -950,10 +950,7 @@ export class AIService {
       config.apiUrl || 'https://integrate.api.nvidia.com/v1/chat/completions',
       {
         model: config.model || 'meta/llama3-8b-instruct',
-        messages: messages.map(msg => ({
-          role: msg.role,
-          content: msg.content
-        })),
+        messages: this.formatOpenAICompatibleMessages(messages),
         temperature: config.temperature,
         max_tokens: config.maxTokens,
         top_p: config.topP
@@ -979,10 +976,7 @@ export class AIService {
       'https://api.groq.com/openai/v1/chat/completions',
       {
         model: config.model || 'llama3-8b-8192',
-        messages: messages.map(msg => ({
-          role: msg.role,
-          content: msg.content
-        })),
+        messages: this.formatOpenAICompatibleMessages(messages),
         temperature: config.temperature,
         max_tokens: config.maxTokens,
         top_p: config.topP
@@ -1061,10 +1055,7 @@ export class AIService {
       'https://api.fireworks.ai/inference/v1/chat/completions',
       {
         model: config.model || 'accounts/fireworks/models/llama-v3p1-8b-instruct',
-        messages: messages.map(msg => ({
-          role: msg.role,
-          content: msg.content
-        })),
+        messages: this.formatOpenAICompatibleMessages(messages),
         temperature: config.temperature,
         max_tokens: config.maxTokens
       },
@@ -1109,5 +1100,21 @@ export class AIService {
       tokensUsed: response.data.usage?.total_tokens,
       model: response.data.model
     };
+  }
+
+  private formatOpenAICompatibleMessages(messages: Message[]) {
+    return messages.map(msg => {
+      if (msg.images && msg.images.length > 0) {
+        const content: Array<{type: string; text?: string; image_url?: {url: string}}> = [];
+        if (msg.content) {
+          content.push({ type: 'text', text: msg.content });
+        }
+        msg.images.forEach(image => {
+          content.push({ type: 'image_url', image_url: { url: image } });
+        });
+        return { role: msg.role, content };
+      }
+      return { role: msg.role, content: msg.content };
+    });
   }
 }
