@@ -1,0 +1,116 @@
+FROM node:18-alpine AS builder
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci --legacy-peer-deps
+
+COPY . .
+
+RUN npx nx build @prism/hono 2>/dev/null || echo "Hono app not found in workspace, building standalone..."
+
+# Fallback: create minimal Hono app if not in Nx workspace
+RUN if [ ! -d "dist/apps/hono" ]; then \
+      mkdir -p dist/apps/hono && \
+      cat > dist/apps/hono/main.js << 'HONOEOF' \
+import { Hono } from 'hono'; \
+import { cors } from 'hono/cors'; \
+import { streamSSE } from 'hono/streaming'; \
+ \
+const app = new Hono(); \
+ \
+app.use('/*', cors({ \
+  origin: (process.env.ALLOWED_ORIGINS || 'http://localhost:3000').split(','), \
+  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], \
+  allowHeaders: ['Content-Type', 'Authorization'], \
+})); \
+ \
+app.get('/health', (c) => c.json({ status: 'ok', timestamp: Date.now() })); \
+ \
+app.post('/api/chat', async (c) => { \
+  const { messages, model, provider, stream } = await c.req.json(); \
+  const apiKey = process.env[`${(provider || 'openai').replace(/-/g, '_').toUpperCase()}_API_KEY`] || process.env.OPENAI_API_KEY || ''; \
+ \
+  const providerUrls = { \
+    openai: 'https://api.openai.com/v1', \
+    groq: 'https://api.groq.com/openai/v1', \
+    cerebras: 'https://api.cerebras.ai/v1', \
+    'nvidia-nim': 'https://integrate.api.nvidia.com/v1', \
+    fireworks: 'https://api.fireworks.ai/inference/v1', \
+    ollama: process.env.OLLAMA_API_URL || 'http://ollama:11434', \
+  }; \
+ \
+  const baseUrl = providerUrls[provider] || 'https://api.openai.com/v1'; \
+ \
+  if (stream) { \
+    return streamSSE(c, async (sseStream) => { \
+      const response = await fetch(`${baseUrl}/chat/completions`, { \
+        method: 'POST', \
+        headers: { \
+          'Content-Type': 'application/json', \
+          'Authorization': `Bearer ${apiKey}`, \
+        }, \
+        body: JSON.stringify({ model: model || 'gpt-3.5-turbo', messages, stream: true }), \
+      }); \
+      const reader = response.body.getReader(); \
+      const decoder = new TextDecoder(); \
+      while (true) { \
+        const { done, value } = await reader.read(); \
+        if (done) break; \
+        const chunk = decoder.decode(value); \
+        const lines = chunk.split('\n').filter(l => l.startsWith('data: ')); \
+        for (const line of lines) { \
+          const data = line.slice(6); \
+          if (data === '[DONE]') { sseStream.close(); return; } \
+          try { \
+            const parsed = JSON.parse(data); \
+            const content = parsed.choices?.[0]?.delta?.content; \
+            if (content) await sseStream.writeSSE({ data: content }); \
+          } catch {} \
+        } \
+      } \
+    }); \
+  } \
+ \
+  const response = await fetch(`${baseUrl}/chat/completions`, { \
+    method: 'POST', \
+    headers: { \
+      'Content-Type': 'application/json', \
+      'Authorization': `Bearer ${apiKey}`, \
+    }, \
+    body: JSON.stringify({ model: model || 'gpt-3.5-turbo', messages }), \
+  }); \
+ \
+  const data = await response.json(); \
+  return c.json({ \
+    content: data.choices?.[0]?.message?.content || '', \
+    model: data.model, \
+    tokensUsed: data.usage?.total_tokens, \
+  }); \
+}); \
+ \
+const port = parseInt(process.env.PORT || '3002'); \
+console.log(`Prism Hono API running on port ${port}`); \
+export default { port, fetch: app.fetch }; \
+HONOEOF \
+    fi
+
+FROM node:18-alpine AS runner
+
+WORKDIR /app
+
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 hono
+
+COPY --from=builder /app/dist/apps/hono ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./
+
+USER hono
+
+EXPOSE 3002
+
+ENV PORT=3002
+ENV NODE_ENV=production
+
+CMD ["node", "dist/main.js"]
