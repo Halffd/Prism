@@ -129,5 +129,24 @@ export interface ExtensionSettings {
   clipboardKey?: string;            // Key to toggle clipboard mode (default: '4')
   pageInfoKey?: string;             // Key to toggle page info mode (default: '5')
   iframeToggleKey?: string;         // Key to toggle iframe show/hide (default: '`')
-  systemPrompt?: string;            // System prompt applied to all conversations (default: '')
+  systemPrompt?: string; // System prompt applied to all conversations (default: '')
+}
+
+export interface AudioTranscriptionResponse {
+  text: string;
+  language?: string;
+  duration?: number;
+}
+
+export interface TTSOptions {
+  model?: string;
+  voice?: 'alloy' | 'ash' | 'ballad' | 'coral' | 'echo' | 'sage' | 'shimmer' | 'verse';
+  speed?: number;
+  responseFormat?: 'mp3' | 'opus' | 'aac' | 'flac' | 'wav';
+}
+
+export interface AudioServiceConfig {
+  apiKey: string;
+  apiUrl?: string;
+  provider?: AIProvider;
 }
