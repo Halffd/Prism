@@ -69,6 +69,7 @@ export function StandaloneChatPage() {
   // Image file upload state
   const [uploadedImages, setUploadedImages] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [dragOver, setDragOver] = useState<boolean>(false);
 
   // Image generation state
   const [imageGenerationPrompt, setImageGenerationPrompt] = useState<string>('');
@@ -658,6 +659,59 @@ export function StandaloneChatPage() {
     input.click();
   };
 
+  const handlePasteImage = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            const imageData = event.target?.result as string;
+            setUploadedImages(prev => [...prev, imageData]);
+          };
+          reader.readAsDataURL(file);
+        }
+        return;
+      }
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+
+    const files = e.dataTransfer?.files;
+    if (!files) return;
+
+    for (const file of Array.from(files)) {
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const imageData = event.target?.result as string;
+          setUploadedImages(prev => [...prev, imageData]);
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+  };
+
   // Render menu for switching sessions
   const renderMenu = () => (
     <div className="menu-overlay">
@@ -986,8 +1040,18 @@ export function StandaloneChatPage() {
           </div>
         )}
 
-        <div className="input-container">
-          <div className="input-actions">
+      <div
+        className={`input-container${dragOver ? ' drag-over' : ''}`}
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+      >
+        {dragOver && (
+          <div className="drop-overlay">
+            <span>Drop images here</span>
+          </div>
+        )}
+        <div className="input-actions">
             <button
               className={`action-btn ${sendSelectedText ? 'active' : ''}`}
               onClick={() => setSendSelectedText(!sendSelectedText)}
@@ -1048,37 +1112,35 @@ export function StandaloneChatPage() {
             </div>
           )}
 
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                const trimmedInput = input.trim();
+        <textarea
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              const trimmedInput = input.trim();
 
-                // Look for a prompt with shortcutKey that matches the entire input
-                const prompt = promptShortcuts.find(p => p.shortcutKey === trimmedInput);
+              const prompt = promptShortcuts.find(p => p.shortcutKey === trimmedInput);
 
-                if (prompt) {
-                  e.preventDefault(); // Prevent sending the message
+              if (prompt) {
+                e.preventDefault();
 
-                  // Replace the command with the prompt content
-                  const newInput = prompt.content;
-                  setInput(newInput);
+                const newInput = prompt.content;
+                setInput(newInput);
 
-                  // After updating the input, send the message
-                  setTimeout(() => {
-                    sendMessage();
-                  }, 0);
-                } else {
-                  e.preventDefault();
+                setTimeout(() => {
                   sendMessage();
-                }
+                }, 0);
+              } else {
+                e.preventDefault();
+                sendMessage();
               }
-            }}
-            placeholder="Ask anything..."
-            disabled={loading}
-            rows={2}
-          />
+            }
+          }}
+          onPaste={handlePasteImage}
+          placeholder="Ask anything... (paste or drop images)"
+          disabled={loading}
+          rows={2}
+        />
           <div className="input-footer">
             <div className="send-options">
               {sendSelectedText && <span className="send-option active" title="Selected text">📝</span>}
