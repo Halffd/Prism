@@ -31,7 +31,14 @@
         "default": "Ctrl+Shift+P",
         "mac": "MacCtrl+Shift+P"
       },
-      "description": "Open Prism Chat"
+      "description": "Open Prism Popup"
+    },
+    "open-chat-tab": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+L",
+        "mac": "MacCtrl+Shift+L"
+      },
+      "description": "Open Prism Chat in New Tab"
     }
   },
   "content_scripts": [
