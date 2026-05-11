@@ -300,6 +300,26 @@
   0%, 100% { opacity: 1; }
   50% { opacity: 0.6; }
 }
+
+.tts-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: var(--font-xs);
+  padding: var(--spacing-xs);
+  border-radius: var(--radius-sm);
+  opacity: 0.5;
+  transition: opacity 0.2s;
+
+  &:hover {
+    opacity: 1;
+  }
+}
+
+.action-btn.processing {
+  opacity: 0.6;
+  cursor: wait;
+}
   }
 }
 

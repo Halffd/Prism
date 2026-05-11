@@ -32,6 +32,8 @@ interface InputSectionProps {
   onDragLeave?: (e: React.DragEvent) => void;
   dragOver?: boolean;
   onVoiceTranscript?: (text: string) => void;
+  voiceClient?: any;
+  useWhisper?: boolean;
 }
 
 export const InputSection: React.FC<InputSectionProps> = ({
@@ -63,7 +65,9 @@ export const InputSection: React.FC<InputSectionProps> = ({
   onDragOver,
   onDragLeave,
   dragOver,
-  onVoiceTranscript
+  onVoiceTranscript,
+  voiceClient,
+  useWhisper
 }) => {
   return (
     <div
@@ -143,7 +147,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
           🖼️
         </button>
         {onVoiceTranscript && (
-          <VoiceInput onTranscript={onVoiceTranscript} disabled={loading} />
+          <VoiceInput onTranscript={onVoiceTranscript} disabled={loading} client={voiceClient} useWhisper={useWhisper} />
         )}
       </div>
 

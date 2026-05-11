@@ -936,6 +936,58 @@ export function Popup() {
     setInput(prev => prev + (prev ? ' ' : '') + text);
   };
 
+  const [speaking, setSpeaking] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const speakMessage = async (msg: Message) => {
+    if (speaking === msg.id) {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+      setSpeaking(null);
+      return;
+    }
+
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+
+    if (client && aiConfig.providerKeys?.['openai']) {
+      try {
+        const result = await client.textToSpeech(msg.content, { voice: 'alloy', responseFormat: 'mp3' });
+        if (result.success && result.data) {
+          const url = URL.createObjectURL(result.data);
+          const audio = new Audio(url);
+          audioRef.current = audio;
+          setSpeaking(msg.id);
+          audio.onended = () => {
+            setSpeaking(null);
+            URL.revokeObjectURL(url);
+            audioRef.current = null;
+          };
+          audio.play();
+          return;
+        }
+      } catch {}
+    }
+
+    if ('speechSynthesis' in window) {
+      const utterance = new SpeechSynthesisUtterance(msg.content);
+      utterance.onend = () => setSpeaking(null);
+      utterance.onerror = () => setSpeaking(null);
+      setSpeaking(msg.id);
+      window.speechSynthesis.speak(utterance);
+    }
+  };
+
   const checkPendingQuery = async () => {
     const result = await chrome.storage.local.get('pendingQuery');
     if (result.pendingQuery) {
@@ -1671,9 +1723,18 @@ export function Popup() {
                     }
                   }}
                 >
-                  {msg.content}
-                </ReactMarkdown>
-              </div>
+      {msg.content}
+      </ReactMarkdown>
+      {msg.role === 'assistant' && (
+        <button
+          className="tts-btn"
+          onClick={() => speakMessage(msg)}
+          title={speaking === msg.id ? 'Stop reading' : 'Read aloud'}
+        >
+          {speaking === msg.id ? '⏹️' : '🔊'}
+        </button>
+      )}
+    </div>
               {msg.context && (
                 <div className="message-context">
                   🔗 {msg.context.title || msg.context.url}
@@ -1735,6 +1796,8 @@ export function Popup() {
           onDragLeave={handleDragLeave}
           dragOver={dragOver}
           onVoiceTranscript={handleVoiceTranscript}
+          voiceClient={client}
+          useWhisper={true}
         />
 
       {showMenu && renderMenu()}
