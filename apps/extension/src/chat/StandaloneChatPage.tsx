@@ -712,6 +712,44 @@ export function StandaloneChatPage() {
     setDragOver(false);
   };
 
+  const [speaking, setSpeaking] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const speakMessage = async (msg: Message) => {
+    if (speaking === msg.id) {
+      if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+      if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
+      setSpeaking(null);
+      return;
+    }
+
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+    if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
+
+    if (client && aiConfig.providerKeys?.['openai']) {
+      try {
+        const result = await client.textToSpeech(msg.content, { voice: 'alloy', responseFormat: 'mp3' });
+        if (result.success && result.data) {
+          const url = URL.createObjectURL(result.data);
+          const audio = new Audio(url);
+          audioRef.current = audio;
+          setSpeaking(msg.id);
+          audio.onended = () => { setSpeaking(null); URL.revokeObjectURL(url); audioRef.current = null; };
+          audio.play();
+          return;
+        }
+      } catch {}
+    }
+
+    if ('speechSynthesis' in window) {
+      const utterance = new SpeechSynthesisUtterance(msg.content);
+      utterance.onend = () => setSpeaking(null);
+      utterance.onerror = () => setSpeaking(null);
+      setSpeaking(msg.id);
+      window.speechSynthesis.speak(utterance);
+    }
+  };
+
   // Render menu for switching sessions
   const renderMenu = () => (
     <div className="menu-overlay">
@@ -1008,9 +1046,18 @@ export function StandaloneChatPage() {
                           }
                         }}
                       >
-                        {msg.content}
-                      </ReactMarkdown>
-                    </div>
+{msg.content}
+      </ReactMarkdown>
+      {msg.role === 'assistant' && (
+        <button
+          className="tts-btn"
+          onClick={() => speakMessage(msg)}
+          title={speaking === msg.id ? 'Stop reading' : 'Read aloud'}
+        >
+          {speaking === msg.id ? '⏹️' : '🔊'}
+        </button>
+      )}
+    </div>
                     {msg.images && msg.images.length > 0 && (
                       <div className="message-images">
                         {msg.images.map((img, idx) => (
