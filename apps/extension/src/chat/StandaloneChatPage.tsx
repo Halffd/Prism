@@ -159,6 +159,44 @@ export function StandaloneChatPage() {
     };
 
     initFontScale();
+
+  // Check for pending query from context menu or URL param
+  const checkPendingQuery = async () => {
+    let pendingQuery = '';
+
+    // Try URL query param first (?q=...)
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlQuery = urlParams.get('q');
+    if (urlQuery) {
+      pendingQuery = urlQuery;
+    }
+
+    // Try chrome.storage (extension context)
+    if (!pendingQuery && typeof chrome !== 'undefined' && chrome.storage?.local) {
+      try {
+        const result = await chrome.storage.local.get(['pendingQuery', 'contextUrl', 'contextTitle']);
+        if (result.pendingQuery) {
+          pendingQuery = result.pendingQuery;
+          await chrome.storage.local.remove(['pendingQuery', 'contextUrl', 'contextTitle']);
+        }
+      } catch {}
+    }
+
+    // Try localStorage fallback
+    if (!pendingQuery) {
+      const stored = localStorage.getItem('pendingQuery');
+      if (stored) {
+        pendingQuery = stored;
+        localStorage.removeItem('pendingQuery');
+      }
+    }
+
+    if (pendingQuery) {
+      setInput(pendingQuery);
+    }
+  };
+
+  checkPendingQuery();
   }, []);
 
   // Update models when AI configuration changes
