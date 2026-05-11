@@ -5,7 +5,10 @@ import {
   ApiResponse,
   AIConfig,
   ChatSession,
-  PromptShortcut
+  PromptShortcut,
+  AudioTranscriptionResponse,
+  TTSOptions,
+  AudioServiceConfig
 } from '@prism/shared-types';
 import { networkStatusService } from './network-status';
 import { getFirebaseIdToken } from '@prism/firebase-auth/src/utils';
@@ -591,5 +594,42 @@ export class UnifiedAIClient {
         error: error.message || 'Failed to clear synced data'
       };
     }
+  }
+
+  async transcribeAudio(audioBlob: Blob): Promise<ApiResponse<AudioTranscriptionResponse>> {
+    try {
+      if (!this.aiService) {
+        return { success: false, error: 'AI service not initialized' };
+      }
+
+      const config = this.getAudioServiceConfig();
+      const result = await this.aiService.transcribeAudio(audioBlob, config);
+      return { success: true, data: result };
+    } catch (error: any) {
+      return { success: false, error: error.message || 'Transcription failed' };
+    }
+  }
+
+  async textToSpeech(text: string, options?: TTSOptions): Promise<ApiResponse<Blob>> {
+    try {
+      if (!this.aiService) {
+        return { success: false, error: 'AI service not initialized' };
+      }
+
+      const config = this.getAudioServiceConfig();
+      const audioBlob = await this.aiService.textToSpeech(text, options || {}, config);
+      return { success: true, data: audioBlob };
+    } catch (error: any) {
+      return { success: false, error: error.message || 'Text-to-speech failed' };
+    }
+  }
+
+  private getAudioServiceConfig(): AudioServiceConfig {
+    const config = this.aiConfig || {} as AIConfig;
+    return {
+      apiKey: config.providerKeys?.['openai'] || config.apiKey || '',
+      apiUrl: config.apiUrl || 'https://api.openai.com/v1',
+      provider: config.provider,
+    };
   }
 }
