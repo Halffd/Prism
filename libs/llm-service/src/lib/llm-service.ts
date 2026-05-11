@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { Message, ContextData, AIConfig } from '@prism/shared-types';
+import { Message, ContextData, AIConfig, AudioTranscriptionResponse, TTSOptions, AudioServiceConfig } from '@prism/shared-types';
 
 export interface ChatCompletionRequest {
   messages: Message[];
@@ -1116,5 +1116,50 @@ export class AIService {
       }
       return { role: msg.role, content: msg.content };
     });
+  }
+
+  async transcribeAudio(audioBlob: Blob, config: AudioServiceConfig): Promise<AudioTranscriptionResponse> {
+    const apiKey = config.apiKey || this.config.apiKey || this.config.providerKeys?.['openai'] || '';
+    const apiUrl = config.apiUrl || 'https://api.openai.com/v1';
+
+    const formData = new FormData();
+    formData.append('file', audioBlob, 'recording.webm');
+    formData.append('model', 'whisper-1');
+    formData.append('response_format', 'verbose_json');
+
+    const response = await axios.post(`${apiUrl}/audio/transcriptions`, formData, {
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      maxContentLength: 25 * 1024 * 1024,
+      maxBodyLength: 25 * 1024 * 1024,
+    });
+
+    return {
+      text: response.data.text,
+      language: response.data.language,
+      duration: response.data.duration,
+    };
+  }
+
+  async textToSpeech(text: string, options: TTSOptions, config: AudioServiceConfig): Promise<Blob> {
+    const apiKey = config.apiKey || this.config.apiKey || this.config.providerKeys?.['openai'] || '';
+    const apiUrl = config.apiUrl || 'https://api.openai.com/v1';
+
+    const response = await axios.post(`${apiUrl}/audio/speech`, {
+      model: options.model || 'tts-1',
+      input: text,
+      voice: options.voice || 'alloy',
+      speed: options.speed || 1.0,
+      response_format: options.responseFormat || 'mp3',
+    }, {
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      responseType: 'blob',
+    });
+
+    return response.data;
   }
 }
