@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import type { Message } from '@prism/shared-types';
+import { VoiceInput } from './VoiceInput';
 
 interface InputSectionProps {
   input: string;
@@ -25,6 +26,12 @@ interface InputSectionProps {
   pageInfoMode: boolean;
   setPageInfoMode: (value: boolean) => void;
   addImageToInput: () => void;
+  onPasteImage?: (e: React.ClipboardEvent) => void;
+  onDrop?: (e: React.DragEvent) => void;
+  onDragOver?: (e: React.DragEvent) => void;
+  onDragLeave?: (e: React.DragEvent) => void;
+  dragOver?: boolean;
+  onVoiceTranscript?: (text: string) => void;
 }
 
 export const InputSection: React.FC<InputSectionProps> = ({
@@ -50,10 +57,26 @@ export const InputSection: React.FC<InputSectionProps> = ({
   setClipboardMode,
   pageInfoMode,
   setPageInfoMode,
-  addImageToInput
+  addImageToInput,
+  onPasteImage,
+  onDrop,
+  onDragOver,
+  onDragLeave,
+  dragOver,
+  onVoiceTranscript
 }) => {
   return (
-    <div className="input-container">
+    <div
+      className={`input-container${dragOver ? ' drag-over' : ''}`}
+      onDrop={onDrop}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+    >
+      {dragOver && (
+        <div className="drop-overlay">
+          <span>Drop images here</span>
+        </div>
+      )}
       <div className="input-actions">
         <button
           className={`action-btn ${sendSelectedText || textSelectionMode ? 'active' : ''}`}
@@ -88,9 +111,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
         <button
           className="action-btn"
           onClick={() => {
-            // Toggle clipboard mode
             setClipboardMode(!clipboardMode);
-            // Add clipboard content to input
             if (!clipboardMode) {
               navigator.clipboard.readText().then(text => {
                 setInput(prev => prev + (prev ? ' ' : '') + text);
@@ -104,9 +125,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
         <button
           className="action-btn"
           onClick={() => {
-            // Toggle page info mode
             setPageInfoMode(!pageInfoMode);
-            // Add page info to input
             if (!pageInfoMode) {
               const pageInfo = `URL: ${window.location.href}\nTitle: ${document.title}`;
               setInput(prev => prev + (prev ? '\n' : '') + pageInfo);
@@ -123,6 +142,9 @@ export const InputSection: React.FC<InputSectionProps> = ({
         >
           🖼️
         </button>
+        {onVoiceTranscript && (
+          <VoiceInput onTranscript={onVoiceTranscript} disabled={loading} />
+        )}
       </div>
 
       {/* Display uploaded images */}
@@ -152,12 +174,12 @@ export const InputSection: React.FC<InputSectionProps> = ({
             sendMessage();
           }
         }}
-        placeholder="Ask about this page..."
+        onPaste={onPasteImage}
+        placeholder="Ask about this page... (paste or drop images)"
         disabled={loading}
         rows={2}
         autoFocus
         onFocus={(e) => {
-          // Ensure the input gets focus when clicked
           e.target.select();
         }}
       />

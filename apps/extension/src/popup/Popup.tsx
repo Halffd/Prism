@@ -149,6 +149,7 @@ export function Popup() {
   // Image file upload state
   const [uploadedImages, setUploadedImages] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [dragOver, setDragOver] = useState<boolean>(false);
 
   // Image generation state
   const [imageGenerationPrompt, setImageGenerationPrompt] = useState<string>('');
@@ -878,6 +879,63 @@ export function Popup() {
     input.click();
   };
 
+  const handlePasteImage = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            const imageData = event.target?.result as string;
+            setUploadedImages(prev => [...prev, imageData]);
+          };
+          reader.readAsDataURL(file);
+        }
+        return;
+      }
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+
+    const files = e.dataTransfer?.files;
+    if (!files) return;
+
+    for (const file of Array.from(files)) {
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const imageData = event.target?.result as string;
+          setUploadedImages(prev => [...prev, imageData]);
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+  };
+
+  const handleVoiceTranscript = (text: string) => {
+    setInput(prev => prev + (prev ? ' ' : '') + text);
+  };
+
   const checkPendingQuery = async () => {
     const result = await chrome.storage.local.get('pendingQuery');
     if (result.pendingQuery) {
@@ -1100,14 +1158,13 @@ export function Popup() {
       }
     }
 
-    if (sendScreenshot || pageScreenshotMode) {
-      const screenshot = await getScreenshot();
-      if (screenshot) {
-        // For now, we'll just add a note that a screenshot was taken
-        // In a real implementation, you'd send the image data to the AI
-        additionalContext += `\n--- Screenshot Attached ---\n`;
+      let screenshotImages: string[] = [];
+      if (sendScreenshot || pageScreenshotMode) {
+        const screenshot = await getScreenshot();
+        if (screenshot) {
+          screenshotImages.push(screenshot);
+        }
       }
-    }
 
     if (clipboardMode) {
       try {
@@ -1137,15 +1194,15 @@ export function Popup() {
       return;
     }
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: fullInput,
-      images: uploadedImages.length > 0 ? [...uploadedImages] : undefined,
-      timestamp: Date.now(),
-      tokens: totalTokens, // Include token count
-      context: freshContext
-    };
+      const userMessage: Message = {
+        id: Date.now().toString(),
+        role: 'user',
+        content: fullInput,
+        images: [...uploadedImages, ...screenshotImages].length > 0 ? [...uploadedImages, ...screenshotImages] : undefined,
+        timestamp: Date.now(),
+        tokens: totalTokens,
+        context: freshContext
+      };
 
     dispatch(addMessage(userMessage));
     setInput('');
@@ -1669,10 +1726,16 @@ export function Popup() {
         setPageScreenshotMode={setPageScreenshotMode}
         clipboardMode={clipboardMode}
         setClipboardMode={setClipboardMode}
-        pageInfoMode={pageInfoMode}
-        setPageInfoMode={setPageInfoMode}
-        addImageToInput={addImageToInput}
-      />
+          pageInfoMode={pageInfoMode}
+          setPageInfoMode={setPageInfoMode}
+          addImageToInput={addImageToInput}
+          onPasteImage={handlePasteImage}
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          dragOver={dragOver}
+          onVoiceTranscript={handleVoiceTranscript}
+        />
 
       {showMenu && renderMenu()}
       {showPrompts && renderPromptShortcuts()}

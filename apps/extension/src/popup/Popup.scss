@@ -181,6 +181,28 @@
   padding: var(--spacing-md);
   background: var(--bg-secondary);
   border-top: 1px solid var(--border-primary);
+  position: relative;
+
+  &.drag-over {
+    background: rgba(139, 92, 246, 0.1);
+    border: 2px dashed var(--accent-purple);
+  }
+
+  .drop-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(139, 92, 246, 0.15);
+    border: 2px dashed var(--accent-purple);
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    pointer-events: none;
+    color: var(--accent-purple);
+    font-weight: 600;
+    font-size: var(--font-md);
+  }
 
   .input-actions {
     display: flex;
@@ -251,23 +273,33 @@
       }
     }
 
-    .send-btn {
-      background: var(--btn-primary-bg);
-      color: white;
-      border: none;
-      border-radius: var(--radius-md);
-      padding: var(--spacing-sm) var(--spacing-md);
-      cursor: pointer;
-      font-size: var(--font-sm);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: var(--spacing-xs);
+.send-btn {
+  background: var(--btn-primary-bg);
+  color: white;
+  border: none;
+  border-radius: var(--radius-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  cursor: pointer;
+  font-size: var(--font-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-xs);
 
-      &:hover:not(:disabled) {
-        background: var(--btn-primary-hover);
-      }
-    }
+  &:hover:not(:disabled) {
+    background: var(--btn-primary-hover);
+  }
+}
+
+.action-btn.recording {
+  background: var(--btn-danger-bg);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
   }
 }
 
