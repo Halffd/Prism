@@ -17,6 +17,7 @@ import {
 } from '@prism/shared-db';
 import { ImageGenerationService } from '@prism/image-gen';
 import type { Message, ContextData, AIConfig } from '@prism/shared-types';
+import { VoiceInput } from '../popup/VoiceInput';
 import '../popup/Popup.scss'; // Reuse popup styles
 
 // Initialize with default settings - will be overridden by stored settings
@@ -700,6 +701,10 @@ export function StandaloneChatPage() {
     }
   };
 
+  const handleVoiceTranscript = (text: string) => {
+    setInput(prev => prev + (prev ? ' ' : '') + text);
+  };
+
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1137,9 +1142,10 @@ export function StandaloneChatPage() {
               }}
               title="Generate an image based on your input"
             >
-              🎨
-            </button>
-          </div>
+🎨
+      </button>
+      <VoiceInput onTranscript={handleVoiceTranscript} disabled={loading} client={client} useWhisper={!!aiConfig.providerKeys?.['openai']} />
+      </div>
 
           {/* Display uploaded images */}
           {uploadedImages.length > 0 && (
