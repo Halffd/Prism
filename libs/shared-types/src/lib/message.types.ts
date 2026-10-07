@@ -37,9 +37,10 @@ export interface PromptShortcut {
   id: string;
   name: string;
   content: string;
-  category: string;
+  category?: string;
   shortcutKey?: string;
   keyboardShortcut?: string;
+  keyboardShortcuts?: string[]; // Multiple bindings; backward-compat with keyboardShortcut
   createdAt: number;
 }
 

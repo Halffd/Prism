@@ -829,17 +829,37 @@ export function Popup() {
         return;
       }
 
-      // Check for keyboard shortcuts for prompt shortcuts first
-      const activeShortcut = promptShortcuts.find(
-        (prompt) =>
-          prompt.keyboardShortcut &&
-          e.key.toLowerCase() ===
-            prompt.keyboardShortcut.split('+').pop()?.toLowerCase() &&
-          (e.ctrlKey || e.metaKey) ===
-            prompt.keyboardShortcut.includes('Ctrl') &&
-          e.shiftKey === prompt.keyboardShortcut.includes('Shift') &&
-          e.altKey === prompt.keyboardShortcut.includes('Alt'),
-      );
+      // Check for keyboard shortcuts for prompt shortcuts first.
+      // Supports multiple bindings per prompt (keyboardShortcuts) as well as
+      // the legacy single keyboardShortcut string.
+      const activeShortcut = promptShortcuts.find((prompt) => {
+        const candidates = [
+          prompt.keyboardShortcut,
+          ...(prompt.keyboardShortcuts ?? []),
+        ].filter((s): s is string => !!s);
+
+        return candidates.some((combo) => {
+          const parts = combo
+            .split('+')
+            .map((p) => p.trim().toLowerCase())
+            .filter(Boolean);
+          const key = parts.pop() ?? '';
+          const wantsCtrl = parts.includes('ctrl') || parts.includes('cmd');
+          const wantsShift = parts.includes('shift');
+          const wantsAlt = parts.includes('alt');
+
+          const gotCtrl = e.ctrlKey || e.metaKey;
+          const gotShift = e.shiftKey;
+          const gotAlt = e.altKey;
+
+          return (
+            e.key.toLowerCase() === key &&
+            gotCtrl === wantsCtrl &&
+            gotShift === wantsShift &&
+            gotAlt === wantsAlt
+          );
+        });
+      });
 
       if (activeShortcut) {
         e.preventDefault();
@@ -1732,6 +1752,11 @@ export function Popup() {
                           {prompt.keyboardShortcut}
                         </span>
                       )}
+                      {(prompt.keyboardShortcuts ?? []).map((combo) => (
+                        <span key={combo} className="shortcut-tag">
+                          {combo}
+                        </span>
+                      ))}
                     </div>
                     <div className="prompt-text">
                       {prompt.content.substring(0, 50)}
