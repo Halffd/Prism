@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import mermaid from 'mermaid';
 
 interface MermaidRendererProps {
@@ -20,7 +20,8 @@ export function MermaidRenderer({ chart, id }: MermaidRendererProps) {
           securityLevel: 'loose',
         });
 
-        const uniqueId = id || `mermaid-${Math.random().toString(36).substr(2, 9)}`;
+        const uniqueId =
+          id || `mermaid-${Math.random().toString(36).substr(2, 9)}`;
         const { svg } = await mermaid.render(uniqueId, chart);
         setSvg(svg);
         setError('');
@@ -62,7 +63,11 @@ export function MermaidRenderer({ chart, id }: MermaidRendererProps) {
         dangerouslySetInnerHTML={{ __html: svg }}
       />
       {svg && (
-        <button className="export-mermaid-btn" onClick={handleExport} title="Export SVG">
+        <button
+          className="export-mermaid-btn"
+          onClick={handleExport}
+          title="Export SVG"
+        >
           📥 Export
         </button>
       )}

@@ -1,0 +1,40 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ES2015",
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "files": [],
+  "include": [],
+  "references": [
+    {
+      "path": "../audio-gen"
+    },
+    {
+      "path": "../model-gen"
+    },
+    {
+      "path": "../inpaint"
+    },
+    {
+      "path": "../tts"
+    },
+    {
+      "path": "../stt"
+    },
+    {
+      "path": "../ocr"
+    },
+    {
+      "path": "../shared-types"
+    },
+    {
+      "path": "./tsconfig.lib.json"
+    }
+  ]
+}

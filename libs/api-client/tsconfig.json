@@ -4,6 +4,27 @@
   "include": [],
   "references": [
     {
+      "path": "../audio-gen"
+    },
+    {
+      "path": "../model-gen"
+    },
+    {
+      "path": "../inpaint"
+    },
+    {
+      "path": "../tts"
+    },
+    {
+      "path": "../stt"
+    },
+    {
+      "path": "../ocr"
+    },
+    {
+      "path": "../ai-factory"
+    },
+    {
       "path": "../llm-service"
     },
     {

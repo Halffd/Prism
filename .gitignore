@@ -67,3 +67,5 @@ vitest.config.*.timestamp*
 # Next.js
 .next
 out
+.opencode
+docs/plan

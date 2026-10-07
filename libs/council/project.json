@@ -1,0 +1,20 @@
+{
+  "name": "council",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/council/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}"],
+      "options": {
+        "outputPath": "dist/libs/council",
+        "tsConfig": "libs/council/tsconfig.lib.json",
+        "packageJson": "libs/council/package.json",
+        "main": "libs/council/src/index.ts",
+        "assets": ["libs/council/*.md"]
+      }
+    }
+  },
+  "tags": []
+}

@@ -1,0 +1,20 @@
+{
+  "name": "tts",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/tts/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}"],
+      "options": {
+        "outputPath": "dist/libs/tts",
+        "tsConfig": "libs/tts/tsconfig.lib.json",
+        "packageJson": "libs/tts/package.json",
+        "main": "libs/tts/src/index.ts",
+        "assets": ["libs/tts/*.md"]
+      }
+    }
+  },
+  "tags": []
+}

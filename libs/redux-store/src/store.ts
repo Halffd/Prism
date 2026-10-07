@@ -1,35 +1,45 @@
-import { configureStore } from '@reduxjs/toolkit';
-import { combineReducers } from '@reduxjs/toolkit';
-import { persistStore, persistReducer } from 'redux-persist';
+import { combineReducers, configureStore } from '@reduxjs/toolkit';
+import { persistReducer, persistStore } from 'redux-persist';
 import storage from 'redux-persist/lib/storage'; // defaults to localStorage for web
-import type { Message, ChatSession, ContextData, AIConfig, PopupDisplayMode, ExtensionSettings, PromptShortcut, ChatHistoryState, ChatFormData } from '@prism/shared-types';
 import { useDispatch, useSelector, TypedUseSelectorHook } from 'react-redux';
+import type {
+  Message,
+  ChatSession,
+  ContextData,
+  AIConfig,
+  PopupDisplayMode,
+  ExtensionSettings,
+  PromptShortcut,
+} from '@prism/shared-types';
+import chatReducer from './chatSlice';
+import aiConfigReducer from './aiConfigSlice';
+import contextReducer from './contextSlice';
+import characterReducer from './characterSlice';
+import personaReducer from './personaSlice';
+import presetReducer from './presetSlice';
+import worldInfoReducer from './worldInfoSlice';
+import agentReducer from './agentSlice';
+import type { ChatState, AIConfigState, ContextState } from './types';
+import type { CharacterState } from './characterSlice';
+import type { PersonaState } from './personaSlice';
+import type { PresetState } from './presetSlice';
+import type { WorldInfoState } from './worldInfoSlice';
+import type { AgentState } from './agentSlice';
 
-// Define the root state interface
 export interface RootState {
   chat: ChatState;
   aiConfig: AIConfigState;
+  context: ContextState;
   ui: UIState;
   settings: SettingsState;
   prompts: PromptsState;
   network: NetworkState;
-}
-
-// Define state interfaces
-export interface ChatState {
-  messages: Message[];
-  currentSessionId: string;
-  sessions: ChatSession[];
-  isLoading: boolean;
-  context: ContextData | null;
-  history: ChatHistoryState;
-  forms: ChatFormData;
-}
-
-export interface AIConfigState {
-  config: AIConfig;
-  availableModels: string[];
-  isFetchingModels: boolean;
+  characters: CharacterState;
+  personas: PersonaState;
+  presets: PresetState;
+  worldInfo: WorldInfoState;
+  agents: AgentState;
+  groupChat: GroupChatState;
 }
 
 export interface UIState {
@@ -55,28 +65,14 @@ export interface NetworkState {
   lastSync: number | null;
 }
 
-// Define action types
-export const CHAT_ACTIONS = {
-  ADD_MESSAGE: 'chat/ADD_MESSAGE',
-  SET_MESSAGES: 'chat/SET_MESSAGES',
-  UPDATE_MESSAGE: 'chat/UPDATE_MESSAGE',
-  DELETE_MESSAGE: 'chat/DELETE_MESSAGE',
-  SET_CURRENT_SESSION: 'chat/SET_CURRENT_SESSION',
-  SET_SESSIONS: 'chat/SET_SESSIONS',
-  ADD_SESSION: 'chat/ADD_SESSION',
-  DELETE_SESSION: 'chat/DELETE_SESSION',
-  SET_LOADING: 'chat/SET_LOADING',
-  SET_CONTEXT: 'chat/SET_CONTEXT',
-  CLEAR_HISTORY: 'chat/CLEAR_HISTORY',
-} as const;
+export interface GroupChatState {
+  isGroupChatActive: boolean;
+  speakingCharacterId: string | null;
+  pendingCharacterIds: string[];
+  addressedCharacterIds: string[];
+}
 
-export const AI_CONFIG_ACTIONS = {
-  SET_AI_CONFIG: 'aiConfig/SET_AI_CONFIG',
-  UPDATE_AI_CONFIG: 'aiConfig/UPDATE_AI_CONFIG',
-  SET_AVAILABLE_MODELS: 'aiConfig/SET_AVAILABLE_MODELS',
-  SET_FETCHING_MODELS: 'aiConfig/SET_FETCHING_MODELS',
-} as const;
-
+// Action type constants for the plain (non-slice) reducers below.
 export const UI_ACTIONS = {
   SET_DISPLAY_MODE: 'ui/SET_DISPLAY_MODE',
   SET_FONT_SIZE: 'ui/SET_FONT_SIZE',
@@ -105,325 +101,207 @@ export const NETWORK_ACTIONS = {
   SET_LAST_SYNC: 'network/SET_LAST_SYNC',
 } as const;
 
-// Define action creators
+export const GROUP_CHAT_ACTIONS = {
+  SET_GROUP_CHAT_ACTIVE: 'groupChat/SET_GROUP_CHAT_ACTIVE',
+  SET_SPEAKING_CHARACTER: 'groupChat/SET_SPEAKING_CHARACTER',
+  SET_PENDING_CHARACTERS: 'groupChat/SET_PENDING_CHARACTERS',
+  SET_ADDRESSED_CHARACTERS: 'groupChat/SET_ADDRESSED_CHARACTERS',
+  CLEAR_PENDING_CHARACTERS: 'groupChat/CLEAR_PENDING_CHARACTERS',
+  ADVANCE_SPEAKING_CHARACTER: 'groupChat/ADVANCE_SPEAKING_CHARACTER',
+  RESET_GROUP_CHAT_STATE: 'groupChat/RESET_GROUP_CHAT_STATE',
+} as const;
+
+// Chat action creators (forwarded to the slice action types so the slice
+// reducer handles them — redux-toolkit matches on action.type).
 export const addMessage = (message: Message) => ({
-  type: CHAT_ACTIONS.ADD_MESSAGE as typeof CHAT_ACTIONS.ADD_MESSAGE,
-  payload: message
+  type: 'chat/addMessage' as const,
+  payload: message,
 });
-
 export const setMessages = (messages: Message[]) => ({
-  type: CHAT_ACTIONS.SET_MESSAGES as typeof CHAT_ACTIONS.SET_MESSAGES,
-  payload: messages
+  type: 'chat/setMessages' as const,
+  payload: messages,
 });
-
 export const updateMessage = (id: string, updates: Partial<Message>) => ({
-  type: CHAT_ACTIONS.UPDATE_MESSAGE as typeof CHAT_ACTIONS.UPDATE_MESSAGE,
-  payload: { id, updates }
+  type: 'chat/updateMessage' as const,
+  payload: { id, message: updates },
 });
-
 export const deleteMessage = (id: string) => ({
-  type: CHAT_ACTIONS.DELETE_MESSAGE as typeof CHAT_ACTIONS.DELETE_MESSAGE,
-  payload: id
+  type: 'chat/deleteMessage' as const,
+  payload: id,
 });
-
 export const setCurrentSession = (sessionId: string) => ({
-  type: CHAT_ACTIONS.SET_CURRENT_SESSION as typeof CHAT_ACTIONS.SET_CURRENT_SESSION,
-  payload: sessionId
+  type: 'chat/setCurrentSessionId' as const,
+  payload: sessionId,
 });
-
 export const setSessions = (sessions: ChatSession[]) => ({
-  type: CHAT_ACTIONS.SET_SESSIONS as typeof CHAT_ACTIONS.SET_SESSIONS,
-  payload: sessions
+  type: 'chat/setSessions' as const,
+  payload: sessions,
 });
-
 export const addSession = (session: ChatSession) => ({
-  type: CHAT_ACTIONS.ADD_SESSION as typeof CHAT_ACTIONS.ADD_SESSION,
-  payload: session
+  type: 'chat/addSession' as const,
+  payload: session,
 });
-
 export const deleteSession = (sessionId: string) => ({
-  type: CHAT_ACTIONS.DELETE_SESSION as typeof CHAT_ACTIONS.DELETE_SESSION,
-  payload: sessionId
+  type: 'chat/deleteSession' as const,
+  payload: sessionId,
 });
-
 export const setLoading = (isLoading: boolean) => ({
-  type: CHAT_ACTIONS.SET_LOADING as typeof CHAT_ACTIONS.SET_LOADING,
-  payload: isLoading
+  type: 'chat/setLoading' as const,
+  payload: isLoading,
 });
-
 export const setContext = (context: ContextData | null) => ({
-  type: CHAT_ACTIONS.SET_CONTEXT as typeof CHAT_ACTIONS.SET_CONTEXT,
-  payload: context
+  type: 'context/setContext' as const,
+  payload: context,
 });
+export const clearHistory = () => ({ type: 'chat/clearHistory' as const });
 
-export const clearHistory = () => ({
-  type: CHAT_ACTIONS.CLEAR_HISTORY as typeof CHAT_ACTIONS.CLEAR_HISTORY
-});
-
+// AI config action creators
 export const setAIConfig = (config: AIConfig) => ({
-  type: AI_CONFIG_ACTIONS.SET_AI_CONFIG as typeof AI_CONFIG_ACTIONS.SET_AI_CONFIG,
-  payload: config
+  type: 'aiConfig/setAIConfig' as const,
+  payload: config,
 });
-
-export const updateAIConfig = (config: AIConfig) => ({
-  type: AI_CONFIG_ACTIONS.UPDATE_AI_CONFIG as typeof AI_CONFIG_ACTIONS.UPDATE_AI_CONFIG,
-  payload: config
+export const updateAIConfig = (config: Partial<AIConfig>) => ({
+  type: 'aiConfig/updateAIConfig' as const,
+  payload: config,
 });
-
 export const setAvailableModels = (models: string[]) => ({
-  type: AI_CONFIG_ACTIONS.SET_AVAILABLE_MODELS as typeof AI_CONFIG_ACTIONS.SET_AVAILABLE_MODELS,
-  payload: models
+  type: 'aiConfig/setAvailableModels' as const,
+  payload: models,
 });
-
 export const setFetchingModels = (isFetching: boolean) => ({
-  type: AI_CONFIG_ACTIONS.SET_FETCHING_MODELS as typeof AI_CONFIG_ACTIONS.SET_FETCHING_MODELS,
-  payload: isFetching
+  type: 'aiConfig/setFetchingModels' as const,
+  payload: isFetching,
 });
 
+// UI action creators
 export const setDisplayMode = (mode: PopupDisplayMode) => ({
   type: UI_ACTIONS.SET_DISPLAY_MODE as typeof UI_ACTIONS.SET_DISPLAY_MODE,
-  payload: mode
+  payload: mode,
 });
-
 export const setFontSize = (size: number) => ({
   type: UI_ACTIONS.SET_FONT_SIZE as typeof UI_ACTIONS.SET_FONT_SIZE,
-  payload: size
+  payload: size,
 });
-
 export const setChatOpen = (isOpen: boolean) => ({
   type: UI_ACTIONS.SET_CHAT_OPEN as typeof UI_ACTIONS.SET_CHAT_OPEN,
-  payload: isOpen
+  payload: isOpen,
 });
-
 export const setShowPrompts = (show: boolean) => ({
   type: UI_ACTIONS.SET_SHOW_PROMPTS as typeof UI_ACTIONS.SET_SHOW_PROMPTS,
-  payload: show
+  payload: show,
 });
-
 export const setShowMenu = (show: boolean) => ({
   type: UI_ACTIONS.SET_SHOW_MENU as typeof UI_ACTIONS.SET_SHOW_MENU,
-  payload: show
+  payload: show,
 });
-
 export const increaseFontSize = () => ({
-  type: UI_ACTIONS.INCREASE_FONT_SIZE as typeof UI_ACTIONS.INCREASE_FONT_SIZE
+  type: UI_ACTIONS.INCREASE_FONT_SIZE as typeof UI_ACTIONS.INCREASE_FONT_SIZE,
 });
-
 export const decreaseFontSize = () => ({
-  type: UI_ACTIONS.DECREASE_FONT_SIZE as typeof UI_ACTIONS.DECREASE_FONT_SIZE
+  type: UI_ACTIONS.DECREASE_FONT_SIZE as typeof UI_ACTIONS.DECREASE_FONT_SIZE,
 });
 
+// Settings action creators
 export const setDisplaySettings = (settings: ExtensionSettings) => ({
   type: SETTINGS_ACTIONS.SET_DISPLAY_SETTINGS as typeof SETTINGS_ACTIONS.SET_DISPLAY_SETTINGS,
-  payload: settings
+  payload: settings,
 });
-
 export const setSystemPrompt = (prompt: string) => ({
   type: SETTINGS_ACTIONS.SET_SYSTEM_PROMPT as typeof SETTINGS_ACTIONS.SET_SYSTEM_PROMPT,
-  payload: prompt
+  payload: prompt,
 });
 
+// Prompts action creators
 export const setPromptShortcuts = (shortcuts: PromptShortcut[]) => ({
   type: PROMPTS_ACTIONS.SET_PROMPT_SHORTCUTS as typeof PROMPTS_ACTIONS.SET_PROMPT_SHORTCUTS,
-  payload: shortcuts
+  payload: shortcuts,
 });
-
 export const addPromptShortcut = (shortcut: PromptShortcut) => ({
   type: PROMPTS_ACTIONS.ADD_PROMPT_SHORTCUT as typeof PROMPTS_ACTIONS.ADD_PROMPT_SHORTCUT,
-  payload: shortcut
+  payload: shortcut,
 });
-
-export const updatePromptShortcut = (id: string, updates: Partial<PromptShortcut>) => ({
+export const updatePromptShortcut = (
+  id: string,
+  updates: Partial<PromptShortcut>,
+) => ({
   type: PROMPTS_ACTIONS.UPDATE_PROMPT_SHORTCUT as typeof PROMPTS_ACTIONS.UPDATE_PROMPT_SHORTCUT,
-  payload: { id, updates }
+  payload: { id, updates },
 });
-
 export const deletePromptShortcut = (id: string) => ({
   type: PROMPTS_ACTIONS.DELETE_PROMPT_SHORTCUT as typeof PROMPTS_ACTIONS.DELETE_PROMPT_SHORTCUT,
-  payload: id
+  payload: id,
 });
-
 export const setPromptsLoading = (isLoading: boolean) => ({
   type: PROMPTS_ACTIONS.SET_LOADING as typeof PROMPTS_ACTIONS.SET_LOADING,
-  payload: isLoading
+  payload: isLoading,
 });
 
+// Network action creators
 export const setOnlineStatus = (isOnline: boolean) => ({
   type: NETWORK_ACTIONS.SET_ONLINE_STATUS as typeof NETWORK_ACTIONS.SET_ONLINE_STATUS,
-  payload: isOnline
+  payload: isOnline,
 });
-
 export const setLastSync = (timestamp: number) => ({
   type: NETWORK_ACTIONS.SET_LAST_SYNC as typeof NETWORK_ACTIONS.SET_LAST_SYNC,
-  payload: timestamp
+  payload: timestamp,
 });
 
-// Reducers
-const initialChatState: ChatState = {
-  messages: [],
-  currentSessionId: `session_${Date.now()}`,
-  sessions: [],
-  isLoading: false,
-  context: null,
-  history: {
-    past: [],
-    present: [],
-    future: [],
-  },
-  forms: {},
-};
+// Group chat action creators
+export const setGroupChatActive = (isActive: boolean) => ({
+  type: GROUP_CHAT_ACTIONS.SET_GROUP_CHAT_ACTIVE as typeof GROUP_CHAT_ACTIONS.SET_GROUP_CHAT_ACTIVE,
+  payload: isActive,
+});
 
-const chatReducer = (state = initialChatState, action: any): ChatState => {
-  switch (action.type) {
-    case CHAT_ACTIONS.ADD_MESSAGE:
-      return {
-        ...state,
-        messages: [...state.messages, action.payload]
-      };
-    case CHAT_ACTIONS.SET_MESSAGES:
-      return {
-        ...state,
-        messages: action.payload
-      };
-    case CHAT_ACTIONS.UPDATE_MESSAGE:
-      return {
-        ...state,
-        messages: state.messages.map(msg => 
-          msg.id === action.payload.id ? { ...msg, ...action.payload.updates } : msg
-        )
-      };
-    case CHAT_ACTIONS.DELETE_MESSAGE:
-      return {
-        ...state,
-        messages: state.messages.filter(msg => msg.id !== action.payload)
-      };
-    case CHAT_ACTIONS.SET_CURRENT_SESSION:
-      return {
-        ...state,
-        currentSessionId: action.payload
-      };
-    case CHAT_ACTIONS.SET_SESSIONS:
-      return {
-        ...state,
-        sessions: action.payload
-      };
-    case CHAT_ACTIONS.ADD_SESSION:
-      return {
-        ...state,
-        sessions: [...state.sessions, action.payload]
-      };
-    case CHAT_ACTIONS.DELETE_SESSION:
-      return {
-        ...state,
-        sessions: state.sessions.filter(session => session.id !== action.payload)
-      };
-    case CHAT_ACTIONS.SET_LOADING:
-      return {
-        ...state,
-        isLoading: action.payload
-      };
-    case CHAT_ACTIONS.SET_CONTEXT:
-      return {
-        ...state,
-        context: action.payload
-      };
-    case CHAT_ACTIONS.CLEAR_HISTORY:
-      return {
-        ...state,
-        messages: []
-      };
-    default:
-      return state;
-  }
-};
+export const setSpeakingCharacter = (characterId: string | null) => ({
+  type: GROUP_CHAT_ACTIONS.SET_SPEAKING_CHARACTER as typeof GROUP_CHAT_ACTIONS.SET_SPEAKING_CHARACTER,
+  payload: characterId,
+});
 
-const initialAIConfigState: AIConfigState = {
-  config: {
-    provider: 'prism-api',
-    apiUrl: 'http://localhost:3000/api',
-    providerKeys: {
-      'openai': '',
-      'gemini': '',
-      'qwen': '',
-      'prism-api': ''
-    }
-  },
-  availableModels: [],
-  isFetchingModels: false
-};
+export const setPendingCharacters = (characterIds: string[]) => ({
+  type: GROUP_CHAT_ACTIONS.SET_PENDING_CHARACTERS as typeof GROUP_CHAT_ACTIONS.SET_PENDING_CHARACTERS,
+  payload: characterIds,
+});
 
-const aiConfigReducer = (state = initialAIConfigState, action: any): AIConfigState => {
-  switch (action.type) {
-    case AI_CONFIG_ACTIONS.SET_AI_CONFIG:
-      return {
-        ...state,
-        config: action.payload
-      };
-    case AI_CONFIG_ACTIONS.UPDATE_AI_CONFIG:
-      return {
-        ...state,
-        config: { ...state.config, ...action.payload }
-      };
-    case AI_CONFIG_ACTIONS.SET_AVAILABLE_MODELS:
-      return {
-        ...state,
-        availableModels: action.payload
-      };
-    case AI_CONFIG_ACTIONS.SET_FETCHING_MODELS:
-      return {
-        ...state,
-        isFetchingModels: action.payload
-      };
-    default:
-      return state;
-  }
-};
+export const setAddressedCharacters = (characterIds: string[]) => ({
+  type: GROUP_CHAT_ACTIONS.SET_ADDRESSED_CHARACTERS as typeof GROUP_CHAT_ACTIONS.SET_ADDRESSED_CHARACTERS,
+  payload: characterIds,
+});
+
+export const clearPendingCharacters = () => ({
+  type: GROUP_CHAT_ACTIONS.CLEAR_PENDING_CHARACTERS as typeof GROUP_CHAT_ACTIONS.CLEAR_PENDING_CHARACTERS,
+});
+
+export const resetGroupChatState = () => ({
+  type: GROUP_CHAT_ACTIONS.RESET_GROUP_CHAT_STATE as typeof GROUP_CHAT_ACTIONS.RESET_GROUP_CHAT_STATE,
+});
 
 const initialUIState: UIState = {
   displayMode: 'popup',
   fontSize: 1.0,
   isChatOpen: false,
   showPrompts: false,
-  showMenu: false
+  showMenu: false,
 };
 
-const uiReducer = (state = initialUIState, action: any): UIState => {
+const uiReducer = (
+  state = initialUIState,
+  action: { type: string; payload?: unknown },
+): UIState => {
   switch (action.type) {
     case UI_ACTIONS.SET_DISPLAY_MODE:
-      return {
-        ...state,
-        displayMode: action.payload
-      };
+      return { ...state, displayMode: action.payload as PopupDisplayMode };
     case UI_ACTIONS.SET_FONT_SIZE:
-      return {
-        ...state,
-        fontSize: action.payload
-      };
+      return { ...state, fontSize: action.payload as number };
     case UI_ACTIONS.SET_CHAT_OPEN:
-      return {
-        ...state,
-        isChatOpen: action.payload
-      };
+      return { ...state, isChatOpen: action.payload as boolean };
     case UI_ACTIONS.SET_SHOW_PROMPTS:
-      return {
-        ...state,
-        showPrompts: action.payload
-      };
+      return { ...state, showPrompts: action.payload as boolean };
     case UI_ACTIONS.SET_SHOW_MENU:
-      return {
-        ...state,
-        showMenu: action.payload
-      };
+      return { ...state, showMenu: action.payload as boolean };
     case UI_ACTIONS.INCREASE_FONT_SIZE:
-      return {
-        ...state,
-        fontSize: Math.min(2.0, state.fontSize + 0.1)
-      };
+      return { ...state, fontSize: Math.min(2.0, state.fontSize + 0.1) };
     case UI_ACTIONS.DECREASE_FONT_SIZE:
-      return {
-        ...state,
-        fontSize: Math.max(0.5, state.fontSize - 0.1)
-      };
+      return { ...state, fontSize: Math.max(0.5, state.fontSize - 0.1) };
     default:
       return state;
   }
@@ -447,27 +325,26 @@ const initialSettingsState: SettingsState = {
     clipboardKey: '4',
     pageInfoKey: '5',
     iframeToggleKey: '`',
-    systemPrompt: ''
+    systemPrompt: '',
   },
-  systemPrompt: ''
+  systemPrompt: '',
 };
 
-const settingsReducer = (state = initialSettingsState, action: any): SettingsState => {
+const settingsReducer = (
+  state = initialSettingsState,
+  action: { type: string; payload?: unknown },
+): SettingsState => {
   switch (action.type) {
     case SETTINGS_ACTIONS.SET_DISPLAY_SETTINGS:
+      return { ...state, displaySettings: action.payload as ExtensionSettings };
+    case SETTINGS_ACTIONS.SET_SYSTEM_PROMPT: {
+      const prompt = action.payload as string;
       return {
         ...state,
-        displaySettings: action.payload
+        systemPrompt: prompt,
+        displaySettings: { ...state.displaySettings, systemPrompt: prompt },
       };
-    case SETTINGS_ACTIONS.SET_SYSTEM_PROMPT:
-      return {
-        ...state,
-        systemPrompt: action.payload,
-        displaySettings: {
-          ...state.displaySettings,
-          systemPrompt: action.payload
-        }
-      };
+    }
     default:
       return state;
   }
@@ -475,38 +352,44 @@ const settingsReducer = (state = initialSettingsState, action: any): SettingsSta
 
 const initialPromptsState: PromptsState = {
   shortcuts: [],
-  isLoading: false
+  isLoading: false,
 };
 
-const promptsReducer = (state = initialPromptsState, action: any): PromptsState => {
+const promptsReducer = (
+  state = initialPromptsState,
+  action: { type: string; payload?: unknown },
+): PromptsState => {
   switch (action.type) {
     case PROMPTS_ACTIONS.SET_PROMPT_SHORTCUTS:
-      return {
-        ...state,
-        shortcuts: action.payload
-      };
+      return { ...state, shortcuts: action.payload as PromptShortcut[] };
     case PROMPTS_ACTIONS.ADD_PROMPT_SHORTCUT:
       return {
         ...state,
-        shortcuts: [...state.shortcuts, action.payload]
+        shortcuts: [...state.shortcuts, action.payload as PromptShortcut],
       };
-    case PROMPTS_ACTIONS.UPDATE_PROMPT_SHORTCUT:
+    case PROMPTS_ACTIONS.UPDATE_PROMPT_SHORTCUT: {
+      const payload = action.payload as {
+        id: string;
+        updates: Partial<PromptShortcut>;
+      };
       return {
         ...state,
-        shortcuts: state.shortcuts.map(shortcut => 
-          shortcut.id === action.payload.id ? { ...shortcut, ...action.payload.updates } : shortcut
-        )
+        shortcuts: state.shortcuts.map((shortcut) =>
+          shortcut.id === payload.id
+            ? { ...shortcut, ...payload.updates }
+            : shortcut,
+        ),
       };
+    }
     case PROMPTS_ACTIONS.DELETE_PROMPT_SHORTCUT:
       return {
         ...state,
-        shortcuts: state.shortcuts.filter(shortcut => shortcut.id !== action.payload)
+        shortcuts: state.shortcuts.filter(
+          (shortcut) => shortcut.id !== (action.payload as string),
+        ),
       };
     case PROMPTS_ACTIONS.SET_LOADING:
-      return {
-        ...state,
-        isLoading: action.payload
-      };
+      return { ...state, isLoading: action.payload as boolean };
     default:
       return state;
   }
@@ -514,46 +397,78 @@ const promptsReducer = (state = initialPromptsState, action: any): PromptsState 
 
 const initialNetworkState: NetworkState = {
   isOnline: true,
-  lastSync: null
+  lastSync: null,
 };
 
-const networkReducer = (state = initialNetworkState, action: any): NetworkState => {
+const networkReducer = (
+  state = initialNetworkState,
+  action: { type: string; payload?: unknown },
+): NetworkState => {
   switch (action.type) {
     case NETWORK_ACTIONS.SET_ONLINE_STATUS:
-      return {
-        ...state,
-        isOnline: action.payload
-      };
+      return { ...state, isOnline: action.payload as boolean };
     case NETWORK_ACTIONS.SET_LAST_SYNC:
-      return {
-        ...state,
-        lastSync: action.payload
-      };
+      return { ...state, lastSync: action.payload as number };
     default:
       return state;
   }
 };
 
-// Combine reducers
+const initialGroupChatState: GroupChatState = {
+  isGroupChatActive: false,
+  speakingCharacterId: null,
+  pendingCharacterIds: [],
+  addressedCharacterIds: [],
+};
+
+export const groupChatReducer = (
+  state = initialGroupChatState,
+  action: { type: string; payload?: unknown },
+): GroupChatState => {
+  switch (action.type) {
+    case GROUP_CHAT_ACTIONS.SET_GROUP_CHAT_ACTIVE:
+      return { ...state, isGroupChatActive: action.payload as boolean };
+    case GROUP_CHAT_ACTIONS.SET_SPEAKING_CHARACTER:
+      return { ...state, speakingCharacterId: action.payload as string | null };
+    case GROUP_CHAT_ACTIONS.SET_PENDING_CHARACTERS:
+      return { ...state, pendingCharacterIds: action.payload as string[] };
+    case GROUP_CHAT_ACTIONS.SET_ADDRESSED_CHARACTERS:
+      return { ...state, addressedCharacterIds: action.payload as string[] };
+    case GROUP_CHAT_ACTIONS.CLEAR_PENDING_CHARACTERS:
+      return { ...state, pendingCharacterIds: [] };
+    case GROUP_CHAT_ACTIONS.ADVANCE_SPEAKING_CHARACTER:
+      return { ...state, speakingCharacterId: action.payload as string | null };
+    case GROUP_CHAT_ACTIONS.RESET_GROUP_CHAT_STATE:
+      return { ...initialGroupChatState };
+    default:
+      return state;
+  }
+};
+
 const rootReducer = combineReducers({
   chat: chatReducer,
   aiConfig: aiConfigReducer,
+  context: contextReducer,
   ui: uiReducer,
   settings: settingsReducer,
   prompts: promptsReducer,
-  network: networkReducer
+  network: networkReducer,
+  characters: characterReducer,
+  personas: personaReducer,
+  presets: presetReducer,
+  worldInfo: worldInfoReducer,
+  agents: agentReducer,
+  groupChat: groupChatReducer,
 });
 
-// Configure persist config
 const persistConfig = {
   key: 'root',
   storage,
-  whitelist: ['chat', 'settings'] // Only persist certain parts of the state
+  whitelist: ['chat', 'settings'],
 };
 
 const persistedReducer = persistReducer(persistConfig, rootReducer);
 
-// Create the store
 export const store = configureStore({
   reducer: persistedReducer,
   middleware: (getDefaultMiddleware) =>

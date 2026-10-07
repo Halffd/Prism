@@ -50,6 +50,36 @@
     },
     {
       "path": "./libs/image-gen"
+    },
+    {
+      "path": "./libs/ai-builder"
+    },
+    {
+      "path": "./libs/ai-factory"
+    },
+    {
+      "path": "./libs/audio-gen"
+    },
+    {
+      "path": "./libs/model-gen"
+    },
+    {
+      "path": "./apps/desktop"
+    },
+    {
+      "path": "./libs/inpaint"
+    },
+    {
+      "path": "./libs/ocr"
+    },
+    {
+      "path": "./libs/stt"
+    },
+    {
+      "path": "./libs/tts"
+    },
+    {
+      "path": "./apps/tui"
     }
   ]
 }

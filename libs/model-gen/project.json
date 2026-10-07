@@ -1,0 +1,20 @@
+{
+  "name": "model-gen",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/model-gen/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}"],
+      "options": {
+        "outputPath": "dist/libs/model-gen",
+        "tsConfig": "libs/model-gen/tsconfig.lib.json",
+        "packageJson": "libs/model-gen/package.json",
+        "main": "libs/model-gen/src/index.ts",
+        "assets": ["libs/model-gen/*.md"]
+      }
+    }
+  },
+  "tags": []
+}

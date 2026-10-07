@@ -1,10 +1,9 @@
-import React, { useState } from 'react';
-import type { Message } from '@prism/shared-types';
+import type React from 'react';
 import { VoiceInput } from './VoiceInput';
 
 interface InputSectionProps {
   input: string;
-  setInput: (value: string) => void;
+  setInput: (value: string | ((prev: string) => string)) => void;
   loading: boolean;
   uploadedImages: string[];
   removeImage: (index: number) => void;
@@ -67,7 +66,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
   dragOver,
   onVoiceTranscript,
   voiceClient,
-  useWhisper
+  useWhisper,
 }) => {
   return (
     <div
@@ -117,8 +116,8 @@ export const InputSection: React.FC<InputSectionProps> = ({
           onClick={() => {
             setClipboardMode(!clipboardMode);
             if (!clipboardMode) {
-              navigator.clipboard.readText().then(text => {
-                setInput(prev => prev + (prev ? ' ' : '') + text);
+              navigator.clipboard.readText().then((text) => {
+                setInput((prev) => prev + (prev ? ' ' : '') + text);
               });
             }
           }}
@@ -132,7 +131,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
             setPageInfoMode(!pageInfoMode);
             if (!pageInfoMode) {
               const pageInfo = `URL: ${window.location.href}\nTitle: ${document.title}`;
-              setInput(prev => prev + (prev ? '\n' : '') + pageInfo);
+              setInput((prev) => prev + (prev ? '\n' : '') + pageInfo);
             }
           }}
           title="Include page info in your message (Shift+5)"
@@ -147,7 +146,12 @@ export const InputSection: React.FC<InputSectionProps> = ({
           🖼️
         </button>
         {onVoiceTranscript && (
-          <VoiceInput onTranscript={onVoiceTranscript} disabled={loading} client={voiceClient} useWhisper={useWhisper} />
+          <VoiceInput
+            onTranscript={onVoiceTranscript}
+            disabled={loading}
+            client={voiceClient}
+            useWhisper={useWhisper}
+          />
         )}
       </div>
 
@@ -189,12 +193,45 @@ export const InputSection: React.FC<InputSectionProps> = ({
       />
       <div className="input-footer">
         <div className="send-options">
-          {(sendSelectedText || textSelectionMode) && <span className="send-option active" title="Ctrl+Shift+T or Shift+1 to toggle">📝</span>}
-          {(sendPageContents || pageContextMode) && <span className="send-option active" title="Ctrl+Shift+P or Shift+2 to toggle">📄</span>}
-          {(sendScreenshot || pageScreenshotMode) && <span className="send-option active" title="Ctrl+Shift+S or Shift+3 to toggle">📷</span>}
-          {clipboardMode && <span className="send-option active" title="Shift+4 to toggle">📋</span>}
-          {pageInfoMode && <span className="send-option active" title="Shift+5 to toggle">ℹ️</span>}
-          {uploadedImages.length > 0 && <span className="send-option active" title="Uploaded images">🖼️ {uploadedImages.length}</span>}
+          {(sendSelectedText || textSelectionMode) && (
+            <span
+              className="send-option active"
+              title="Ctrl+Shift+T or Shift+1 to toggle"
+            >
+              📝
+            </span>
+          )}
+          {(sendPageContents || pageContextMode) && (
+            <span
+              className="send-option active"
+              title="Ctrl+Shift+P or Shift+2 to toggle"
+            >
+              📄
+            </span>
+          )}
+          {(sendScreenshot || pageScreenshotMode) && (
+            <span
+              className="send-option active"
+              title="Ctrl+Shift+S or Shift+3 to toggle"
+            >
+              📷
+            </span>
+          )}
+          {clipboardMode && (
+            <span className="send-option active" title="Shift+4 to toggle">
+              📋
+            </span>
+          )}
+          {pageInfoMode && (
+            <span className="send-option active" title="Shift+5 to toggle">
+              ℹ️
+            </span>
+          )}
+          {uploadedImages.length > 0 && (
+            <span className="send-option active" title="Uploaded images">
+              🖼️ {uploadedImages.length}
+            </span>
+          )}
         </div>
         <button
           onClick={sendMessage}

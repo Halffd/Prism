@@ -68,6 +68,9 @@ services:
       - FIREWORKS_API_KEY=${FIREWORKS_API_KEY:-}
       - ZAI_API_KEY=${ZAI_API_KEY:-}
       - OLLAMA_API_URL=http://ollama:11434
+      - LLAMACPP_API_URL=http://llamacpp:8080
+      - KOBOLDCPP_API_URL=http://koboldcpp:5001
+      - SGLANG_API_URL=http://sglang:30000
     restart: always
     labels:
       - 'traefik.enable=true'
@@ -141,7 +144,114 @@ services:
     # deploy:
     #   resources: {}
 
-  # Traefik reverse proxy
+  # llama.cpp server for local LLM inference (OpenAI-compatible API)
+  llamacpp:
+    image: ghcr.io/ggerganov/llama.cpp:server
+    restart: unless-stopped
+    ports:
+      - '${LLAMACPP_PORT:-8080}:8080'
+    volumes:
+      - llamacpp_models:/models
+    environment:
+      - LLAMA_ARG_CTX_SIZE=${LLAMACPP_CTX_SIZE:-4096}
+      - LLAMA_ARG_N_GPU_LAYERS=${LLAMACPP_N_GPU_LAYERS:--1}
+      - LLAMA_ARG_THREADS=${LLAMACPP_THREADS:-4}
+      - LLAMA_ARG_BATCH_SIZE=${LLAMACPP_BATCH_SIZE:-512}
+      - LLAMA_ARG_FLASH_ATTN=${LLAMACPP_FLASH_ATTN:-1}
+      - LLAMA_ARG_MODEL=/models/${LLAMACPP_MODEL:-model.gguf}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # Uncomment for CPU-only mode:
+    # deploy:
+    #   resources: {}
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:8080/health']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+    # KoboldCpp for local LLM inference (OpenAI + KoboldAI API)
+  koboldcpp:
+    image: ghcr.io/lost-ruins/koboldcpp:latest
+    restart: unless-stopped
+    ports:
+      - '${KOBOLDCPP_PORT:-5001}:5001'
+    volumes:
+      - koboldcpp_models:/models
+    environment:
+      - MODEL=/models/${KOBOLDCPP_MODEL:-model.gguf}
+      - CONTEXT_SIZE=${KOBOLDCPP_CTX_SIZE:-4096}
+      - GPU_LAYERS=${KOBOLDCPP_N_GPU_LAYERS:--1}
+      - THREADS=${KOBOLDCPP_THREADS:-4}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:5001/api/v1/model']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    profiles:
+      - local-inference
+
+  # SGLang for fast local LLM inference (OpenAI-compatible API)
+  sglang:
+    image: lmsys/sglang:latest
+    restart: unless-stopped
+    ports:
+      - '${SGLANG_PORT:-30000}:30000'
+    volumes:
+      - sglang_models:/root/.cache/huggingface
+    environment:
+      - MODEL_PATH=${SGLANG_MODEL:-meta-llama/Meta-Llama-3.1-8B-Instruct}
+      - TP=${SGLANG_TP:-1}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:30000/health']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    profiles:
+      - local-inference
+
+  
+  # SearXNG self-hosted search engine (no API key needed)
+  searxng:
+    image: searxng/searxng:latest
+    restart: unless-stopped
+    ports:
+      - '${SEARXNG_PORT:-8888}:8080'
+    volumes:
+      - ./searxng-settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:${SEARXNG_PORT:-8888}/
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:8080/healthz']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    profiles:
+      - local-search
+
+# Traefik reverse proxy
   traefik:
     image: traefik:v2.9
     command:
@@ -177,4 +287,8 @@ volumes:
   postgres_data:
   redis_data:
   ollama_data:
+  llamacpp_models:
+  koboldcpp_models:
+  sglang_models:
   letsencrypt:
+  searxng_data:

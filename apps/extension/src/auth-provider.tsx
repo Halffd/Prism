@@ -1,8 +1,14 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  ReactNode,
+} from 'react';
 import {
   supabaseAuthService,
   type AuthUser,
-  type AuthResult
+  type AuthResult,
 } from '@prism/supabase-client';
 
 // Define the authentication context type
@@ -30,7 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const initializeUser = async () => {
       const sessionResult = await supabaseAuthService.getCurrentSession();
       if (sessionResult) {
-        const currentUser = supabaseAuthService.getCurrentUser();
+        const currentUser = await supabaseAuthService.getCurrentUser();
         if (currentUser) {
           setUser(currentUser);
         }
@@ -41,14 +47,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     initializeUser();
 
     // Subscribe to authentication state changes
-    const { data: { subscription } } = supabaseAuthService.onAuthStateChange((event, session) => {
+    const {
+      data: { subscription },
+    } = supabaseAuthService.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
         const mappedUser: AuthUser = {
           id: session.user.id,
           email: session.user.email || '',
-          displayName: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'Anonymous User',
+          displayName:
+            session.user.user_metadata?.full_name ||
+            session.user.email?.split('@')[0] ||
+            'Anonymous User',
           avatarUrl: session.user.user_metadata?.avatar_url || '',
-          emailVerified: session.user.email_confirmed_at ? true : false
+          emailVerified: session.user.email_confirmed_at ? true : false,
         };
         setUser(mappedUser);
       } else if (event === 'SIGNED_OUT') {
@@ -62,7 +73,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const signInWithEmail = async (email: string, password: string): Promise<AuthResult> => {
+  const signInWithEmail = async (
+    email: string,
+    password: string,
+  ): Promise<AuthResult> => {
     const result = await supabaseAuthService.signInWithEmail(email, password);
     if (result.success && result.user) {
       setUser(result.user);
@@ -70,7 +84,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return result;
   };
 
-  const signUpWithEmail = async (email: string, password: string): Promise<AuthResult> => {
+  const signUpWithEmail = async (
+    email: string,
+    password: string,
+  ): Promise<AuthResult> => {
     const result = await supabaseAuthService.signUpWithEmail(email, password);
     if (result.success && result.user) {
       setUser(result.user);
@@ -91,7 +108,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   };
 
-  const updateProfile = async (displayName?: string, avatarUrl?: string): Promise<void> => {
+  const updateProfile = async (
+    displayName?: string,
+    avatarUrl?: string,
+  ): Promise<void> => {
     await supabaseAuthService.updateProfile({ displayName, avatarUrl });
     // The user state will be updated via the onAuthStateChange listener
   };
@@ -104,14 +124,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signUpWithEmail,
     signInWithGoogle,
     signOut,
-    updateProfile
+    updateProfile,
   };
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 // Custom hook to use the auth context

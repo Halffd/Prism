@@ -1,0 +1,24 @@
+---
+plan name: Prism-Blazor-Migration
+plan description: Migrate Prism to Blazor C#
+plan status: active
+---
+
+## Idea
+Convert the Prism Nx monorepo (TypeScript/React/Next.js/Express/Expo/Electron) to a Blazor C# ecosystem. The web app, API server, desktop, and mobile apps migrate to .NET 8+ (Blazor Web App, ASP.NET Core Minimal API, Photino.Blazor, MAUI Blazor Hybrid). The Chrome Extension stays TypeScript/React because Blazor WASM in extensions is architecturally insane (40MB runtime, 135MB total, 2-5s cold start). Data layer consolidates from 4 overlapping DBs (MongoDB + idb + Dexie + Supabase) to 2 (Supabase PG + single IndexedDB). Auth consolidates from dual Firebase+Supabase to Supabase-only. LLM services merge from 2 monoliths (1300+ lines) into Strategy pattern (15+ focused provider classes). Redux store maps to Blazor DI state services with Memento undo/redo. ~187 source files across 5 apps + 10 libs.
+
+## Implementation
+- Phase 1 - Foundation Libraries (Week 1-2, ~15 days): Create Prism.sln with .NET 8 solution structure. Migrate shared-types → Prism.Shared.Models (C# POCOs, enums, Message, ContextData, AIProvider). Migrate shared-db + supabase-client → Prism.Data (IDbService, SupabaseDbAdapter, IndexedDbAdapter, SyncService, database POCOs from database.types.ts 36 table enums). Migrate api-client + llm-service → Prism.AI (LlmClient facade, ILlmProvider interface, 15+ provider implementations with Strategy pattern, Polly resilience pipeline, IAsyncEnumerable streaming, OfflineQueue). Migrate redux-store → Prism.State (ChatStateService with Memento undo/redo, AiConfigOptions, UiState, UserSettings, PromptService, NetworkStateService via Blazor DI). Migrate image-gen → Prism.ImageGen (HuggingFace HttpClient service). Migrate ui-components → Prism.UI.Shared (MermaidRenderer.razor with JS interop). Migrate context-manager → Prism.Context (IContextProcessor). Scaffold xUnit test projects per library.
+- Phase 2 - Web App (Week 3, ~3 days): Create Prism.Web Blazor Web App project (Interactive Server + WebAssembly). Implement App.razor with CascadingAuthenticationState, MainLayout.razor with sidebar + nav. Build Chat.razor @page /chat decomposed into MessageList.razor, MessageInput.razor, ProviderSelector.razor, SessionManager.razor sub-components. Implement MarkdownRenderer.razor using Markdig + ColorCode-Sharp for syntax highlighting. Wire up auth via Supabase.Auth, state via DI services, API calls via Prism.AI.
+- Phase 3 - API Server (Week 3, ~2 days): Create Prism.Api ASP.NET Core Minimal API project. Map Express routes to endpoints: POST /api/chat (JWT auth + LlmClient streaming + SSE), GET/POST/PUT/DELETE /api/sessions, GET/POST/PUT/DELETE /api/sync/*, POST /api/auth. Add middleware: CORS, rate limiting (built-in), security headers. Replace Mongoose with Supabase PG via Prism.Data. Add Polly resilience for LLM calls.
+- Phase 4 - Chrome Extension Modular Cleanup (Week 4, ~3 days): KEEP as TypeScript/React - no Blazor. Decompose Popup.tsx (~57K) into 10 React components (ChatLayout, MessageList, MessageInput, ProviderSelector, SessionManager, AuthPanel, SyncControls, VoiceInput, ImageGenPanel, ContextModeToggle). Decompose Settings.tsx (~56K) into 7 React components (SettingsLayout, AiConfigPanel, ImageModelsPanel, SiteFiltersPanel, PromptShortcutsPanel, DisplayModePanel, KeyboardBindingsPanel). Decompose content.ts (1654 lines) into 5 modules (content-extract, content-inject, content-keyboard, content-ui, content-shortcuts). Update extension to call Prism.Api endpoints instead of Express. Remove Firebase auth, use Supabase Auth only.
+- Phase 5 - Mobile + Desktop (Week 5, ~3 days): Create Prism.Mobile MAUI Blazor Hybrid project with BlazorWebView. Reuse Chat.razor and Settings.razor from Prism.Web. Add platform-specific IBrowserInterop implementations (voice input, AsyncStorage → Preferences API). Create Prism.Desktop Photino.Blazor project as thin native shell hosting Blazor components. Wire up shared state services and Prism.AI.
+- Phase 6 - Data Migration + Testing (Week 6, ~5 days): Build Prism.Migrate console app: export MongoDB collections (users, messages, sessions), transform to Supabase PG format, insert via REST API or PostgreSQL COPY, verify counts. Export Firebase Auth users, import into Supabase Auth via Admin API. Integration testing across all apps (web, extension, API, mobile, desktop). Performance profiling with BenchmarkDotNet. E2E tests for critical paths (chat, auth, sync, LLM streaming).
+
+## Required Specs
+<!-- SPECS_START -->
+- Prism-Blazor-Architecture
+- Prism-Data-Migration
+- Prism-AI-Consolidation
+- Prism-Extension-TypeScript
+<!-- SPECS_END -->

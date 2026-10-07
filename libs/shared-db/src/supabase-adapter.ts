@@ -1,5 +1,5 @@
 import { Message, ChatSession } from '@prism/shared-types';
-import { PromptShortcut } from './db';
+import type { PromptShortcut } from '@prism/shared-types';
 import { supabaseDbService } from '@prism/supabase-client';
 
 // This is a compatibility layer to gradually migrate from MongoDB to Supabase

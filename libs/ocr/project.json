@@ -1,0 +1,20 @@
+{
+  "name": "ocr",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/ocr/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}"],
+      "options": {
+        "outputPath": "dist/libs/ocr",
+        "tsConfig": "libs/ocr/tsconfig.lib.json",
+        "packageJson": "libs/ocr/package.json",
+        "main": "libs/ocr/src/index.ts",
+        "assets": ["libs/ocr/*.md"]
+      }
+    }
+  },
+  "tags": []
+}

@@ -1,6 +1,6 @@
 // Create a service for online database synchronization
 import type { Message, ChatSession } from '@prism/shared-types';
-import { PromptShortcut } from './db';
+import type { PromptShortcut } from '@prism/shared-types';
 
 export interface OnlineSyncConfig {
   apiUrl: string;

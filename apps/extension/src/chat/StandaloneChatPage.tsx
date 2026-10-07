@@ -4,17 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { UnifiedAIClient } from '@prism/api-client';
-import {
-  saveChatHistory,
-  loadChatHistory,
-  getChatSessions,
-  deleteChatSession,
-  ChatSession,
-  savePromptShortcut,
-  getPromptShortcuts,
-  deletePromptShortcut,
-  PromptShortcut
-} from '@prism/shared-db';
+import type { ChatSession, PromptShortcut } from '@prism/shared-types';
 import { ImageGenerationService } from '@prism/image-gen';
 import type { Message, ContextData, AIConfig } from '@prism/shared-types';
 import { VoiceInput } from '../popup/VoiceInput';
@@ -25,11 +15,11 @@ const defaultAIConfig: AIConfig = {
   provider: 'prism-api',
   apiUrl: 'http://localhost:3000/api',
   providerKeys: {
-    'openai': '',
-    'gemini': '',
-    'qwen': '',
-    'prism-api': ''
-  }
+    openai: '',
+    gemini: '',
+    qwen: '',
+    'prism-api': '',
+  },
 };
 
 let client = new UnifiedAIClient({ aiConfig: defaultAIConfig });
@@ -39,12 +29,19 @@ export function StandaloneChatPage() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [context, setContext] = useState<ContextData | null>(null);
+  void setContext;
   const [aiConfig, setAiConfig] = useState<AIConfig>(defaultAIConfig);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [fetchingModels, setFetchingModels] = useState<boolean>(false);
   const [iframeUrl, setIframeUrl] = useState<string>('');
+  void iframeUrl;
+  void setIframeUrl;
   const [isIframeInjected, setIsIframeInjected] = useState<boolean>(false);
+  void isIframeInjected;
+  void setIsIframeInjected;
   const [iframeError, setIframeError] = useState<string | null>(null);
+  void iframeError;
+  void setIframeError;
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string>(() => {
     // Generate a default session ID based on timestamp
@@ -57,10 +54,17 @@ export function StandaloneChatPage() {
     name: '',
     content: '',
     category: '',
-    shortcutKey: ''  // Adding shortcut key field
+    shortcutKey: '', // Adding shortcut key field
   });
-  const [editingKeyboardShortcut, setEditingKeyboardShortcut] = useState<string | null>(null);
-  const [currentKeyboardShortcut, setCurrentKeyboardShortcut] = useState<string>('');
+  const [editingKeyboardShortcut, setEditingKeyboardShortcut] = useState<
+    string | null
+  >(null);
+  void editingKeyboardShortcut;
+  void setEditingKeyboardShortcut;
+  const [currentKeyboardShortcut, setCurrentKeyboardShortcut] =
+    useState<string>('');
+  void currentKeyboardShortcut;
+  void setCurrentKeyboardShortcut;
 
   // Content sending options
   const [sendSelectedText, setSendSelectedText] = useState<boolean>(true);
@@ -70,14 +74,21 @@ export function StandaloneChatPage() {
   // Image file upload state
   const [uploadedImages, setUploadedImages] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState<boolean>(false);
+  void isUploading;
+  void setIsUploading;
   const [dragOver, setDragOver] = useState<boolean>(false);
 
   // Image generation state
-  const [imageGenerationPrompt, setImageGenerationPrompt] = useState<string>('');
+  const [imageGenerationPrompt, setImageGenerationPrompt] =
+    useState<string>('');
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [isGeneratingImage, setIsGeneratingImage] = useState<boolean>(false);
-  const [imageGenerationModel, setImageGenerationModel] = useState<string>('stabilityai/stable-diffusion-2-1');
-  const [imageGenerationApiKey, setImageGenerationApiKey] = useState<string>('');
+  void isGeneratingImage;
+  const [imageGenerationModel, setImageGenerationModel] = useState<string>(
+    'stabilityai/stable-diffusion-2-1',
+  );
+  const [imageGenerationApiKey, setImageGenerationApiKey] =
+    useState<string>('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -91,18 +102,19 @@ export function StandaloneChatPage() {
         // Ensure providerKeys exists and has all providers
         if (!config.providerKeys) {
           config.providerKeys = {
-            'openai': config.apiKey || '',
-            'gemini': config.apiKey || '',
-            'qwen': config.apiKey || '',
-            'prism-api': config.apiKey || config.apiUrl || ''
+            openai: config.apiKey || '',
+            gemini: config.apiKey || '',
+            qwen: config.apiKey || '',
+            'prism-api': config.apiKey || config.apiUrl || '',
           };
         } else {
           // Ensure all provider keys exist
           config.providerKeys = {
-            'openai': config.providerKeys['openai'] || '',
-            'gemini': config.providerKeys['gemini'] || '',
-            'qwen': config.providerKeys['qwen'] || '',
-            'prism-api': config.providerKeys['prism-api'] || config.apiUrl || ''
+            openai: config.providerKeys['openai'] || '',
+            gemini: config.providerKeys['gemini'] || '',
+            qwen: config.providerKeys['qwen'] || '',
+            'prism-api':
+              config.providerKeys['prism-api'] || config.apiUrl || '',
           };
         }
 
@@ -110,16 +122,18 @@ export function StandaloneChatPage() {
         // Update the current provider's API key in the config before creating the client
         const updatedConfig = { ...config };
         if (updatedConfig.providerKeys) {
-          updatedConfig.apiKey = updatedConfig.providerKeys[updatedConfig.provider] || '';
+          updatedConfig.apiKey =
+            updatedConfig.providerKeys[updatedConfig.provider] || '';
           if (updatedConfig.provider === 'prism-api') {
-            updatedConfig.apiUrl = updatedConfig.providerKeys['prism-api'] || updatedConfig.apiUrl;
+            updatedConfig.apiUrl =
+              updatedConfig.providerKeys['prism-api'] || updatedConfig.apiUrl;
           }
         }
 
         setAiConfig(updatedConfig);
         client = new UnifiedAIClient({
           aiConfig: updatedConfig,
-          prismApiUrl: updatedConfig.apiUrl
+          prismApiUrl: updatedConfig.apiUrl,
         });
 
         // Fetch available models for the current provider
@@ -150,11 +164,17 @@ export function StandaloneChatPage() {
         const fontScale = localStorage.getItem('fontScale');
         let currentFontScale = 1.0;
         if (fontScale) {
-          currentFontScale = Math.max(0.5, Math.min(2.0, parseFloat(fontScale))); // Clamp between 0.5 and 2.0
+          currentFontScale = Math.max(
+            0.5,
+            Math.min(2.0, parseFloat(fontScale)),
+          ); // Clamp between 0.5 and 2.0
         }
-        
+
         // Apply font scale to the document root (for the popup)
-        document.documentElement.style.setProperty('--font-scale', currentFontScale.toString());
+        document.documentElement.style.setProperty(
+          '--font-scale',
+          currentFontScale.toString(),
+        );
       } catch (error) {
         console.warn('Could not load font scale, using default:', error);
       }
@@ -162,43 +182,55 @@ export function StandaloneChatPage() {
 
     initFontScale();
 
-  // Check for pending query from context menu or URL param
-  const checkPendingQuery = async () => {
-    let pendingQuery = '';
+    // Check for pending query from context menu or URL param
+    const checkPendingQuery = async () => {
+      let pendingQuery = '';
 
-    // Try URL query param first (?q=...)
-    const urlParams = new URLSearchParams(window.location.search);
-    const urlQuery = urlParams.get('q');
-    if (urlQuery) {
-      pendingQuery = urlQuery;
-    }
-
-    // Try chrome.storage (extension context)
-    if (!pendingQuery && typeof chrome !== 'undefined' && chrome.storage?.local) {
-      try {
-        const result = await chrome.storage.local.get(['pendingQuery', 'contextUrl', 'contextTitle']);
-        if (result.pendingQuery) {
-          pendingQuery = result.pendingQuery;
-          await chrome.storage.local.remove(['pendingQuery', 'contextUrl', 'contextTitle']);
-        }
-      } catch {}
-    }
-
-    // Try localStorage fallback
-    if (!pendingQuery) {
-      const stored = localStorage.getItem('pendingQuery');
-      if (stored) {
-        pendingQuery = stored;
-        localStorage.removeItem('pendingQuery');
+      // Try URL query param first (?q=...)
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlQuery = urlParams.get('q');
+      if (urlQuery) {
+        pendingQuery = urlQuery;
       }
-    }
 
-    if (pendingQuery) {
-      setInput(pendingQuery);
-    }
-  };
+      // Try chrome.storage (extension context)
+      if (
+        !pendingQuery &&
+        typeof chrome !== 'undefined' &&
+        chrome.storage?.local
+      ) {
+        try {
+          const result = await chrome.storage.local.get([
+            'pendingQuery',
+            'contextUrl',
+            'contextTitle',
+          ]);
+          if (result.pendingQuery) {
+            pendingQuery = result.pendingQuery;
+            await chrome.storage.local.remove([
+              'pendingQuery',
+              'contextUrl',
+              'contextTitle',
+            ]);
+          }
+        } catch {}
+      }
 
-  checkPendingQuery();
+      // Try localStorage fallback
+      if (!pendingQuery) {
+        const stored = localStorage.getItem('pendingQuery');
+        if (stored) {
+          pendingQuery = stored;
+          localStorage.removeItem('pendingQuery');
+        }
+      }
+
+      if (pendingQuery) {
+        setInput(pendingQuery);
+      }
+    };
+
+    checkPendingQuery();
   }, []);
 
   // Update models when AI configuration changes
@@ -230,14 +262,19 @@ export function StandaloneChatPage() {
   const adjustFontSize = (delta: number) => {
     try {
       const currentFontScaleStr = localStorage.getItem('fontScale');
-      let currentFontScale = currentFontScaleStr ? parseFloat(currentFontScaleStr) : 1.0;
-      
+      let currentFontScale = currentFontScaleStr
+        ? parseFloat(currentFontScaleStr)
+        : 1.0;
+
       // Calculate new scale and clamp between 0.5 and 2.0
       currentFontScale = Math.max(0.5, Math.min(2.0, currentFontScale + delta));
-      
+
       // Apply font scale to the document root
-      document.documentElement.style.setProperty('--font-scale', currentFontScale.toString());
-      
+      document.documentElement.style.setProperty(
+        '--font-scale',
+        currentFontScale.toString(),
+      );
+
       // Save the new font scale to localStorage
       localStorage.setItem('fontScale', currentFontScale.toString());
     } catch (error) {
@@ -248,7 +285,9 @@ export function StandaloneChatPage() {
   const loadChatHistoryFromDB = async () => {
     try {
       // For standalone page, use localStorage instead of extension storage
-      const savedHistory = localStorage.getItem(`chatHistory_${currentSessionId}`);
+      const savedHistory = localStorage.getItem(
+        `chatHistory_${currentSessionId}`,
+      );
       if (savedHistory) {
         setMessages(JSON.parse(savedHistory));
       }
@@ -277,16 +316,21 @@ export function StandaloneChatPage() {
   const saveCurrentChatToDB = async (newMessages: Message[]) => {
     try {
       // For standalone page, use localStorage instead of extension storage
-      localStorage.setItem(`chatHistory_${currentSessionId}`, JSON.stringify(newMessages));
-      
+      localStorage.setItem(
+        `chatHistory_${currentSessionId}`,
+        JSON.stringify(newMessages),
+      );
+
       // Update sessions list
       const updatedSessions = [...sessions];
-      const sessionIndex = updatedSessions.findIndex(s => s.id === currentSessionId);
+      const sessionIndex = updatedSessions.findIndex(
+        (s) => s.id === currentSessionId,
+      );
       if (sessionIndex !== -1) {
         updatedSessions[sessionIndex] = {
           ...updatedSessions[sessionIndex],
           messages: newMessages,
-          updatedAt: Date.now()
+          updatedAt: Date.now(),
         };
       } else {
         updatedSessions.push({
@@ -294,10 +338,10 @@ export function StandaloneChatPage() {
           userId: 'standalone-user',
           messages: newMessages,
           createdAt: Date.now(),
-          updatedAt: Date.now()
+          updatedAt: Date.now(),
         });
       }
-      
+
       setSessions(updatedSessions);
       localStorage.setItem('chatSessions', JSON.stringify(updatedSessions));
     } catch (error) {
@@ -332,11 +376,13 @@ export function StandaloneChatPage() {
       try {
         // For standalone page, use localStorage instead of extension storage
         localStorage.removeItem(`chatHistory_${sessionId}`);
-        
-        const updatedSessions = sessions.filter(session => session.id !== sessionId);
+
+        const updatedSessions = sessions.filter(
+          (session) => session.id !== sessionId,
+        );
         setSessions(updatedSessions);
         localStorage.setItem('chatSessions', JSON.stringify(updatedSessions));
-        
+
         // If we're deleting the current session, create a new one
         if (sessionId === currentSessionId) {
           createNewSession();
@@ -364,7 +410,10 @@ export function StandaloneChatPage() {
       // For standalone page, use localStorage instead of extension storage
       const savedPrompts = localStorage.getItem('promptShortcuts');
       const prompts = savedPrompts ? JSON.parse(savedPrompts) : [];
-      const updatedPrompts = [...prompts.filter((p: PromptShortcut) => p.id !== prompt.id), prompt];
+      const updatedPrompts = [
+        ...prompts.filter((p: PromptShortcut) => p.id !== prompt.id),
+        prompt,
+      ];
       localStorage.setItem('promptShortcuts', JSON.stringify(updatedPrompts));
       setPromptShortcuts(updatedPrompts);
     } catch (error) {
@@ -373,14 +422,21 @@ export function StandaloneChatPage() {
   };
 
   const deletePromptShortcutFromDB = async (promptId: string) => {
-    if (window.confirm('Are you sure you want to delete this prompt shortcut?')) {
+    if (
+      window.confirm('Are you sure you want to delete this prompt shortcut?')
+    ) {
       try {
         // For standalone page, use localStorage instead of extension storage
         const savedPrompts = localStorage.getItem('promptShortcuts');
         if (savedPrompts) {
           const prompts = JSON.parse(savedPrompts);
-          const updatedPrompts = prompts.filter((p: PromptShortcut) => p.id !== promptId);
-          localStorage.setItem('promptShortcuts', JSON.stringify(updatedPrompts));
+          const updatedPrompts = prompts.filter(
+            (p: PromptShortcut) => p.id !== promptId,
+          );
+          localStorage.setItem(
+            'promptShortcuts',
+            JSON.stringify(updatedPrompts),
+          );
           setPromptShortcuts(updatedPrompts);
         }
       } catch (error) {
@@ -397,17 +453,20 @@ export function StandaloneChatPage() {
         content: newPrompt.content,
         category: newPrompt.category || 'General',
         shortcutKey: newPrompt.shortcutKey || undefined,
-        createdAt: Date.now()
+        createdAt: Date.now(),
       };
       savePromptShortcutToDB(prompt);
       setNewPrompt({ name: '', content: '', category: '', shortcutKey: '' });
     }
   };
 
-  const updatePromptShortcut = async (id: string, updates: Partial<PromptShortcut>) => {
+  const updatePromptShortcut = async (
+    id: string,
+    updates: Partial<PromptShortcut>,
+  ) => {
     try {
       // Get the current prompt
-      const currentPrompt = promptShortcuts.find(p => p.id === id);
+      const currentPrompt = promptShortcuts.find((p) => p.id === id);
       if (!currentPrompt) return;
 
       const updatedPrompt = { ...currentPrompt, ...updates };
@@ -416,19 +475,7 @@ export function StandaloneChatPage() {
       console.error('Failed to update prompt shortcut:', error);
     }
   };
-
-  const assignKeyboardShortcut = (promptId: string) => {
-    setEditingKeyboardShortcut(promptId);
-    setCurrentKeyboardShortcut('');
-  };
-
-  const saveKeyboardShortcut = () => {
-    if (editingKeyboardShortcut && currentKeyboardShortcut) {
-      updatePromptShortcut(editingKeyboardShortcut, { keyboardShortcut: currentKeyboardShortcut });
-      setEditingKeyboardShortcut(null);
-      setCurrentKeyboardShortcut('');
-    }
-  };
+  void updatePromptShortcut;
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -446,7 +493,7 @@ export function StandaloneChatPage() {
     // Load image generation config from localStorage
     const savedApiKey = localStorage.getItem('imageGenApiKey');
     const savedModel = localStorage.getItem('imageGenModel');
-    
+
     if (savedApiKey) {
       setImageGenerationApiKey(savedApiKey);
     }
@@ -467,7 +514,7 @@ export function StandaloneChatPage() {
     try {
       const service = new ImageGenerationService({
         model: imageGenerationModel,
-        apiKey: imageGenerationApiKey
+        apiKey: imageGenerationApiKey,
       });
 
       const result = await service.generateImage(imageGenerationPrompt);
@@ -479,7 +526,7 @@ export function StandaloneChatPage() {
         role: 'assistant',
         content: `Generated image for: "${imageGenerationPrompt}"`,
         timestamp: Date.now(),
-        context
+        context: context ?? undefined,
       };
 
       // Add the image as a new message in the chat
@@ -503,7 +550,10 @@ export function StandaloneChatPage() {
     if (!text || text.length === 0) return 0;
 
     // Simple estimation: split by whitespace
-    const words = text.trim().split(/\s+/).filter(word => word.length > 0);
+    const words = text
+      .trim()
+      .split(/\s+/)
+      .filter((word) => word.length > 0);
     // Rough estimation: about 1 token per word, but longer words might be multiple tokens
     let tokenCount = 0;
     for (const word of words) {
@@ -518,8 +568,10 @@ export function StandaloneChatPage() {
     return Math.max(1, tokenCount);
   };
 
+  void generateImage;
+
   const sendMessage = async () => {
-    if ((!input.trim() && uploadedImages.length === 0)) return;
+    if (!input.trim() && uploadedImages.length === 0) return;
 
     // Load extension settings to get token limits
     // For standalone page, use default limits
@@ -529,7 +581,9 @@ export function StandaloneChatPage() {
     const totalTokens = estimateTokenCount(input);
 
     if (totalTokens > totalMessageTokenLimit) {
-      alert(`Message exceeds token limit. Current: ${totalTokens} tokens, Limit: ${totalMessageTokenLimit} tokens. Please reduce the message size.`);
+      alert(
+        `Message exceeds token limit. Current: ${totalTokens} tokens, Limit: ${totalMessageTokenLimit} tokens. Please reduce the message size.`,
+      );
       return;
     }
 
@@ -540,7 +594,7 @@ export function StandaloneChatPage() {
       timestamp: Date.now(),
       tokens: totalTokens, // Include token count
       images: uploadedImages.length > 0 ? [...uploadedImages] : undefined,
-      context
+      context: context ?? undefined,
     };
 
     const newMessages = [...messages, userMessage];
@@ -554,7 +608,12 @@ export function StandaloneChatPage() {
       client.updateAIConfig(aiConfig);
 
       // Try to send the message using the client (which handles online/offline)
-      const response = await client.sendMessage(input, context, currentSessionId, uploadedImages.length > 0 ? uploadedImages : undefined);
+      const response = await client.sendMessage(
+        input,
+        context ?? undefined,
+        currentSessionId,
+        uploadedImages.length > 0 ? uploadedImages : undefined,
+      );
 
       if (response.success && response.data) {
         const updatedMessages = [...newMessages, response.data];
@@ -567,7 +626,8 @@ export function StandaloneChatPage() {
         const errorMessage: Message = {
           id: `error-${Date.now()}`,
           role: 'assistant',
-          content: response.error || 'Failed to get response. Please try again later.',
+          content:
+            response.error || 'Failed to get response. Please try again later.',
           timestamp: Date.now(),
         };
         setMessages([...newMessages, errorMessage]);
@@ -579,7 +639,9 @@ export function StandaloneChatPage() {
       const errorMessage: Message = {
         id: `error-${Date.now()}`,
         role: 'assistant',
-        content: (error as Error).message || 'Network error. Please check your connection.',
+        content:
+          (error as Error).message ||
+          'Network error. Please check your connection.',
         timestamp: Date.now(),
       };
       setMessages([...newMessages, errorMessage]);
@@ -595,22 +657,38 @@ export function StandaloneChatPage() {
       // Create a temporary client with the current AI config
       const tempClient = new UnifiedAIClient({
         aiConfig: config,
-        prismApiUrl: config.apiUrl
+        prismApiUrl: config.apiUrl,
       });
       const models = await tempClient.getAvailableModels();
       setAvailableModels(models);
     } catch (error) {
       console.error('Error fetching available models:', error);
       // Set some default models based on the provider
-      switch(config.provider) {
+      switch (config.provider) {
         case 'openai':
-          setAvailableModels(['gpt-3.5-turbo', 'gpt-4', 'gpt-4o', 'gpt-4-turbo']);
+          setAvailableModels([
+            'gpt-3.5-turbo',
+            'gpt-4',
+            'gpt-4o',
+            'gpt-4-turbo',
+          ]);
           break;
         case 'gemini':
-          setAvailableModels(['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro']);
+          setAvailableModels([
+            'gemini-2.5-flash',
+            'gemini-2.5-pro',
+            'gemini-1.5-pro',
+            'gemini-1.5-flash',
+            'gemini-pro',
+          ]);
           break;
         case 'claude':
-          setAvailableModels(['claude-3-5-sonnet-20241022', 'claude-3-sonnet-20240229', 'claude-3-opus-20240229', 'claude-3-haiku-20240307']);
+          setAvailableModels([
+            'claude-3-5-sonnet-20241022',
+            'claude-3-sonnet-20240229',
+            'claude-3-opus-20240229',
+            'claude-3-haiku-20240307',
+          ]);
           break;
         default:
           setAvailableModels([]);
@@ -630,8 +708,8 @@ export function StandaloneChatPage() {
   };
 
   // Image upload handling
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
+  const handleImageUpload = (e: Event) => {
+    const files = (e.target as HTMLInputElement).files;
     if (files && files.length > 0) {
       const file = files[0];
       if (!file.type.startsWith('image/')) {
@@ -642,14 +720,14 @@ export function StandaloneChatPage() {
       const reader = new FileReader();
       reader.onload = (event) => {
         const imageData = event.target?.result as string;
-        setUploadedImages(prev => [...prev, imageData]);
+        setUploadedImages((prev) => [...prev, imageData]);
       };
       reader.readAsDataURL(file);
     }
   };
 
   const removeImage = (index: number) => {
-    setUploadedImages(prev => prev.filter((_, i) => i !== index));
+    setUploadedImages((prev) => prev.filter((_, i) => i !== index));
   };
 
   const addImageToInput = () => {
@@ -672,7 +750,7 @@ export function StandaloneChatPage() {
           const reader = new FileReader();
           reader.onload = (event) => {
             const imageData = event.target?.result as string;
-            setUploadedImages(prev => [...prev, imageData]);
+            setUploadedImages((prev) => [...prev, imageData]);
           };
           reader.readAsDataURL(file);
         }
@@ -694,7 +772,7 @@ export function StandaloneChatPage() {
         const reader = new FileReader();
         reader.onload = (event) => {
           const imageData = event.target?.result as string;
-          setUploadedImages(prev => [...prev, imageData]);
+          setUploadedImages((prev) => [...prev, imageData]);
         };
         reader.readAsDataURL(file);
       }
@@ -702,7 +780,7 @@ export function StandaloneChatPage() {
   };
 
   const handleVoiceTranscript = (text: string) => {
-    setInput(prev => prev + (prev ? ' ' : '') + text);
+    setInput((prev) => prev + (prev ? ' ' : '') + text);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -722,24 +800,41 @@ export function StandaloneChatPage() {
 
   const speakMessage = async (msg: Message) => {
     if (speaking === msg.id) {
-      if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
-      if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
       setSpeaking(null);
       return;
     }
 
-    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
-    if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
 
     if (client && aiConfig.providerKeys?.['openai']) {
       try {
-        const result = await client.textToSpeech(msg.content, { voice: 'alloy', responseFormat: 'mp3' });
+        const result = await client.textToSpeech(msg.content, {
+          voice: 'alloy',
+          responseFormat: 'mp3',
+        });
         if (result.success && result.data) {
           const url = URL.createObjectURL(result.data);
           const audio = new Audio(url);
           audioRef.current = audio;
           setSpeaking(msg.id);
-          audio.onended = () => { setSpeaking(null); URL.revokeObjectURL(url); audioRef.current = null; };
+          audio.onended = () => {
+            setSpeaking(null);
+            URL.revokeObjectURL(url);
+            audioRef.current = null;
+          };
           audio.play();
           return;
         }
@@ -761,22 +856,27 @@ export function StandaloneChatPage() {
       <div className="menu-panel">
         <div className="menu-header">
           <h2>Chat Sessions</h2>
-          <button onClick={() => setShowMenu(false)} className="close-btn">✕</button>
+          <button onClick={() => setShowMenu(false)} className="close-btn">
+            ✕
+          </button>
         </div>
 
         <div className="menu-content">
           <div className="menu-section">
             <div className="session-actions">
-              <button className="session-item new-session-btn" onClick={() => {
-                createNewSession();
-                setShowMenu(false);
-              }}>
+              <button
+                className="session-item new-session-btn"
+                onClick={() => {
+                  createNewSession();
+                  setShowMenu(false);
+                }}
+              >
                 + New Chat
               </button>
             </div>
 
             <div className="session-list">
-              {sessions.map(session => (
+              {sessions.map((session) => (
                 <div key={session.id} className="session-item">
                   <button
                     onClick={() => {
@@ -785,7 +885,9 @@ export function StandaloneChatPage() {
                     }}
                     className={session.id === currentSessionId ? 'active' : ''}
                   >
-                    <div className="session-title">{session.title || 'Untitled Chat'}</div>
+                    <div className="session-title">
+                      {session.title || 'Untitled Chat'}
+                    </div>
                     <div className="session-date">
                       {new Date(session.updatedAt).toLocaleDateString()}
                     </div>
@@ -814,7 +916,9 @@ export function StandaloneChatPage() {
       <div className="menu-panel">
         <div className="menu-header">
           <h2>Prompt Shortcuts</h2>
-          <button onClick={() => setShowPrompts(false)} className="close-btn">✕</button>
+          <button onClick={() => setShowPrompts(false)} className="close-btn">
+            ✕
+          </button>
         </div>
 
         <div className="menu-content">
@@ -825,24 +929,32 @@ export function StandaloneChatPage() {
                   type="text"
                   placeholder="Prompt name"
                   value={newPrompt.name}
-                  onChange={(e) => setNewPrompt({...newPrompt, name: e.target.value})}
+                  onChange={(e) =>
+                    setNewPrompt({ ...newPrompt, name: e.target.value })
+                  }
                 />
                 <input
                   type="text"
                   placeholder="Slash command (e.g. /fix)"
                   value={newPrompt.shortcutKey}
-                  onChange={(e) => setNewPrompt({...newPrompt, shortcutKey: e.target.value})}
+                  onChange={(e) =>
+                    setNewPrompt({ ...newPrompt, shortcutKey: e.target.value })
+                  }
                 />
                 <input
                   type="text"
                   placeholder="Category (optional)"
                   value={newPrompt.category}
-                  onChange={(e) => setNewPrompt({...newPrompt, category: e.target.value})}
+                  onChange={(e) =>
+                    setNewPrompt({ ...newPrompt, category: e.target.value })
+                  }
                 />
                 <textarea
                   placeholder="Prompt content"
                   value={newPrompt.content}
-                  onChange={(e) => setNewPrompt({...newPrompt, content: e.target.value})}
+                  onChange={(e) =>
+                    setNewPrompt({ ...newPrompt, content: e.target.value })
+                  }
                   rows={3}
                 />
                 <button onClick={addNewPrompt}>Add Prompt</button>
@@ -850,16 +962,25 @@ export function StandaloneChatPage() {
             </div>
 
             <div className="prompt-list">
-              {promptShortcuts.map(prompt => (
+              {promptShortcuts.map((prompt) => (
                 <div key={prompt.id} className="prompt-item">
                   <div className="prompt-content">
                     <div className="prompt-name">{prompt.name}</div>
-                    <div className="prompt-text">{prompt.content.substring(0, 100)}{prompt.content.length > 100 ? '...' : ''}</div>
+                    <div className="prompt-text">
+                      {prompt.content.substring(0, 100)}
+                      {prompt.content.length > 100 ? '...' : ''}
+                    </div>
                     <div className="prompt-category">{prompt.category}</div>
                   </div>
                   <div className="prompt-actions">
-                    <button onClick={() => usePrompt(prompt.content)}>Use</button>
-                    <button onClick={() => deletePromptShortcutFromDB(prompt.id)}>Delete</button>
+                    <button onClick={() => usePrompt(prompt.content)}>
+                      Use
+                    </button>
+                    <button
+                      onClick={() => deletePromptShortcutFromDB(prompt.id)}
+                    >
+                      Delete
+                    </button>
                   </div>
                 </div>
               ))}
@@ -887,10 +1008,13 @@ export function StandaloneChatPage() {
           <select
             value={aiConfig.provider}
             onChange={(e) => {
-              const updatedConfig = { ...aiConfig, provider: e.target.value as AIConfig['provider'] };
+              const updatedConfig = {
+                ...aiConfig,
+                provider: e.target.value as AIConfig['provider'],
+              };
               setAiConfig(updatedConfig);
               client.updateAIConfig(updatedConfig);
-              
+
               // Save the updated config to localStorage
               localStorage.setItem('aiConfig', JSON.stringify(updatedConfig));
             }}
@@ -911,7 +1035,7 @@ export function StandaloneChatPage() {
             <option value="openrouter">OpenRouter</option>
             <option value="poe">Poe</option>
           </select>
-          
+
           {availableModels.length > 0 && (
             <select
               value={aiConfig.model || ''}
@@ -920,15 +1044,23 @@ export function StandaloneChatPage() {
               disabled={fetchingModels}
             >
               <option value="">Select model</option>
-              {availableModels.map(model => (
-                <option key={model} value={model}>{model}</option>
+              {availableModels.map((model) => (
+                <option key={model} value={model}>
+                  {model}
+                </option>
               ))}
             </select>
           )}
-          
-          <button onClick={() => setShowMenu(true)} className="menu-btn">📋</button>
-          <button onClick={() => setShowPrompts(true)} className="prompts-btn">⚡</button>
-          <button onClick={clearHistory} className="clear-btn">🗑️</button>
+
+          <button onClick={() => setShowMenu(true)} className="menu-btn">
+            📋
+          </button>
+          <button onClick={() => setShowPrompts(true)} className="prompts-btn">
+            ⚡
+          </button>
+          <button onClick={clearHistory} className="clear-btn">
+            🗑️
+          </button>
         </div>
       </div>
 
@@ -942,17 +1074,21 @@ export function StandaloneChatPage() {
           ) : (
             messages.map((msg) => {
               const currentMsgDate = new Date(msg.timestamp);
-              const previousMsgDate = messages.indexOf(msg) > 0 ? 
-                new Date(messages[messages.indexOf(msg) - 1].timestamp) : null;
-              const showDateSeparator = !previousMsgDate || 
-                currentMsgDate.toDateString() !== previousMsgDate.toDateString();
-              
-              const timeString = currentMsgDate.toLocaleTimeString([], { 
-                hour: '2-digit', 
+              const previousMsgDate =
+                messages.indexOf(msg) > 0
+                  ? new Date(messages[messages.indexOf(msg) - 1].timestamp)
+                  : null;
+              const showDateSeparator =
+                !previousMsgDate ||
+                currentMsgDate.toDateString() !==
+                  previousMsgDate.toDateString();
+
+              const timeString = currentMsgDate.toLocaleTimeString([], {
+                hour: '2-digit',
                 minute: '2-digit',
-                hour12: false 
+                hour12: false,
               });
-              
+
               // Calculate relative time (e.g. "2m ago")
               const now = Date.now();
               const diffInSeconds = Math.floor((now - msg.timestamp) / 1000);
@@ -969,16 +1105,16 @@ export function StandaloneChatPage() {
                 const days = Math.floor(diffInSeconds / 86400);
                 relativeTime = `${days}d ago`;
               }
-              
+
               return (
                 <React.Fragment key={msg.id}>
                   {showDateSeparator && (
                     <div className="date-separator">
-                      {currentMsgDate.toLocaleDateString([], { 
+                      {currentMsgDate.toLocaleDateString([], {
                         weekday: 'long',
                         year: 'numeric',
                         month: 'long',
-                        day: 'numeric'
+                        day: 'numeric',
                       })}
                     </div>
                   )}
@@ -991,8 +1127,8 @@ export function StandaloneChatPage() {
                         <span className="relative-time">{relativeTime}</span>
                       </div>
                       <div className="button-container">
-                        <button 
-                          className="copy-message-btn" 
+                        <button
+                          className="copy-message-btn"
                           onClick={() => {
                             navigator.clipboard.writeText(msg.content);
                           }}
@@ -1001,9 +1137,14 @@ export function StandaloneChatPage() {
                           📋
                         </button>
                         {msg.role === 'assistant' && (
-                          <button 
-                            className="resend-message-btn" 
-                            onClick={() => setInput(messages[messages.indexOf(msg) - 1]?.content || '')}
+                          <button
+                            className="resend-message-btn"
+                            onClick={() =>
+                              setInput(
+                                messages[messages.indexOf(msg) - 1]?.content ||
+                                  '',
+                              )
+                            }
                             title="Resend message"
                           >
                             ↪️
@@ -1013,22 +1154,42 @@ export function StandaloneChatPage() {
                     </div>
                     {messages.indexOf(msg) > 0 && (
                       <div className="time-since-previous">
-                        {Math.floor((msg.timestamp - messages[messages.indexOf(msg) - 1].timestamp) / 60000)}m after previous
+                        {Math.floor(
+                          (msg.timestamp -
+                            messages[messages.indexOf(msg) - 1].timestamp) /
+                            60000,
+                        )}
+                        m after previous
                       </div>
                     )}
                     <div className="message-content">
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm]}
                         components={{
-                          code({node, inline, className, children, ...props}) {
-                            const match = /language-(\w+)/.exec(className || '');
+                          code({
+                            inline,
+                            className,
+                            children,
+                            ...props
+                          }: {
+                            inline?: boolean;
+                            className?: string;
+                            children?: React.ReactNode;
+                          } & React.HTMLAttributes<HTMLElement>) {
+                            const match = /language-(\w+)/.exec(
+                              className || '',
+                            );
                             return !inline && match ? (
                               <div className="code-block-wrapper">
                                 <div className="code-header">
                                   <span>{match[1]}</span>
-                                  <button 
-                                    className="copy-code-btn" 
-                                    onClick={() => navigator.clipboard.writeText(String(children))}
+                                  <button
+                                    className="copy-code-btn"
+                                    onClick={() =>
+                                      navigator.clipboard.writeText(
+                                        String(children),
+                                      )
+                                    }
                                     title="Copy code"
                                   >
                                     📋
@@ -1048,25 +1209,32 @@ export function StandaloneChatPage() {
                                 {children}
                               </code>
                             );
-                          }
+                          },
                         }}
                       >
-{msg.content}
-      </ReactMarkdown>
-      {msg.role === 'assistant' && (
-        <button
-          className="tts-btn"
-          onClick={() => speakMessage(msg)}
-          title={speaking === msg.id ? 'Stop reading' : 'Read aloud'}
-        >
-          {speaking === msg.id ? '⏹️' : '🔊'}
-        </button>
-      )}
-    </div>
+                        {msg.content}
+                      </ReactMarkdown>
+                      {msg.role === 'assistant' && (
+                        <button
+                          className="tts-btn"
+                          onClick={() => speakMessage(msg)}
+                          title={
+                            speaking === msg.id ? 'Stop reading' : 'Read aloud'
+                          }
+                        >
+                          {speaking === msg.id ? '⏹️' : '🔊'}
+                        </button>
+                      )}
+                    </div>
                     {msg.images && msg.images.length > 0 && (
                       <div className="message-images">
                         {msg.images.map((img, idx) => (
-                          <img key={idx} src={img} alt={`Uploaded ${idx}`} className="uploaded-image-preview" />
+                          <img
+                            key={idx}
+                            src={img}
+                            alt={`Uploaded ${idx}`}
+                            className="uploaded-image-preview"
+                          />
                         ))}
                       </div>
                     )}
@@ -1087,23 +1255,27 @@ export function StandaloneChatPage() {
         {generatedImage && (
           <div className="generated-image-container">
             <h3>Generated Image:</h3>
-            <img src={generatedImage} alt="Generated" className="generated-image" />
+            <img
+              src={generatedImage}
+              alt="Generated"
+              className="generated-image"
+            />
             <button onClick={() => setGeneratedImage(null)}>Clear</button>
           </div>
         )}
 
-      <div
-        className={`input-container${dragOver ? ' drag-over' : ''}`}
-        onDrop={handleDrop}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-      >
-        {dragOver && (
-          <div className="drop-overlay">
-            <span>Drop images here</span>
-          </div>
-        )}
-        <div className="input-actions">
+        <div
+          className={`input-container${dragOver ? ' drag-over' : ''}`}
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+        >
+          {dragOver && (
+            <div className="drop-overlay">
+              <span>Drop images here</span>
+            </div>
+          )}
+          <div className="input-actions">
             <button
               className={`action-btn ${sendSelectedText ? 'active' : ''}`}
               onClick={() => setSendSelectedText(!sendSelectedText)}
@@ -1142,10 +1314,15 @@ export function StandaloneChatPage() {
               }}
               title="Generate an image based on your input"
             >
-🎨
-      </button>
-      <VoiceInput onTranscript={handleVoiceTranscript} disabled={loading} client={client} useWhisper={!!aiConfig.providerKeys?.['openai']} />
-      </div>
+              🎨
+            </button>
+            <VoiceInput
+              onTranscript={handleVoiceTranscript}
+              disabled={loading}
+              client={client}
+              useWhisper={!!aiConfig.providerKeys?.['openai']}
+            />
+          </div>
 
           {/* Display uploaded images */}
           {uploadedImages.length > 0 && (
@@ -1165,45 +1342,65 @@ export function StandaloneChatPage() {
             </div>
           )}
 
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              const trimmedInput = input.trim();
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                const trimmedInput = input.trim();
 
-              const prompt = promptShortcuts.find(p => p.shortcutKey === trimmedInput);
+                const prompt = promptShortcuts.find(
+                  (p) => p.shortcutKey === trimmedInput,
+                );
 
-              if (prompt) {
-                e.preventDefault();
+                if (prompt) {
+                  e.preventDefault();
 
-                const newInput = prompt.content;
-                setInput(newInput);
+                  const newInput = prompt.content;
+                  setInput(newInput);
 
-                setTimeout(() => {
+                  setTimeout(() => {
+                    sendMessage();
+                  }, 0);
+                } else {
+                  e.preventDefault();
                   sendMessage();
-                }, 0);
-              } else {
-                e.preventDefault();
-                sendMessage();
+                }
               }
-            }
-          }}
-          onPaste={handlePasteImage}
-          placeholder="Ask anything... (paste or drop images)"
-          disabled={loading}
-          rows={2}
-        />
+            }}
+            onPaste={handlePasteImage}
+            placeholder="Ask anything... (paste or drop images)"
+            disabled={loading}
+            rows={2}
+          />
           <div className="input-footer">
             <div className="send-options">
-              {sendSelectedText && <span className="send-option active" title="Selected text">📝</span>}
-              {sendPageContents && <span className="send-option active" title="Page contents">📄</span>}
-              {sendScreenshot && <span className="send-option active" title="Screenshot">📷</span>}
-              {uploadedImages.length > 0 && <span className="send-option active" title="Uploaded images">🖼️ {uploadedImages.length}</span>}
+              {sendSelectedText && (
+                <span className="send-option active" title="Selected text">
+                  📝
+                </span>
+              )}
+              {sendPageContents && (
+                <span className="send-option active" title="Page contents">
+                  📄
+                </span>
+              )}
+              {sendScreenshot && (
+                <span className="send-option active" title="Screenshot">
+                  📷
+                </span>
+              )}
+              {uploadedImages.length > 0 && (
+                <span className="send-option active" title="Uploaded images">
+                  🖼️ {uploadedImages.length}
+                </span>
+              )}
             </div>
             <button
               onClick={sendMessage}
-              disabled={loading || (!input.trim() && uploadedImages.length === 0)}
+              disabled={
+                loading || (!input.trim() && uploadedImages.length === 0)
+              }
               className="send-btn"
             >
               {loading ? '⏳' : '🚀'}

@@ -1,4 +1,5 @@
-
+/* eslint-disable no-restricted-globals */
+/// <reference lib="dom" />
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -10,20 +11,19 @@ import {
   SafeAreaView,
   KeyboardAvoidingView,
   Platform,
-  ScrollView,
+  StatusBar,
 } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 import { UnifiedAIClient } from '@prism/api-client';
 import type { Message, AIConfig } from '@prism/shared-types';
+import { colors, typography, spacing, elevation, borderRadius } from '../theme/nocturnal-editorial';
 
-// Web-compatible storage solution
 export const storage = {
   getItem: async (key: string): Promise<string | null> => {
     if (typeof window !== 'undefined' && window.localStorage) {
       return window.localStorage.getItem(key);
     }
     try {
-      // Fallback to AsyncStorage for native platforms
       const AsyncStorage = await import('@react-native-async-storage/async-storage').then(m => m.default);
       return await AsyncStorage.getItem(key);
     } catch (error) {
@@ -37,16 +37,14 @@ export const storage = {
       return;
     }
     try {
-      // Fallback to AsyncStorage for native platforms
       const AsyncStorage = await import('@react-native-async-storage/async-storage').then(m => m.default);
       await AsyncStorage.setItem(key, value);
     } catch (error) {
       console.error('Storage set error:', error);
     }
-  }
+  },
 };
 
-// Get current AI configuration from storage
 const getAIConfig = async (): Promise<AIConfig> => {
   const storedConfig = await storage.getItem('aiConfig');
   if (storedConfig) {
@@ -62,7 +60,6 @@ const getAIConfig = async (): Promise<AIConfig> => {
   };
 };
 
-// Create client with the stored AI configuration
 const createClient = async (): Promise<UnifiedAIClient> => {
   const aiConfig = await getAIConfig();
   return new UnifiedAIClient({
@@ -96,7 +93,6 @@ export function ChatScreen({ navigateToSettings }: ChatScreenProps = {}) {
 
   const copyMessageToClipboard = async (content: string) => {
     try {
-      // Try to use Clipboard API if available, otherwise use React Native Clipboard
       if (typeof navigator !== 'undefined' && navigator.clipboard) {
         await navigator.clipboard.writeText(content);
       } else {
@@ -110,10 +106,8 @@ export function ChatScreen({ navigateToSettings }: ChatScreenProps = {}) {
 
   const resendMessage = async (message: Message) => {
     if (message.role === 'user') {
-      // Resend the user's message by putting it in the input field
       setInput(message.content);
     } else if (message.role === 'assistant') {
-      // Find the corresponding user message and resend it
       const userMessageIndex = messages.findIndex(
         (msg, idx) => idx < messages.indexOf(message) && msg.role === 'user'
       );
@@ -126,49 +120,25 @@ export function ChatScreen({ navigateToSettings }: ChatScreenProps = {}) {
   const getRelativeTime = (timestamp: number): string => {
     const now = Date.now();
     const diffInSeconds = Math.floor((now - timestamp) / 1000);
-
-    if (diffInSeconds < 60) {
-      return 'just now';
-    } else if (diffInSeconds < 3600) {
-      const minutes = Math.floor(diffInSeconds / 60);
-      return `${minutes}m ago`;
-    } else if (diffInSeconds < 86400) {
-      const hours = Math.floor(diffInSeconds / 3600);
-      return `${hours}h ago`;
-    } else {
-      const days = Math.floor(diffInSeconds / 86400);
-      return `${days}d ago`;
-    }
+    if (diffInSeconds < 60) return 'just now';
+    if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m ago`;
+    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h ago`;
+    return `${Math.floor(diffInSeconds / 86400)}d ago`;
   };
 
   const getTimeSinceLastMessage = (currentIndex: number): string | null => {
-    if (currentIndex === 0) return null; // First message has no previous message
-
-    const currentTimestamp = messages[currentIndex].timestamp;
-    const previousTimestamp = messages[currentIndex - 1].timestamp;
-
-    const diffInSeconds = Math.floor((currentTimestamp - previousTimestamp) / 1000);
-
-    if (diffInSeconds < 60) {
-      return `${diffInSeconds}s after`;
-    } else if (diffInSeconds < 3600) {
-      const minutes = Math.floor(diffInSeconds / 60);
-      return `${minutes}m after`;
-    } else if (diffInSeconds < 86400) {
-      const hours = Math.floor(diffInSeconds / 3600);
-      return `${hours}h after`;
-    } else {
-      const days = Math.floor(diffInSeconds / 86400);
-      return `${days}d after`;
-    }
+    if (currentIndex === 0) return null;
+    const diffInSeconds = Math.floor((messages[currentIndex].timestamp - messages[currentIndex - 1].timestamp) / 1000);
+    if (diffInSeconds < 60) return `${diffInSeconds}s after`;
+    if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m after`;
+    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h after`;
+    return `${Math.floor(diffInSeconds / 86400)}d after`;
   };
 
   const loadHistory = async () => {
     try {
       const savedMessages = await storage.getItem('chatHistory');
-      if (savedMessages) {
-        setMessages(JSON.parse(savedMessages));
-      }
+      if (savedMessages) setMessages(JSON.parse(savedMessages));
     } catch (error) {
       console.error('Failed to load chat history:', error);
     }
@@ -184,168 +154,143 @@ export function ChatScreen({ navigateToSettings }: ChatScreenProps = {}) {
 
   const sendMessage = async () => {
     if (!input.trim()) return;
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: input,
-      timestamp: Date.now(),
-    };
-
+    const userMessage: Message = { id: Date.now().toString(), role: 'user', content: input, timestamp: Date.now() };
     setMessages((prev) => [...prev, userMessage]);
     setInput('');
     setLoading(true);
-
     try {
-      const client = await createClient(); // Create client with current AI settings
+      const client = await createClient();
       const response = await client.sendMessage(input);
       if (response.success && response.data) {
         setMessages((prev) => [...prev, response.data!]);
       } else {
-        // If API call fails, add an error message to the chat
-        const errorMessage: Message = {
-          id: `error-${Date.now()}`,
-          role: 'assistant',
+        setMessages((prev) => [...prev, {
+          id: `error-${Date.now()}`, role: 'assistant',
           content: response.error || 'Failed to get response. Please try again later.',
           timestamp: Date.now(),
-        };
-        setMessages((prev) => [...prev, errorMessage]);
+        }]);
       }
     } catch (error: any) {
-      console.error('Error sending message:', error);
-      // Add an error message to the chat in case of network errors
-      const errorMessage: Message = {
-        id: `error-${Date.now()}`,
-        role: 'assistant',
+      setMessages((prev) => [...prev, {
+        id: `error-${Date.now()}`, role: 'assistant',
         content: error.message || 'Network error. Please check your connection.',
         timestamp: Date.now(),
-      };
-      setMessages((prev) => [...prev, errorMessage]);
+      }]);
     } finally {
       setLoading(false);
     }
   };
 
+  const renderMessage = ({ item, index }: { item: Message; index: number }) => {
+    const currentMsgDate = new Date(item.timestamp);
+    const previousMsgDate = index > 0 ? new Date(messages[index - 1].timestamp) : null;
+    const showDateSeparator = !previousMsgDate || currentMsgDate.toDateString() !== previousMsgDate.toDateString();
+    const timeString = currentMsgDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    const relativeTime = getRelativeTime(item.timestamp);
+    const isUser = item.role === 'user';
+
+    return (
+      <React.Fragment>
+        {showDateSeparator && (
+          <View style={styles.dateSeparator}>
+            <Text style={styles.dateSeparatorText}>
+              {currentMsgDate.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }).toUpperCase()}
+            </Text>
+          </View>
+        )}
+        <View style={[styles.messageContainer, isUser ? styles.userMessage : styles.assistantMessage]}>
+          <View style={styles.messageHeader}>
+            <View style={styles.timestampContainer}>
+              <Text style={[styles.timestamp, isUser ? styles.userTimestamp : styles.assistantTimestamp]}>
+                {timeString}
+              </Text>
+              <Text style={styles.relativeTime}>
+                {relativeTime}
+              </Text>
+            </View>
+            <View style={styles.buttonContainer}>
+              <TouchableOpacity style={styles.iconButton} onPress={() => copyMessageToClipboard(item.content)}>
+                <Text style={styles.iconButtonText}>Copy</Text>
+              </TouchableOpacity>
+              {item.role === 'assistant' && (
+                <TouchableOpacity style={styles.iconButton} onPress={() => resendMessage(item)}>
+                  <Text style={styles.iconButtonText}>Retry</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+          {index > 0 && getTimeSinceLastMessage(index) && (
+            <Text style={styles.timeSincePrevious}>
+              {getTimeSinceLastMessage(index)}
+            </Text>
+          )}
+          <View style={styles.messageBody}>
+            <Markdown
+              style={{
+                body: { color: isUser ? colors.on_primary : colors.on_surface, fontSize: typography.body_lg.fontSize, lineHeight: typography.body_lg.lineHeight },
+                heading1: { color: isUser ? colors.on_primary : colors.on_surface, fontSize: typography.headline_lg.fontSize, fontWeight: '700' as const },
+                heading2: { color: isUser ? colors.on_primary : colors.on_surface, fontSize: typography.headline_md.fontSize, fontWeight: '700' as const },
+                heading3: { color: isUser ? colors.on_primary : colors.on_surface, fontSize: typography.title_lg.fontSize, fontWeight: '600' as const },
+                code_block: { backgroundColor: colors.surface_container_lowest, padding: spacing.md, borderRadius: borderRadius.md, color: colors.on_surface_variant },
+                code_inline: { backgroundColor: colors.surface_container, padding: 2, borderRadius: borderRadius.sm, color: colors.tertiary },
+                table: { borderWidth: 0 },
+                th: { backgroundColor: colors.surface_container, padding: spacing.sm, fontWeight: '600' as const, color: colors.on_surface },
+                td: { padding: spacing.sm, color: colors.on_surface_variant },
+              }}
+              onLinkPress={(url) => { console.log('Link pressed:', url); return false; }}
+            >
+              {item.content}
+            </Markdown>
+          </View>
+        </View>
+      </React.Fragment>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Prism Chat</Text>
+        <Text style={styles.headerTitle}>Prism</Text>
         {navigateToSettings && (
           <TouchableOpacity style={styles.settingsButton} onPress={navigateToSettings}>
-            <Text style={styles.settingsButtonText}>⚙️</Text>
+            <Text style={styles.settingsButtonText}>Settings</Text>
           </TouchableOpacity>
         )}
       </View>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.container}
+        style={styles.keyboardContainer}
         keyboardVerticalOffset={90}
       >
-        <FlatList
-          ref={flatListRef}
-          data={messages}
-          keyExtractor={(item, index) => `${item.id}-${index}`}
-          renderItem={({ item, index }) => {
-            const currentMsgDate = new Date(item.timestamp);
-            const previousMsgDate = index > 0 ? new Date(messages[index - 1].timestamp) : null;
-            const showDateSeparator = !previousMsgDate ||
-              currentMsgDate.toDateString() !== previousMsgDate.toDateString();
-
-            const timeString = currentMsgDate.toLocaleTimeString([], {
-              hour: '2-digit',
-              minute: '2-digit',
-              hour12: false
-            });
-
-            const relativeTime = getRelativeTime(item.timestamp);
-
-            return (
-              <React.Fragment>
-                {showDateSeparator && (
-                  <View style={styles.dateSeparator}>
-                    <Text style={styles.dateSeparatorText}>
-                      {currentMsgDate.toLocaleDateString([], {
-                        weekday: 'long',
-                        year: 'numeric',
-                        month: 'long',
-                        day: 'numeric'
-                      })}
-                    </Text>
-                  </View>
-                )}
-                <View
-                  style={[
-                    styles.messageContainer,
-                    item.role === 'user' ? styles.userMessage : styles.assistantMessage,
-                  ]}
-                >
-                  <View style={styles.messageHeader}>
-                    <View style={styles.timestampContainer}>
-                      <Text style={item.role === 'user' ? styles.userTimestamp : styles.assistantTimestamp}>
-                        {timeString}
-                      </Text>
-                      <Text style={styles.relativeTime}>
-                        {relativeTime}
-                      </Text>
-                    </View>
-                    <View style={styles.buttonContainer}>
-                      <TouchableOpacity
-                        style={styles.copyButton}
-                        onPress={() => copyMessageToClipboard(item.content)}
-                      >
-                        <Text style={styles.copyButtonText}>📋</Text>
-                      </TouchableOpacity>
-                      {item.role === 'assistant' && (
-                        <TouchableOpacity
-                          style={styles.resendButton}
-                          onPress={() => resendMessage(item)}
-                        >
-                          <Text style={styles.resendButtonText}>↪️</Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  </View>
-                  {index > 0 && (
-                    <Text style={styles.timeSincePrevious}>
-                      {getTimeSinceLastMessage(index)}
-                    </Text>
-                  )}
-                  <View style={item.role === 'user' ? styles.userText : styles.assistantText}>
-                    <Markdown
-                      style={{
-                        body: { color: item.role === 'user' ? '#fff' : '#000' },
-                        heading1: { fontSize: 24, fontWeight: 'bold' },
-                        heading2: { fontSize: 20, fontWeight: 'bold' },
-                        heading3: { fontSize: 18, fontWeight: 'bold' },
-                        code_block: { backgroundColor: '#1e1e1e', padding: 10, borderRadius: 5 },
-                        code_inline: { backgroundColor: '#f0f0f0', padding: 2, borderRadius: 3 },
-                        table: { borderWidth: 1, borderColor: '#ccc' },
-                        th: { backgroundColor: '#e0e0e0', padding: 5, fontWeight: 'bold' },
-                        td: { padding: 5, borderWidth: 1, borderColor: '#ccc' },
-                      }}
-                      onLinkPress={(url) => console.log('Link pressed:', url)}
-                    >
-                      {item.content}
-                    </Markdown>
-                  </View>
-                </View>
-              </React.Fragment>
-            );
-          }}
-          contentContainerStyle={styles.messagesList}
-        />
-        <View style={styles.inputContainer}>
+        {messages.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>Prism</Text>
+            <Text style={styles.emptySubtitle}>Ask anything to begin</Text>
+          </View>
+        ) : (
+          <FlatList
+            ref={flatListRef}
+            data={messages}
+            keyExtractor={(item, index) => `${item.id}-${index}`}
+            renderItem={renderMessage}
+            contentContainerStyle={styles.messagesList}
+          />
+        )}
+        <View style={styles.inputBar}>
           <TextInput
             style={styles.input}
             value={input}
             onChangeText={setInput}
             placeholder="Ask anything..."
+            placeholderTextColor={colors.on_surface_variant}
             editable={!loading}
           />
           <TouchableOpacity
             style={[styles.sendButton, (loading || !input.trim()) && styles.disabledButton]}
             onPress={sendMessage}
             disabled={loading || !input.trim()}
+            activeOpacity={0.7}
           >
             <Text style={styles.sendButtonText}>{loading ? '...' : 'Send'}</Text>
           </TouchableOpacity>
@@ -358,143 +303,163 @@ export function ChatScreen({ navigateToSettings }: ChatScreenProps = {}) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: colors.surface,
+  },
+  keyboardContainer: {
+    flex: 1,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-    backgroundColor: '#007bff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#ccc',
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.lg,
+    backgroundColor: colors.surface_container_low,
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: 'white',
+    ...typography.headline_md,
+    color: colors.primary,
+    letterSpacing: -0.5,
   },
   settingsButton: {
-    padding: 5,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
   },
   settingsButtonText: {
-    fontSize: 20,
+    ...typography.label_sm,
+    color: colors.on_surface_variant,
+    letterSpacing: 0.1,
+    textTransform: 'uppercase',
+  },
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    paddingHorizontal: spacing.xxl,
+  },
+  emptyTitle: {
+    ...typography.display_lg,
+    color: colors.primary,
+    marginBottom: spacing.sm,
+  },
+  emptySubtitle: {
+    ...typography.body_lg,
+    color: colors.on_surface_variant,
   },
   messagesList: {
-    padding: 10,
+    padding: spacing.lg,
+    paddingBottom: spacing.xl,
+  },
+  dateSeparator: {
+    alignItems: 'center',
+    marginVertical: spacing.xl,
+  },
+  dateSeparatorText: {
+    ...typography.label_sm,
+    color: colors.on_surface_variant,
+    backgroundColor: colors.surface_container_low,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.pill,
+    letterSpacing: 0.1,
+    textTransform: 'uppercase',
   },
   messageContainer: {
-    borderRadius: 10,
-    padding: 10,
-    marginVertical: 5,
-    maxWidth: '80%',
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    marginVertical: spacing.sm,
+    maxWidth: '85%',
   },
   userMessage: {
-    backgroundColor: '#007bff',
+    backgroundColor: colors.primary_container,
     alignSelf: 'flex-end',
   },
   assistantMessage: {
-    backgroundColor: '#e0e0e0',
+    backgroundColor: colors.surface_container_high,
     alignSelf: 'flex-start',
   },
   messageHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 5,
+    marginBottom: spacing.sm,
   },
   timestampContainer: {
     flexDirection: 'column',
   },
-  buttonContainer: {
-    flexDirection: 'row',
+  timestamp: {
+    ...typography.label_sm,
+    letterSpacing: 0.1,
+    textTransform: 'uppercase',
   },
   userTimestamp: {
-    fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.8)',
-    marginBottom: 2,
+    color: colors.on_surface_variant,
   },
   assistantTimestamp: {
-    fontSize: 12,
-    color: 'rgba(0, 0, 0, 0.6)',
-    marginBottom: 2,
+    color: colors.on_surface_variant,
   },
   relativeTime: {
-    fontSize: 10,
+    ...typography.body_sm,
+    color: colors.on_surface_variant,
     fontStyle: 'italic',
-    color: 'rgba(0, 0, 0, 0.6)',
+    marginTop: 1,
   },
-  copyButton: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+  buttonContainer: {
+    flexDirection: 'row',
+    gap: spacing.sm,
   },
-  copyButtonText: {
-    fontSize: 14,
+  iconButton: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.pill,
+    backgroundColor: colors.surface_container_low,
   },
-  resendButton: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  resendButtonText: {
-    fontSize: 14,
+  iconButtonText: {
+    ...typography.label_sm,
+    color: colors.on_surface_variant,
+    textTransform: 'uppercase',
+    letterSpacing: 0.1,
   },
   timeSincePrevious: {
-    fontSize: 10,
+    ...typography.body_sm,
+    color: colors.on_surface_variant,
     fontStyle: 'italic',
-    color: 'rgba(0, 0, 0, 0.5)',
-    marginBottom: 5,
-    paddingLeft: 15,
-    borderLeftWidth: 1,
-    borderLeftColor: '#ccc',
+    marginBottom: spacing.sm,
+    paddingLeft: spacing.lg,
   },
-  dateSeparator: {
-    alignItems: 'center',
-    marginVertical: 10,
-  },
-  dateSeparatorText: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: 'rgba(0, 0, 0, 0.6)',
-    backgroundColor: '#e0e0e0',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 10,
-  },
-  userText: {
-    color: 'white',
-  },
-  assistantText: {
-    color: 'black',
-  },
-  inputContainer: {
+  messageBody: {},
+  inputBar: {
     flexDirection: 'row',
-    padding: 10,
-    borderTopWidth: 1,
-    borderColor: '#ccc',
-    backgroundColor: 'white',
+    padding: spacing.lg,
+    backgroundColor: colors.surface_container_low,
+    alignItems: 'center',
+    gap: spacing.md,
   },
   input: {
     flex: 1,
+    backgroundColor: colors.surface_container_lowest,
+    borderRadius: borderRadius.pill,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+    color: colors.on_surface,
+    fontSize: typography.body_lg.fontSize,
     borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 20,
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-    marginRight: 10,
+    borderColor: 'transparent',
   },
   sendButton: {
-    backgroundColor: '#007bff',
-    borderRadius: 20,
-    paddingVertical: 10,
-    paddingHorizontal: 20,
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xl,
     justifyContent: 'center',
+    backgroundColor: colors.primary,
   },
   disabledButton: {
-    opacity: 0.5,
+    opacity: 0.4,
   },
   sendButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
+    color: colors.on_primary,
+    fontWeight: '600',
+    fontSize: typography.label_lg.fontSize,
+    letterSpacing: 0.5,
   },
 });

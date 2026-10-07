@@ -1,0 +1,20 @@
+{
+  "name": "ai-builder",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/ai-builder/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}"],
+      "options": {
+        "outputPath": "dist/libs/ai-builder",
+        "tsConfig": "libs/ai-builder/tsconfig.lib.json",
+        "packageJson": "libs/ai-builder/package.json",
+        "main": "libs/ai-builder/src/index.ts",
+        "assets": ["libs/ai-builder/*.md"]
+      }
+    }
+  },
+  "tags": []
+}

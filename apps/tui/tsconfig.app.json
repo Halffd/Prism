@@ -1,0 +1,51 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/tsconfig.app.tsbuildinfo",
+    "jsx": "react-jsx",
+    "lib": ["es2022"],
+    "types": ["node"],
+    "rootDir": "src",
+    "baseUrl": "../..",
+    "paths": {
+      "@prism/redux-store": ["libs/redux-store/src/index.ts"],
+      "@prism/api-client": ["libs/api-client/src/index.ts"],
+      "@prism/shared-db": ["libs/shared-db/src/index.ts"],
+      "@prism/shared-types": ["libs/shared-types/src/index.ts"],
+      "@prism/llm-service": ["libs/llm-service/src/index.ts"],
+      "@prism/image-gen": ["libs/image-gen/src/index.ts"],
+      "@prism/supabase-client": ["libs/supabase-client/src/index.ts"],
+      "@prism/ocr": ["libs/ocr/src/index.ts"],
+      "@prism/stt": ["libs/stt/src/index.ts"],
+      "@prism/tts": ["libs/tts/src/index.ts"],
+      "@prism/inpaint": ["libs/inpaint/src/index.ts"],
+      "@prism/model-gen": ["libs/model-gen/src/index.ts"],
+      "@prism/audio-gen": ["libs/audio-gen/src/index.ts"],
+      "@prism/video-gen": ["libs/video-gen/src/index.ts"],
+      "@prism/llm": ["libs/llm/src/index.ts"],
+      "@prism/agent": ["libs/agent/src/index.ts"],
+      "@prism/ai-factory": ["libs/ai-factory/src/index.ts"],
+      "@prism/ai-builder": ["libs/ai-builder/src/index.ts"],
+      "@prism/ai-adapters": ["libs/ai-adapters/src/index.ts"],
+      "@prism/context-manager": ["libs/context-manager/src/index.ts"]
+    }
+  },
+  "exclude": [
+    "out-tsc",
+    "dist",
+    "src/**/*.spec.ts",
+    "src/**/*.test.ts",
+    "src/**/*.spec.tsx",
+    "src/**/*.test.tsx"
+  ],
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "references": [
+    {
+      "path": "../../libs/ai-adapters/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/shared-types/tsconfig.lib.json"
+    }
+  ]
+}

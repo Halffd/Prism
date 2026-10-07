@@ -1,8 +1,7 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 import { AIConfigState } from './types';
-import type { AIConfig } from '@prism/shared-types';
+import type { AIConfig, AIMode, AICapability } from '@prism/shared-types';
 
-// Add type declaration for window in Node.js environment
 declare const window: any;
 
 const initialState: AIConfigState = {
@@ -41,6 +40,15 @@ export const aiConfigSlice = createSlice({
       }
       state.config.providerKeys[action.payload.provider as keyof typeof state.config.providerKeys] = action.payload.key;
     },
+    setAdapterMode: (state, action: PayloadAction<AIMode>) => {
+      state.config.mode = action.payload;
+    },
+    setCapabilityMode: (state, action: PayloadAction<{ capability: AICapability; mode: AIMode }>) => {
+      if (!state.config.capabilityModes) {
+        state.config.capabilityModes = {};
+      }
+      state.config.capabilityModes[action.payload.capability] = action.payload.mode;
+    },
   },
 });
 
@@ -51,6 +59,8 @@ export const {
   setFetchingModels,
   setSelectedProvider: setAIProvider,
   setProviderKey,
+  setAdapterMode,
+  setCapabilityMode,
 } = aiConfigSlice.actions;
 
 export default aiConfigSlice.reducer;

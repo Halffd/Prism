@@ -3,7 +3,7 @@ import type { Message, ContextData, AIConfig } from '@prism/shared-types';
 
 const defaultAIConfig: AIConfig = {
   provider: 'prism-api',
-  apiUrl: 'http://localhost:3000/api'
+  apiUrl: 'http://localhost:3000/api',
 };
 
 let client = new UnifiedAIClient({ aiConfig: defaultAIConfig });
@@ -38,55 +38,69 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.type === 'OPEN_CHAT') {
-    chrome.storage.local.get(['displaySettings']).then((result) => {
-      const settings = result.displaySettings;
-      const displayMode = settings?.popupDisplayMode || 'popup';
+    chrome.storage.local
+      .get(['displaySettings'])
+      .then((result) => {
+        const settings = result.displaySettings;
+        const displayMode = settings?.popupDisplayMode || 'popup';
 
-      if (displayMode === 'iframe') {
-        chrome.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
-          if (tabs[0]?.id) {
-            chrome.tabs.sendMessage(tabs[0].id, { type: 'INJECT_IFRAME_CHAT' })
-              .catch(() => {
+        if (displayMode === 'iframe') {
+          chrome.tabs
+            .query({ active: true, currentWindow: true })
+            .then((tabs) => {
+              if (tabs[0]?.id) {
+                Promise.resolve(
+                  chrome.tabs.sendMessage(tabs[0].id, {
+                    type: 'INJECT_IFRAME_CHAT',
+                  }),
+                ).catch(() => {
+                  openChatInNewTab();
+                });
+              } else {
                 openChatInNewTab();
-              });
-          } else {
-            openChatInNewTab();
-          }
-        });
-      } else if (displayMode === 'newtab') {
-        openChatInNewTab();
-      } else {
-        chrome.action.openPopup().catch(() => {
+              }
+            });
+        } else if (displayMode === 'newtab') {
           openChatInNewTab();
-        });
-      }
-    }).catch(() => {
-      openChatInNewTab();
-    });
-    return;
+        } else {
+          chrome.action.openPopup().catch(() => {
+            openChatInNewTab();
+          });
+        }
+      })
+      .catch(() => {
+        openChatInNewTab();
+      });
+    return false;
   }
 
   if (request.type === 'INSERT_PROMPT_SHORTCUT') {
-    chrome.runtime.sendMessage({
-      type: 'INSERT_PROMPT_CONTENT',
-      content: request.content
-    }).catch(() => {
+    Promise.resolve(
+      chrome.runtime.sendMessage({
+        type: 'INSERT_PROMPT_CONTENT',
+        content: request.content,
+      }),
+    ).catch(() => {
       chrome.storage.local.set({ pendingPromptContent: request.content });
       openChatInNewTab();
     });
-    return;
+    return false;
   }
 
   if (request.type === 'TOGGLE_MODE') {
     const modeStateKey = `mode_${request.mode}`;
     chrome.storage.local.set({ [modeStateKey]: request.value });
-    chrome.runtime.sendMessage({
-      type: 'MODE_TOGGLED',
-      mode: request.mode,
-      value: request.value
-    }).catch(() => {});
-    return;
+    Promise.resolve(
+      chrome.runtime.sendMessage({
+        type: 'MODE_TOGGLED',
+        mode: request.mode,
+        value: request.value,
+      }),
+    ).catch(() => {});
+    return false;
   }
+
+  return false;
 });
 
 function openChatInNewTab(query?: string) {
@@ -107,11 +121,17 @@ async function handleSendMessage(data: {
     if (data.aiConfig) {
       client = new UnifiedAIClient({
         aiConfig: data.aiConfig,
-        prismApiUrl: data.aiConfig.apiUrl
+        prismApiUrl: data.aiConfig.apiUrl,
       });
     }
 
-    const response = await client.sendMessage(data.content, data.context, undefined, data.images, data.conversationHistory);
+    const response = await client.sendMessage(
+      data.content,
+      data.context,
+      undefined,
+      data.images,
+      data.conversationHistory,
+    );
 
     if (response.success && response.data) {
       const history = await getHistory();
@@ -124,7 +144,7 @@ async function handleSendMessage(data: {
     console.error('Error in background:', error);
     return {
       success: false,
-      error: (error as Error).message || 'Failed to send message'
+      error: (error as Error).message || 'Failed to send message',
     };
   }
 }
@@ -137,11 +157,9 @@ async function handleGetContext(tabId?: number) {
     const settings = result.displaySettings;
     const pageContentTokenLimit = settings?.pageContentTokenLimit || 20000;
 
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
     const response = await chrome.tabs.sendMessage(tabId, {
       type: 'EXTRACT_CONTEXT',
-      pageContentTokenLimit
+      pageContentTokenLimit,
     });
 
     return response;
@@ -160,7 +178,7 @@ async function updateAIConfig(config: AIConfig) {
   await chrome.storage.local.set({ aiConfig: config });
   client = new UnifiedAIClient({
     aiConfig: config,
-    prismApiUrl: config.apiUrl
+    prismApiUrl: config.apiUrl,
   });
   return { success: true };
 }
@@ -174,63 +192,63 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: 'prism-main',
     title: 'Prism AI Assistant',
-    contexts: ['all']
+    contexts: ['all'],
   });
 
   chrome.contextMenus.create({
     id: 'prism-new-chat',
     parentId: 'prism-main',
     title: 'Open New Chat Window',
-    contexts: ['page', 'selection']
+    contexts: ['page', 'selection'],
   });
 
   chrome.contextMenus.create({
     id: 'prism-separator-1',
     parentId: 'prism-main',
     type: 'separator',
-    contexts: ['page', 'selection']
+    contexts: ['page', 'selection'],
   });
 
   chrome.contextMenus.create({
     id: 'prism-explain',
     parentId: 'prism-main',
     title: 'Explain "%s"',
-    contexts: ['selection']
+    contexts: ['selection'],
   });
 
   chrome.contextMenus.create({
     id: 'prism-summarize',
     parentId: 'prism-main',
     title: 'Summarize this page',
-    contexts: ['page']
+    contexts: ['page'],
   });
 
   chrome.contextMenus.create({
     id: 'prism-analyze',
     parentId: 'prism-main',
     title: 'Analyze this content',
-    contexts: ['page', 'selection']
+    contexts: ['page', 'selection'],
   });
 
   chrome.contextMenus.create({
     id: 'prism-translate',
     parentId: 'prism-main',
     title: 'Translate selection',
-    contexts: ['selection']
+    contexts: ['selection'],
   });
 
   chrome.contextMenus.create({
     id: 'prism-fix-grammar',
     parentId: 'prism-main',
     title: 'Fix grammar/spelling',
-    contexts: ['selection']
+    contexts: ['selection'],
   });
 
   chrome.contextMenus.create({
     id: 'prism-code-explain',
     parentId: 'prism-main',
     title: 'Explain this code',
-    contexts: ['selection']
+    contexts: ['selection'],
   });
 });
 
@@ -244,7 +262,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     chrome.storage.local.set({
       pendingQuery: prompt || '',
       contextUrl: tab?.url,
-      contextTitle: tab?.title
+      contextTitle: tab?.title,
     });
     openChatInNewTab(prompt || undefined);
     return;
@@ -270,7 +288,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     chrome.storage.local.set({
       pendingQuery: prompt,
       contextUrl: tab?.url,
-      contextTitle: tab?.title
+      contextTitle: tab?.title,
     });
 
     chrome.action.openPopup().catch(() => {

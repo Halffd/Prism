@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useAuth } from '../auth-provider';
-import { supabaseAuthService } from '@prism/supabase-client';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -11,12 +10,11 @@ import {
   loadChatHistory,
   getChatSessions,
   deleteChatSession,
-  ChatSession,
   savePromptShortcut,
   getPromptShortcuts,
   deletePromptShortcut,
-  PromptShortcut
 } from '@prism/shared-db';
+import type { PromptShortcut } from '@prism/shared-types';
 import { UnifiedAIClient, networkStatusService } from '@prism/api-client';
 import { ImageGenerationService } from '@prism/image-gen';
 import type { Message, ContextData, AIConfig } from '@prism/shared-types';
@@ -29,23 +27,14 @@ import {
   setAIConfig,
   updateAIConfig,
   setContext,
-  setDisplayMode,
-  setFontSize,
-  setChatOpen,
-  setShowPrompts,
-  setShowMenu,
-  increaseFontSize,
-  decreaseFontSize,
-  setDisplaySettings,
-  setSystemPrompt,
   setPromptShortcuts,
   addPromptShortcut,
   updatePromptShortcut as updatePromptShortcutAction,
   deletePromptShortcut as deleteReduxPromptShortcut,
-  setPromptsLoading,
-  setOnlineStatus,
+  setAvailableModels,
+  setFetchingModels,
   RootState,
-  AppDispatch
+  AppDispatch,
 } from '@prism/redux-store';
 import './Popup.scss';
 import { InputSection } from './InputSection';
@@ -58,21 +47,32 @@ const defaultAIConfig: AIConfig = {
   provider: 'prism-api',
   apiUrl: 'http://localhost:3000/api',
   providerKeys: {
-    'openai': '',
-    'gemini': '',
-    'qwen': '',
-    'prism-api': ''
-  }
+    openai: '',
+    gemini: '',
+    qwen: '',
+    'prism-api': '',
+  },
 };
 
 let client = new UnifiedAIClient({ aiConfig: defaultAIConfig });
 
 export function Popup() {
   const dispatch = useDispatch<AppDispatch>();
-  const { messages, currentSessionId, sessions, loading } = useSelector((state: RootState) => state.chat);
-  const { config: reduxAIConfig, availableModels, isFetchingModels } = useSelector((state: RootState) => state.aiConfig);
-  const { context: reduxContext } = useSelector((state: RootState) => state.context);
-  const { user, isAuthenticated, loading: authLoading, signInWithGoogle, signOut } = useAuth();
+  const { messages, currentSessionId, sessions, loading } = useSelector(
+    (state: RootState) => state.chat,
+  );
+  const {
+    config: reduxAIConfig,
+    availableModels,
+    fetchingModels,
+  } = useSelector((state: RootState) => state.aiConfig);
+  const { context: reduxContext } = useSelector(
+    (state: RootState) => state.context,
+  );
+  const { shortcuts: promptShortcuts } = useSelector(
+    (state: RootState) => state.prompts,
+  );
+  const { user, isAuthenticated, signInWithGoogle, signOut } = useAuth();
 
   const [input, setInput] = useState('');
   const [iframeUrl, setIframeUrl] = useState<string>('');
@@ -80,7 +80,8 @@ export function Popup() {
   const [iframeError, setIframeError] = useState<string | null>(null);
   const [showMenu, setShowMenu] = useState(false);
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
-  const [autoSyncIntervalId, setAutoSyncIntervalId] = useState<NodeJS.Timeout | null>(null);
+  const [autoSyncIntervalId, setAutoSyncIntervalId] =
+    useState<NodeJS.Timeout | null>(null);
   const [isOnline, setIsOnline] = useState(true); // Track network status
 
   // Monitor network status
@@ -112,14 +113,14 @@ export function Popup() {
       setAutoSyncIntervalId(interval);
 
       return () => {
-        if (interval) {
-          clearInterval(interval);
-        }
+        clearInterval(interval);
       };
-    } else if (autoSyncIntervalId) {
+    }
+    if (autoSyncIntervalId) {
       clearInterval(autoSyncIntervalId);
       setAutoSyncIntervalId(null);
     }
+    return undefined;
   }, [autoSyncEnabled, messages]);
 
   const toggleAutoSync = () => {
@@ -131,10 +132,13 @@ export function Popup() {
     name: '',
     content: '',
     category: '',
-    shortcutKey: ''  // Adding shortcut key field
+    shortcutKey: '', // Adding shortcut key field
   });
-  const [editingKeyboardShortcut, setEditingKeyboardShortcut] = useState<string | null>(null);
-  const [currentKeyboardShortcut, setCurrentKeyboardShortcut] = useState<string>('');
+  const [editingKeyboardShortcut, setEditingKeyboardShortcut] = useState<
+    string | null
+  >(null);
+  const [currentKeyboardShortcut, setCurrentKeyboardShortcut] =
+    useState<string>('');
 
   // Content sending options
   const [sendSelectedText, setSendSelectedText] = useState<boolean>(true);
@@ -148,15 +152,18 @@ export function Popup() {
 
   // Image file upload state
   const [uploadedImages, setUploadedImages] = useState<string[]>([]);
-  const [isUploading, setIsUploading] = useState<boolean>(false);
   const [dragOver, setDragOver] = useState<boolean>(false);
 
   // Image generation state
-  const [imageGenerationPrompt, setImageGenerationPrompt] = useState<string>('');
+  const [imageGenerationPrompt, setImageGenerationPrompt] =
+    useState<string>('');
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [isGeneratingImage, setIsGeneratingImage] = useState<boolean>(false);
-  const [imageGenerationModel, setImageGenerationModel] = useState<string>('stabilityai/stable-diffusion-2-1');
-  const [imageGenerationApiKey, setImageGenerationApiKey] = useState<string>('');
+  const [imageGenerationModel, setImageGenerationModel] = useState<string>(
+    'stabilityai/stable-diffusion-2-1',
+  );
+  const [imageGenerationApiKey, setImageGenerationApiKey] =
+    useState<string>('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -170,18 +177,19 @@ export function Popup() {
           // Ensure providerKeys exists and has all providers
           if (!config.providerKeys) {
             config.providerKeys = {
-              'openai': config.apiKey || '',
-              'gemini': config.apiKey || '',
-              'qwen': config.apiKey || '',
-              'prism-api': config.apiKey || config.apiUrl || ''
+              openai: config.apiKey || '',
+              gemini: config.apiKey || '',
+              qwen: config.apiKey || '',
+              'prism-api': config.apiKey || config.apiUrl || '',
             };
           } else {
             // Ensure all provider keys exist
             config.providerKeys = {
-              'openai': config.providerKeys['openai'] || '',
-              'gemini': config.providerKeys['gemini'] || '',
-              'qwen': config.providerKeys['qwen'] || '',
-              'prism-api': config.providerKeys['prism-api'] || config.apiUrl || ''
+              openai: config.providerKeys['openai'] || '',
+              gemini: config.providerKeys['gemini'] || '',
+              qwen: config.providerKeys['qwen'] || '',
+              'prism-api':
+                config.providerKeys['prism-api'] || config.apiUrl || '',
             };
           }
 
@@ -189,16 +197,18 @@ export function Popup() {
           // Update the current provider's API key in the config before creating the client
           const updatedConfig = { ...config };
           if (updatedConfig.providerKeys) {
-            updatedConfig.apiKey = updatedConfig.providerKeys[updatedConfig.provider] || '';
+            updatedConfig.apiKey =
+              updatedConfig.providerKeys[updatedConfig.provider] || '';
             if (updatedConfig.provider === 'prism-api') {
-              updatedConfig.apiUrl = updatedConfig.providerKeys['prism-api'] || updatedConfig.apiUrl;
+              updatedConfig.apiUrl =
+                updatedConfig.providerKeys['prism-api'] || updatedConfig.apiUrl;
             }
           }
 
           dispatch(setAIConfig(updatedConfig));
           client = new UnifiedAIClient({
             aiConfig: updatedConfig,
-            prismApiUrl: updatedConfig.apiUrl
+            prismApiUrl: updatedConfig.apiUrl,
           });
 
           // Fetch available models for the current provider
@@ -236,7 +246,11 @@ export function Popup() {
     getCurrentContext();
 
     // Listen for messages from content script or background
-    const handleMessage = (request: any, sender: any, sendResponse: (response: any) => void) => {
+    const handleMessage = (
+      request: any,
+      sender: any,
+      sendResponse: (response: any) => void,
+    ) => {
       if (request.type === 'INSERT_PROMPT_CONTENT') {
         setInput(request.content);
         return true; // Keep the message channel open for async response if needed
@@ -267,7 +281,9 @@ export function Popup() {
       }
       if (request.type === 'RETRY_LAST_MESSAGE') {
         // Retry the last user message
-        const lastUserMessage = [...messages].reverse().find(msg => msg.role === 'user');
+        const lastUserMessage = [...messages]
+          .reverse()
+          .find((msg) => msg.role === 'user');
         if (lastUserMessage) {
           setInput(lastUserMessage.content);
         }
@@ -276,7 +292,9 @@ export function Popup() {
       if (request.action === 'FOCUS_INPUT') {
         // Focus the input field when requested
         setTimeout(() => {
-          const inputElement = document.querySelector('textarea') as HTMLTextAreaElement;
+          const inputElement = document.querySelector(
+            'textarea',
+          ) as HTMLTextAreaElement;
           if (inputElement) {
             inputElement.focus();
             inputElement.select();
@@ -296,7 +314,9 @@ export function Popup() {
       if (event.data && event.data.action === 'FOCUS_INPUT') {
         // Focus the input field when requested
         setTimeout(() => {
-          const inputElement = document.querySelector('textarea') as HTMLTextAreaElement;
+          const inputElement = document.querySelector(
+            'textarea',
+          ) as HTMLTextAreaElement;
           if (inputElement) {
             inputElement.focus();
             inputElement.select();
@@ -310,7 +330,9 @@ export function Popup() {
 
       if (event.data && event.data.type === 'RETRY_LAST_MESSAGE') {
         // Retry the last user message
-        const lastUserMessage = [...messages].reverse().find(msg => msg.role === 'user');
+        const lastUserMessage = [...messages]
+          .reverse()
+          .find((msg) => msg.role === 'user');
         if (lastUserMessage) {
           setInput(lastUserMessage.content);
         }
@@ -339,14 +361,14 @@ export function Popup() {
       setAutoSyncIntervalId(interval);
 
       return () => {
-        if (interval) {
-          clearInterval(interval);
-        }
+        clearInterval(interval);
       };
-    } else if (autoSyncIntervalId) {
+    }
+    if (autoSyncIntervalId) {
       clearInterval(autoSyncIntervalId);
       setAutoSyncIntervalId(null);
     }
+    return undefined;
   }, [autoSyncEnabled, messages]);
 
   const checkPendingPromptContent = async () => {
@@ -361,14 +383,20 @@ export function Popup() {
   useEffect(() => {
     const initConfig = async () => {
       try {
-        const result = await chrome.storage.local.get(['fontScale', 'displaySettings']);
+        const result = await chrome.storage.local.get([
+          'fontScale',
+          'displaySettings',
+        ]);
         let currentFontScale = 1.0;
         if (result.fontScale) {
           currentFontScale = Math.max(0.5, Math.min(2.0, result.fontScale)); // Clamp between 0.5 and 2.0
         }
 
         // Apply font scale to the document root (for the popup)
-        document.documentElement.style.setProperty('--font-scale', currentFontScale.toString());
+        document.documentElement.style.setProperty(
+          '--font-scale',
+          currentFontScale.toString(),
+        );
 
         // Removed command prefix initialization as we're using individual prompt shortcuts instead of global prefix
       } catch (error) {
@@ -390,7 +418,11 @@ export function Popup() {
 
   // Listen for tab updates to refresh context when switching between tabs
   useEffect(() => {
-    const handleTabUpdate = (tabId: number, changeInfo: chrome.tabs.TabChangeInfo, tab: chrome.tabs.Tab) => {
+    const handleTabUpdate = (
+      tabId: number,
+      changeInfo: chrome.tabs.TabChangeInfo,
+      tab: chrome.tabs.Tab,
+    ) => {
       // Update context when the active tab changes
       if (changeInfo.status === 'complete' && tab.active) {
         getCurrentContext();
@@ -407,25 +439,30 @@ export function Popup() {
 
   // Listen for AI configuration updates from the background script
   useEffect(() => {
-    const handleConfigUpdate = (request: any, sender: any, sendResponse: (response: any) => void) => {
+    const handleConfigUpdate = (
+      request: any,
+      sender: any,
+      sendResponse: (response: any) => void,
+    ) => {
       if (request.type === 'UPDATE_AI_CONFIG' && request.data) {
         const config = request.data as AIConfig;
 
         // Ensure providerKeys exists and has all providers
         if (!config.providerKeys) {
           config.providerKeys = {
-            'openai': config.apiKey || '',
-            'gemini': config.apiKey || '',
-            'qwen': config.apiKey || '',
-            'prism-api': config.apiKey || config.apiUrl || ''
+            openai: config.apiKey || '',
+            gemini: config.apiKey || '',
+            qwen: config.apiKey || '',
+            'prism-api': config.apiKey || config.apiUrl || '',
           };
         } else {
           // Ensure all provider keys exist
           config.providerKeys = {
-            'openai': config.providerKeys['openai'] || '',
-            'gemini': config.providerKeys['gemini'] || '',
-            'qwen': config.providerKeys['qwen'] || '',
-            'prism-api': config.providerKeys['prism-api'] || config.apiUrl || ''
+            openai: config.providerKeys['openai'] || '',
+            gemini: config.providerKeys['gemini'] || '',
+            qwen: config.providerKeys['qwen'] || '',
+            'prism-api':
+              config.providerKeys['prism-api'] || config.apiUrl || '',
           };
         }
 
@@ -434,15 +471,17 @@ export function Popup() {
         // Update the client with the new configuration
         const updatedConfig = { ...config };
         if (updatedConfig.providerKeys) {
-          updatedConfig.apiKey = updatedConfig.providerKeys[updatedConfig.provider] || '';
+          updatedConfig.apiKey =
+            updatedConfig.providerKeys[updatedConfig.provider] || '';
           if (updatedConfig.provider === 'prism-api') {
-            updatedConfig.apiUrl = updatedConfig.providerKeys['prism-api'] || updatedConfig.apiUrl;
+            updatedConfig.apiUrl =
+              updatedConfig.providerKeys['prism-api'] || updatedConfig.apiUrl;
           }
         }
 
         client = new UnifiedAIClient({
           aiConfig: updatedConfig,
-          prismApiUrl: updatedConfig.apiUrl
+          prismApiUrl: updatedConfig.apiUrl,
         });
       }
       return true; // Keep the message channel open for async response if needed
@@ -473,8 +512,20 @@ export function Popup() {
 
   const loadChatSessionsFromDB = async () => {
     try {
-      const sessionsList = await getChatSessions();
-      dispatch(setSessions(sessionsList));
+      const sessions = await getChatSessions();
+      // Map DBChatSession to shared-types ChatSession (title optional in shared type)
+      dispatch(
+        setSessions(
+          sessions.map((s) => ({
+            id: s.id,
+            userId: '', // User ID not tracked locally
+            title: s.title,
+            messages: [],
+            createdAt: s.createdAt,
+            updatedAt: s.updatedAt,
+          })),
+        ),
+      );
     } catch (error) {
       console.error('Failed to load chat sessions:', error);
     }
@@ -528,11 +579,18 @@ export function Popup() {
       dispatch(setPromptShortcuts(prompts));
 
       // Also sync to chrome.storage.local for content script access
-      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      if (
+        typeof chrome !== 'undefined' &&
+        chrome.storage &&
+        chrome.storage.local
+      ) {
         try {
           await chrome.storage.local.set({ promptShortcuts: prompts });
         } catch (error) {
-          console.warn('Could not sync prompt shortcuts to chrome.storage.local:', error);
+          console.warn(
+            'Could not sync prompt shortcuts to chrome.storage.local:',
+            error,
+          );
         }
       }
     } catch (error) {
@@ -551,7 +609,9 @@ export function Popup() {
   };
 
   const deletePromptShortcutFromDB = async (promptId: string) => {
-    if (window.confirm('Are you sure you want to delete this prompt shortcut?')) {
+    if (
+      window.confirm('Are you sure you want to delete this prompt shortcut?')
+    ) {
       try {
         await deletePromptShortcut(promptId);
         dispatch(deleteReduxPromptShortcut(promptId)); // Remove from Redux store
@@ -570,17 +630,20 @@ export function Popup() {
         content: newPrompt.content,
         category: newPrompt.category || 'General',
         shortcutKey: newPrompt.shortcutKey || undefined,
-        createdAt: Date.now()
+        createdAt: Date.now(),
       };
       savePromptShortcutToDB(prompt);
       setNewPrompt({ name: '', content: '', category: '', shortcutKey: '' });
     }
   };
 
-  const updatePromptShortcut = async (id: string, updates: Partial<PromptShortcut>) => {
+  const updatePromptShortcut = async (
+    id: string,
+    updates: Partial<PromptShortcut>,
+  ) => {
     try {
       // Get the current prompt
-      const currentPrompt = promptShortcuts.find(p => p.id === id);
+      const currentPrompt = promptShortcuts.find((p) => p.id === id);
       if (!currentPrompt) return;
 
       const updatedPrompt = { ...currentPrompt, ...updates };
@@ -599,7 +662,9 @@ export function Popup() {
 
   const saveKeyboardShortcut = () => {
     if (editingKeyboardShortcut && currentKeyboardShortcut) {
-      updatePromptShortcut(editingKeyboardShortcut, { keyboardShortcut: currentKeyboardShortcut });
+      updatePromptShortcut(editingKeyboardShortcut, {
+        keyboardShortcut: currentKeyboardShortcut,
+      });
       setEditingKeyboardShortcut(null);
       setCurrentKeyboardShortcut('');
     }
@@ -608,10 +673,15 @@ export function Popup() {
   // Content sending functions
   const getSelectedText = async (): Promise<string> => {
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const [tab] = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
       if (tab.id) {
-        const result = await chrome.tabs.sendMessage(tab.id, { type: 'GET_SELECTED_TEXT' });
-        return result.text || '';
+        const result = (await chrome.tabs.sendMessage(tab.id, {
+          type: 'GET_SELECTED_TEXT',
+        })) as { text?: string } | undefined;
+        return result?.text || '';
       }
       return '';
     } catch (error) {
@@ -627,13 +697,16 @@ export function Popup() {
       const settings = result.displaySettings;
       const pageContentTokenLimit = settings?.pageContentTokenLimit || 20000;
 
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const [tab] = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
       if (tab.id) {
-        const result = await chrome.tabs.sendMessage(tab.id, {
+        const result = (await chrome.tabs.sendMessage(tab.id, {
           type: 'GET_PAGE_CONTENTS_WITH_LIMIT',
-          tokenLimit: pageContentTokenLimit
-        });
-        return result.content || '';
+          tokenLimit: pageContentTokenLimit,
+        })) as { content?: string } | undefined;
+        return result?.content || '';
       }
       return '';
     } catch (error) {
@@ -644,10 +717,15 @@ export function Popup() {
 
   const getScreenshot = async (): Promise<string> => {
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const [tab] = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
       if (tab.id) {
         // Capture the visible part of the current tab
-        const screenshot = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
+        const screenshot = await chrome.tabs.captureVisibleTab(undefined, {
+          format: 'png',
+        });
         return screenshot;
       }
       return '';
@@ -682,7 +760,7 @@ export function Popup() {
     try {
       const service = new ImageGenerationService({
         model: imageGenerationModel,
-        apiKey: imageGenerationApiKey
+        apiKey: imageGenerationApiKey,
       });
 
       const result = await service.generateImage(imageGenerationPrompt);
@@ -694,7 +772,7 @@ export function Popup() {
         role: 'assistant',
         content: `Generated image for: "${imageGenerationPrompt}"`,
         timestamp: Date.now(),
-        context
+        context: reduxContext ?? undefined,
       };
 
       // Add the image as a new message in the chat
@@ -705,7 +783,7 @@ export function Popup() {
       // Save the image generation config
       await chrome.storage.local.set({
         imageGenApiKey: imageGenerationApiKey,
-        imageGenModel: imageGenerationModel
+        imageGenModel: imageGenerationModel,
       });
     } catch (error) {
       console.error('Error generating image:', error);
@@ -718,9 +796,10 @@ export function Popup() {
   const saveImageGenerationConfig = async () => {
     await chrome.storage.local.set({
       imageGenApiKey: imageGenerationApiKey,
-      imageGenModel: imageGenerationModel
+      imageGenModel: imageGenerationModel,
     });
   };
+  void saveImageGenerationConfig;
 
   const usePrompt = (content: string) => {
     setInput(content);
@@ -751,12 +830,15 @@ export function Popup() {
       }
 
       // Check for keyboard shortcuts for prompt shortcuts first
-      const activeShortcut = promptShortcuts.find(prompt =>
-        prompt.keyboardShortcut &&
-        e.key.toLowerCase() === prompt.keyboardShortcut.split('+').pop()?.toLowerCase() &&
-        (e.ctrlKey || e.metaKey) === prompt.keyboardShortcut.includes('Ctrl') &&
-        e.shiftKey === prompt.keyboardShortcut.includes('Shift') &&
-        e.altKey === prompt.keyboardShortcut.includes('Alt')
+      const activeShortcut = promptShortcuts.find(
+        (prompt) =>
+          prompt.keyboardShortcut &&
+          e.key.toLowerCase() ===
+            prompt.keyboardShortcut.split('+').pop()?.toLowerCase() &&
+          (e.ctrlKey || e.metaKey) ===
+            prompt.keyboardShortcut.includes('Ctrl') &&
+          e.shiftKey === prompt.keyboardShortcut.includes('Shift') &&
+          e.altKey === prompt.keyboardShortcut.includes('Alt'),
       );
 
       if (activeShortcut) {
@@ -769,13 +851,13 @@ export function Popup() {
       if (e.ctrlKey && e.shiftKey) {
         if (e.key.toLowerCase() === 't') {
           e.preventDefault();
-          setSendSelectedText(prev => !prev);
+          setSendSelectedText((prev) => !prev);
         } else if (e.key.toLowerCase() === 'p') {
           e.preventDefault();
-          setSendPageContents(prev => !prev);
+          setSendPageContents((prev) => !prev);
         } else if (e.key.toLowerCase() === 's') {
           e.preventDefault();
-          setSendScreenshot(prev => !prev);
+          setSendScreenshot((prev) => !prev);
         }
       }
 
@@ -784,7 +866,9 @@ export function Popup() {
         const trimmedInput = input.trim();
 
         // Look for a prompt with shortcutKey that matches the entire input
-        const prompt = promptShortcuts.find(p => p.shortcutKey === trimmedInput);
+        const prompt = promptShortcuts.find(
+          (p) => p.shortcutKey === trimmedInput,
+        );
 
         if (prompt) {
           e.preventDefault(); // Prevent sending the message
@@ -817,10 +901,16 @@ export function Popup() {
         let currentFontScale = result.fontScale || 1.0;
 
         // Calculate new scale and clamp between 0.5 and 2.0
-        currentFontScale = Math.max(0.5, Math.min(2.0, currentFontScale + delta));
+        currentFontScale = Math.max(
+          0.5,
+          Math.min(2.0, currentFontScale + delta),
+        );
 
         // Apply font scale to the document root (for the popup)
-        document.documentElement.style.setProperty('--font-scale', currentFontScale.toString());
+        document.documentElement.style.setProperty(
+          '--font-scale',
+          currentFontScale.toString(),
+        );
 
         // Save the new font scale to storage
         await chrome.storage.local.set({ fontScale: currentFontScale });
@@ -828,16 +918,22 @@ export function Popup() {
         // Also update the content script if possible
         try {
           // Send message to content script to update font scale on the page
-          const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+          const [tab] = await chrome.tabs.query({
+            active: true,
+            currentWindow: true,
+          });
           if (tab.id) {
             chrome.tabs.sendMessage(tab.id, {
               type: 'UPDATE_FONT_SCALE',
-              scale: currentFontScale
+              scale: currentFontScale,
             });
           }
         } catch (contentError) {
           // If content script communication fails, just update the popup
-          console.warn('Could not update content script font scale:', contentError);
+          console.warn(
+            'Could not update content script font scale:',
+            contentError,
+          );
         }
       } catch (error) {
         console.error('Error adjusting font size:', error);
@@ -849,8 +945,8 @@ export function Popup() {
   }, [input, promptShortcuts, editingKeyboardShortcut]);
 
   // Image upload handling
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
+  const handleImageUpload = (e: Event) => {
+    const files = (e.target as HTMLInputElement).files;
     if (files && files.length > 0) {
       const file = files[0];
       if (!file.type.startsWith('image/')) {
@@ -861,14 +957,14 @@ export function Popup() {
       const reader = new FileReader();
       reader.onload = (event) => {
         const imageData = event.target?.result as string;
-        setUploadedImages(prev => [...prev, imageData]);
+        setUploadedImages((prev) => [...prev, imageData]);
       };
       reader.readAsDataURL(file);
     }
   };
 
   const removeImage = (index: number) => {
-    setUploadedImages(prev => prev.filter((_, i) => i !== index));
+    setUploadedImages((prev) => prev.filter((_, i) => i !== index));
   };
 
   const addImageToInput = () => {
@@ -891,7 +987,7 @@ export function Popup() {
           const reader = new FileReader();
           reader.onload = (event) => {
             const imageData = event.target?.result as string;
-            setUploadedImages(prev => [...prev, imageData]);
+            setUploadedImages((prev) => [...prev, imageData]);
           };
           reader.readAsDataURL(file);
         }
@@ -913,7 +1009,7 @@ export function Popup() {
         const reader = new FileReader();
         reader.onload = (event) => {
           const imageData = event.target?.result as string;
-          setUploadedImages(prev => [...prev, imageData]);
+          setUploadedImages((prev) => [...prev, imageData]);
         };
         reader.readAsDataURL(file);
       }
@@ -933,7 +1029,7 @@ export function Popup() {
   };
 
   const handleVoiceTranscript = (text: string) => {
-    setInput(prev => prev + (prev ? ' ' : '') + text);
+    setInput((prev) => prev + (prev ? ' ' : '') + text);
   };
 
   const [speaking, setSpeaking] = useState<string | null>(null);
@@ -960,9 +1056,12 @@ export function Popup() {
       window.speechSynthesis.cancel();
     }
 
-    if (client && aiConfig.providerKeys?.['openai']) {
+    if (client && reduxAIConfig.providerKeys?.['openai']) {
       try {
-        const result = await client.textToSpeech(msg.content, { voice: 'alloy', responseFormat: 'mp3' });
+        const result = await client.textToSpeech(msg.content, {
+          voice: 'alloy',
+          responseFormat: 'mp3',
+        });
         if (result.success && result.data) {
           const url = URL.createObjectURL(result.data);
           const audio = new Audio(url);
@@ -998,22 +1097,25 @@ export function Popup() {
 
   const getCurrentContext = async (): Promise<ContextData | null> => {
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const [tab] = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
 
       if (tab.id) {
-        const response = await chrome.runtime.sendMessage({
-          type: 'GET_CONTEXT'
-        });
+        const response = (await chrome.runtime.sendMessage({
+          type: 'GET_CONTEXT',
+        })) as (ContextData & { error?: string }) | undefined;
 
         if (response && !response.error) {
-          setContext(response);
+          dispatch(setContext(response));
           return response;
         }
       }
-      return context; // Return current context if couldn't get fresh one
+      return reduxContext; // Return current context if couldn't get fresh one
     } catch (error) {
       console.error('Error getting context:', error);
-      return context; // Return current context on error
+      return reduxContext; // Return current context on error
     }
   };
 
@@ -1023,22 +1125,38 @@ export function Popup() {
       // Create a temporary client with the current AI config
       const tempClient = new UnifiedAIClient({
         aiConfig: config,
-        prismApiUrl: config.apiUrl
+        prismApiUrl: config.apiUrl,
       });
       const models = await tempClient.getAvailableModels();
       setAvailableModels(models);
     } catch (error) {
       console.error('Error fetching available models:', error);
       // Set some default models based on the provider
-      switch(config.provider) {
+      switch (config.provider) {
         case 'openai':
-          setAvailableModels(['gpt-3.5-turbo', 'gpt-4', 'gpt-4o', 'gpt-4-turbo']);
+          setAvailableModels([
+            'gpt-3.5-turbo',
+            'gpt-4',
+            'gpt-4o',
+            'gpt-4-turbo',
+          ]);
           break;
         case 'gemini':
-          setAvailableModels(['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro']);
+          setAvailableModels([
+            'gemini-2.5-flash',
+            'gemini-2.5-pro',
+            'gemini-1.5-pro',
+            'gemini-1.5-flash',
+            'gemini-pro',
+          ]);
           break;
         case 'claude':
-          setAvailableModels(['claude-3-5-sonnet-20241022', 'claude-3-sonnet-20240229', 'claude-3-opus-20240229', 'claude-3-haiku-20240307']);
+          setAvailableModels([
+            'claude-3-5-sonnet-20241022',
+            'claude-3-sonnet-20240229',
+            'claude-3-opus-20240229',
+            'claude-3-haiku-20240307',
+          ]);
           break;
         default:
           setAvailableModels([]);
@@ -1135,7 +1253,9 @@ export function Popup() {
         setIframeError(null);
       } else {
         // If container exists, just update the iframe src
-        const iframe = document.getElementById('prism-injected-iframe') as HTMLIframeElement;
+        const iframe = document.getElementById(
+          'prism-injected-iframe',
+        ) as HTMLIFrameElement | null;
         if (iframe) {
           iframe.src = url.toString();
         }
@@ -1162,7 +1282,10 @@ export function Popup() {
     if (!text || text.length === 0) return 0;
 
     // Simple estimation: split by whitespace
-    const words = text.trim().split(/\s+/).filter(word => word.length > 0);
+    const words = text
+      .trim()
+      .split(/\s+/)
+      .filter((word) => word.length > 0);
     // Rough estimation: about 1 token per word, but longer words might be multiple tokens
     let tokenCount = 0;
     for (const word of words) {
@@ -1210,13 +1333,13 @@ export function Popup() {
       }
     }
 
-      let screenshotImages: string[] = [];
-      if (sendScreenshot || pageScreenshotMode) {
-        const screenshot = await getScreenshot();
-        if (screenshot) {
-          screenshotImages.push(screenshot);
-        }
+    let screenshotImages: string[] = [];
+    if (sendScreenshot || pageScreenshotMode) {
+      const screenshot = await getScreenshot();
+      if (screenshot) {
+        screenshotImages.push(screenshot);
       }
+    }
 
     if (clipboardMode) {
       try {
@@ -1242,35 +1365,42 @@ export function Popup() {
     const totalTokens = estimateTokenCount(fullInput);
 
     if (totalTokens > totalMessageTokenLimit) {
-      alert(`Message exceeds token limit. Current: ${totalTokens} tokens, Limit: ${totalMessageTokenLimit} tokens. Please reduce the message size.`);
+      alert(
+        `Message exceeds token limit. Current: ${totalTokens} tokens, Limit: ${totalMessageTokenLimit} tokens. Please reduce the message size.`,
+      );
       return;
     }
 
-      const userMessage: Message = {
-        id: Date.now().toString(),
-        role: 'user',
-        content: fullInput,
-        images: [...uploadedImages, ...screenshotImages].length > 0 ? [...uploadedImages, ...screenshotImages] : undefined,
-        timestamp: Date.now(),
-        tokens: totalTokens,
-        context: freshContext
-      };
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: fullInput,
+      images:
+        [...uploadedImages, ...screenshotImages].length > 0
+          ? [...uploadedImages, ...screenshotImages]
+          : undefined,
+      timestamp: Date.now(),
+      tokens: totalTokens,
+      context: freshContext ?? undefined,
+    };
 
     dispatch(addMessage(userMessage));
     setInput('');
     setUploadedImages([]); // Clear uploaded images after sending
     // Reset all mode states after sending
-    dispatch(setTextSelectionMode(false));
-    dispatch(setPageContextMode(false));
-    dispatch(setPageScreenshotMode(false));
-    dispatch(setClipboardMode(false));
-    dispatch(setPageInfoMode(false));
+    setTextSelectionMode(false);
+    setPageContextMode(false);
+    setPageScreenshotMode(false);
+    setClipboardMode(false);
+    setPageInfoMode(false);
     // Save to database before attempting to send, ensuring offline persistence
     await saveCurrentChatToDB([...messages, userMessage]);
 
     try {
       // Load extension settings to get system prompt
-      const settingsResult = await chrome.storage.local.get(['displaySettings']);
+      const settingsResult = await chrome.storage.local.get([
+        'displaySettings',
+      ]);
       const systemPrompt = settingsResult.displaySettings?.systemPrompt || '';
 
       // Prepare the conversation history with system prompt if available
@@ -1300,7 +1430,13 @@ export function Popup() {
       client.updateAIConfig(reduxAIConfig);
 
       // Try to send the message using the client (which handles online/offline)
-      const response = await client.sendMessage(fullInput, freshContext, currentSessionId, uploadedImages.length > 0 ? [...uploadedImages] : undefined, conversationHistory);
+      const response = await client.sendMessage(
+        fullInput,
+        freshContext ?? undefined,
+        currentSessionId,
+        undefined,
+        conversationHistory,
+      );
 
       if (response && response.success && response.data) {
         dispatch(addMessage(response.data));
@@ -1316,7 +1452,7 @@ export function Popup() {
           role: 'assistant',
           content: `Error: ${response?.error || 'Failed to get response from AI'}`,
           timestamp: Date.now(),
-          context: freshContext
+          context: freshContext ?? undefined,
         };
         dispatch(addMessage(errorMessage));
         await saveCurrentChatToDB([...messages, userMessage, errorMessage]);
@@ -1329,7 +1465,7 @@ export function Popup() {
         role: 'assistant',
         content: `Error: ${(error as Error).message || 'Failed to send message to AI'}`,
         timestamp: Date.now(),
-        context: freshContext
+        context: freshContext ?? undefined,
       };
       dispatch(addMessage(errorMessage));
       await saveCurrentChatToDB([...messages, userMessage, errorMessage]);
@@ -1352,7 +1488,7 @@ export function Popup() {
       // Set up API client
       const apiClient = new UnifiedAIClient({
         aiConfig: aiConfig,
-        prismApiUrl: aiConfig?.apiUrl || process.env.NEXT_PUBLIC_API_URL
+        prismApiUrl: aiConfig?.apiUrl || process.env.NEXT_PUBLIC_API_URL,
       });
 
       // Sync messages
@@ -1371,8 +1507,8 @@ export function Popup() {
           userId: '', // This will be set by the server
           messages: messages,
           createdAt: Date.now(), // This will also be set by the server
-          updatedAt: Date.now()
-        }
+          updatedAt: Date.now(),
+        },
       ]);
       if (!syncSessionsResult.success) {
         console.error('Failed to sync sessions:', syncSessionsResult.error);
@@ -1383,7 +1519,9 @@ export function Popup() {
       // Sync prompts (get from Redux state or local state)
       // For now, we'll get them from chrome storage
       const promptShortcutsResult = await getPromptShortcuts();
-      const syncPromptsResult = await apiClient.syncPrompts(promptShortcutsResult);
+      const syncPromptsResult = await apiClient.syncPrompts(
+        promptShortcutsResult,
+      );
       if (!syncPromptsResult.success) {
         console.error('Failed to sync prompts:', syncPromptsResult.error);
         alert(`Failed to sync prompts: ${syncPromptsResult.error}`);
@@ -1406,7 +1544,7 @@ export function Popup() {
       // Set up API client
       const apiClient = new UnifiedAIClient({
         aiConfig: aiConfig,
-        prismApiUrl: aiConfig?.apiUrl || process.env.NEXT_PUBLIC_API_URL
+        prismApiUrl: aiConfig?.apiUrl || process.env.NEXT_PUBLIC_API_URL,
       });
 
       // Get synced data from API
@@ -1446,26 +1584,30 @@ export function Popup() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-
   const renderMenu = () => (
     <div className="menu-overlay">
       <div className="menu-panel">
         <div className="menu-header">
           <h2>Navigation Menu</h2>
-          <button onClick={() => setShowMenu(false)} className="close-btn">✕</button>
+          <button onClick={() => setShowMenu(false)} className="close-btn">
+            ✕
+          </button>
         </div>
 
         <div className="menu-content">
           <div className="menu-section">
             <h3>Chat Sessions</h3>
             <div className="session-list">
-              <button className="session-item new-session-btn" onClick={() => {
-                createNewSession();
-                setShowMenu(false);
-              }}>
+              <button
+                className="session-item new-session-btn"
+                onClick={() => {
+                  createNewSession();
+                  setShowMenu(false);
+                }}
+              >
                 + New Chat
               </button>
-              {sessions.map(session => (
+              {sessions.map((session) => (
                 <div key={session.id} className="session-item">
                   <button
                     onClick={() => {
@@ -1492,16 +1634,22 @@ export function Popup() {
             <button className="menu-action-btn" onClick={clearHistory}>
               Clear Current Chat
             </button>
-            <button className="menu-action-btn" onClick={() => {
-              setShowPrompts(true);
-              setShowMenu(false);
-            }}>
+            <button
+              className="menu-action-btn"
+              onClick={() => {
+                setShowPrompts(true);
+                setShowMenu(false);
+              }}
+            >
               Prompt Shortcuts
             </button>
-            <button className="menu-action-btn" onClick={() => {
-              setShowSettings(true);
-              setShowMenu(false);
-            }}>
+            <button
+              className="menu-action-btn"
+              onClick={() => {
+                chrome.runtime.openOptionsPage();
+                setShowMenu(false);
+              }}
+            >
               Settings
             </button>
           </div>
@@ -1515,7 +1663,9 @@ export function Popup() {
       <div className="menu-panel">
         <div className="menu-header">
           <h2>Prompt Shortcuts</h2>
-          <button onClick={() => setShowPrompts(false)} className="close-btn">✕</button>
+          <button onClick={() => setShowPrompts(false)} className="close-btn">
+            ✕
+          </button>
         </div>
 
         <div className="menu-content">
@@ -1526,20 +1676,26 @@ export function Popup() {
                 type="text"
                 placeholder="Prompt name"
                 value={newPrompt.name}
-                onChange={(e) => setNewPrompt({...newPrompt, name: e.target.value})}
+                onChange={(e) =>
+                  setNewPrompt({ ...newPrompt, name: e.target.value })
+                }
                 className="prompt-input"
               />
               <input
                 type="text"
                 placeholder="Slash command (e.g. /fix)"
                 value={newPrompt.shortcutKey}
-                onChange={(e) => setNewPrompt({...newPrompt, shortcutKey: e.target.value})}
+                onChange={(e) =>
+                  setNewPrompt({ ...newPrompt, shortcutKey: e.target.value })
+                }
                 className="prompt-input"
               />
               <textarea
                 placeholder="Prompt content"
                 value={newPrompt.content}
-                onChange={(e) => setNewPrompt({...newPrompt, content: e.target.value})}
+                onChange={(e) =>
+                  setNewPrompt({ ...newPrompt, content: e.target.value })
+                }
                 className="prompt-textarea"
                 rows={3}
               />
@@ -1547,7 +1703,9 @@ export function Popup() {
                 type="text"
                 placeholder="Category (optional)"
                 value={newPrompt.category}
-                onChange={(e) => setNewPrompt({...newPrompt, category: e.target.value})}
+                onChange={(e) =>
+                  setNewPrompt({ ...newPrompt, category: e.target.value })
+                }
                 className="prompt-input"
               />
               <button onClick={addNewPrompt} className="prompt-add-btn">
@@ -1559,15 +1717,26 @@ export function Popup() {
           <div className="menu-section">
             <h3>Saved Prompts</h3>
             <div className="prompt-list">
-              {promptShortcuts.map(prompt => (
+              {promptShortcuts.map((prompt) => (
                 <div key={prompt.id} className="prompt-item">
                   <div className="prompt-content">
                     <div className="prompt-name">{prompt.name}</div>
                     <div className="prompt-info">
-                      {prompt.shortcutKey && <span className="shortcut-tag">{prompt.shortcutKey}</span>}
-                      {prompt.keyboardShortcut && <span className="shortcut-tag">{prompt.keyboardShortcut}</span>}
+                      {prompt.shortcutKey && (
+                        <span className="shortcut-tag">
+                          {prompt.shortcutKey}
+                        </span>
+                      )}
+                      {prompt.keyboardShortcut && (
+                        <span className="shortcut-tag">
+                          {prompt.keyboardShortcut}
+                        </span>
+                      )}
                     </div>
-                    <div className="prompt-text">{prompt.content.substring(0, 50)}{prompt.content.length > 50 ? '...' : ''}</div>
+                    <div className="prompt-text">
+                      {prompt.content.substring(0, 50)}
+                      {prompt.content.length > 50 ? '...' : ''}
+                    </div>
                   </div>
                   <div className="prompt-actions">
                     <button
@@ -1604,11 +1773,19 @@ export function Popup() {
 
       {/* Keyboard Shortcut Assignment Modal */}
       {editingKeyboardShortcut && (
-        <div className="menu-overlay" onClick={() => setEditingKeyboardShortcut(null)}>
+        <div
+          className="menu-overlay"
+          onClick={() => setEditingKeyboardShortcut(null)}
+        >
           <div className="menu-panel" onClick={(e) => e.stopPropagation()}>
             <div className="menu-header">
               <h2>Assign Keyboard Shortcut</h2>
-              <button onClick={() => setEditingKeyboardShortcut(null)} className="close-btn">✕</button>
+              <button
+                onClick={() => setEditingKeyboardShortcut(null)}
+                className="close-btn"
+              >
+                ✕
+              </button>
             </div>
 
             <div className="menu-content">
@@ -1644,8 +1821,6 @@ export function Popup() {
       )}
     </div>
   );
-
-
 
   return (
     <div className="popup-container">
@@ -1704,7 +1879,16 @@ export function Popup() {
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
                   components={{
-                    code({node, inline, className, children, ...props}) {
+                    code({
+                      inline,
+                      className,
+                      children,
+                      ...props
+                    }: {
+                      inline?: boolean;
+                      className?: string;
+                      children?: React.ReactNode;
+                    } & React.HTMLAttributes<HTMLElement>) {
                       const match = /language-(\w+)/.exec(className || '');
                       return !inline && match ? (
                         <SyntaxHighlighter
@@ -1720,21 +1904,21 @@ export function Popup() {
                           {children}
                         </code>
                       );
-                    }
+                    },
                   }}
                 >
-      {msg.content}
-      </ReactMarkdown>
-      {msg.role === 'assistant' && (
-        <button
-          className="tts-btn"
-          onClick={() => speakMessage(msg)}
-          title={speaking === msg.id ? 'Stop reading' : 'Read aloud'}
-        >
-          {speaking === msg.id ? '⏹️' : '🔊'}
-        </button>
-      )}
-    </div>
+                  {msg.content}
+                </ReactMarkdown>
+                {msg.role === 'assistant' && (
+                  <button
+                    className="tts-btn"
+                    onClick={() => speakMessage(msg)}
+                    title={speaking === msg.id ? 'Stop reading' : 'Read aloud'}
+                  >
+                    {speaking === msg.id ? '⏹️' : '🔊'}
+                  </button>
+                )}
+              </div>
               {msg.context && (
                 <div className="message-context">
                   🔗 {msg.context.title || msg.context.url}
@@ -1787,18 +1971,18 @@ export function Popup() {
         setPageScreenshotMode={setPageScreenshotMode}
         clipboardMode={clipboardMode}
         setClipboardMode={setClipboardMode}
-          pageInfoMode={pageInfoMode}
-          setPageInfoMode={setPageInfoMode}
-          addImageToInput={addImageToInput}
-          onPasteImage={handlePasteImage}
-          onDrop={handleDrop}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          dragOver={dragOver}
-          onVoiceTranscript={handleVoiceTranscript}
-          voiceClient={client}
-          useWhisper={true}
-        />
+        pageInfoMode={pageInfoMode}
+        setPageInfoMode={setPageInfoMode}
+        addImageToInput={addImageToInput}
+        onPasteImage={handlePasteImage}
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        dragOver={dragOver}
+        onVoiceTranscript={handleVoiceTranscript}
+        voiceClient={client}
+        useWhisper={true}
+      />
 
       {showMenu && renderMenu()}
       {showPrompts && renderPromptShortcuts()}

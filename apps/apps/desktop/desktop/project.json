@@ -36,8 +36,8 @@
     "package": {
       "executor": "nx-electron:package",
       "options": {
-        "name": "apps-desktop-desktop",
-        "frontendProject": "",
+        "name": "Prism",
+        "frontendProject": "@prism/desktop",
         "sourcePath": "dist/apps",
         "outputPath": "dist/packages",
         "prepackageOnly": true
@@ -46,8 +46,8 @@
     "make": {
       "executor": "nx-electron:make",
       "options": {
-        "name": "apps-desktop-desktop",
-        "frontendProject": "",
+        "name": "Prism",
+        "frontendProject": "@prism/desktop",
         "sourcePath": "dist/apps",
         "outputPath": "dist/executables"
       }

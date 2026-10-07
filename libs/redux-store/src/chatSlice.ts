@@ -33,12 +33,15 @@ export const chatSlice = createSlice({
       state.history.future = [];
       state.messages.push(action.payload);
     },
-    updateMessage: (state, action: PayloadAction<{ id: string; message: Partial<Message> }>) => {
+    updateMessage: (
+      state,
+      action: PayloadAction<{ id: string; message: Partial<Message> }>,
+    ) => {
       const { id, message } = action.payload;
-      const existingMessage = state.messages.find(msg => msg.id === id);
+      const existingMessage = state.messages.find((msg) => msg.id === id);
       if (existingMessage) {
-        const newMessages = state.messages.map(msg =>
-          msg.id === id ? { ...msg, ...message } : msg
+        const newMessages = state.messages.map((msg) =>
+          msg.id === id ? { ...msg, ...message } : msg,
         );
         state.history.past.push(state.history.present);
         state.history.present = newMessages;
@@ -61,18 +64,30 @@ export const chatSlice = createSlice({
     setLoading: (state, action: PayloadAction<boolean>) => {
       state.loading = action.payload;
     },
-    setSelectedProvider: (state, action: PayloadAction<AIConfig['provider']>) => {
+    setSelectedProvider: (
+      state,
+      action: PayloadAction<AIConfig['provider']>,
+    ) => {
       state.selectedProvider = action.payload;
     },
-    updateSession: (state, action: PayloadAction<{ sessionId: string; updates: Partial<any> }>) => {
+    updateSession: (
+      state,
+      action: PayloadAction<{ sessionId: string; updates: Partial<any> }>,
+    ) => {
       const { sessionId, updates } = action.payload;
-      const session = state.sessions.find(s => s.id === sessionId);
+      const session = state.sessions.find((s) => s.id === sessionId);
       if (session) {
         Object.assign(session, updates);
       }
     },
+    addSession: (state, action: PayloadAction<any>) => {
+      state.sessions.push(action.payload);
+    },
+    deleteSession: (state, action: PayloadAction<string>) => {
+      state.sessions = state.sessions.filter((s) => s.id !== action.payload);
+    },
     removeSession: (state, action: PayloadAction<string>) => {
-      state.sessions = state.sessions.filter(s => s.id !== action.payload);
+      state.sessions = state.sessions.filter((s) => s.id !== action.payload);
     },
     // Undo/Redo actions
     pushToHistory: (state, action: PayloadAction<Message[]>) => {
@@ -98,14 +113,19 @@ export const chatSlice = createSlice({
       state.history = { past: [], present: [], future: [] };
     },
     // Fork action
-    forkSession: (state, action: PayloadAction<{ messageId: string; newSessionId: string }>) => {
+    forkSession: (
+      state,
+      action: PayloadAction<{ messageId: string; newSessionId: string }>,
+    ) => {
       const { messageId, newSessionId } = action.payload;
-      const messageIndex = state.messages.findIndex(m => m.id === messageId);
+      const messageIndex = state.messages.findIndex((m) => m.id === messageId);
       if (messageIndex === -1) return;
       const forkedMessages = state.messages.slice(0, messageIndex + 1);
       const newSession = {
         id: newSessionId,
-        userId: state.sessions.find(s => s.id === state.currentSessionId)?.userId || 'unknown',
+        userId:
+          state.sessions.find((s) => s.id === state.currentSessionId)?.userId ||
+          'unknown',
         messages: forkedMessages,
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -118,7 +138,13 @@ export const chatSlice = createSlice({
       state.history.present = forkedMessages;
     },
     // Form actions
-    initForm: (state, action: PayloadAction<{ formId: string; fields: Record<string, unknown> }>) => {
+    initForm: (
+      state,
+      action: PayloadAction<{
+        formId: string;
+        fields: Record<string, unknown>;
+      }>,
+    ) => {
       const { formId, fields } = action.payload;
       const fieldStates: Record<string, FormField> = {};
       Object.entries(fields).forEach(([name, value]) => {
@@ -137,7 +163,10 @@ export const chatSlice = createSlice({
         errors: {},
       };
     },
-    updateField: (state, action: PayloadAction<{ formId: string; name: string; value: unknown }>) => {
+    updateField: (
+      state,
+      action: PayloadAction<{ formId: string; name: string; value: unknown }>,
+    ) => {
       const { formId, name, value } = action.payload;
       const form = state.forms[formId];
       if (!form) return;
@@ -147,7 +176,10 @@ export const chatSlice = createSlice({
       field.dirty = true;
       field.touched = true;
     },
-    setFieldError: (state, action: PayloadAction<{ formId: string; name: string; error: string }>) => {
+    setFieldError: (
+      state,
+      action: PayloadAction<{ formId: string; name: string; error: string }>,
+    ) => {
       const { formId, name, error } = action.payload;
       const form = state.forms[formId];
       if (!form) return;
@@ -160,7 +192,10 @@ export const chatSlice = createSlice({
       }
       form.isValid = Object.keys(form.errors).length === 0;
     },
-    setFormSubmitting: (state, action: PayloadAction<{ formId: string; isSubmitting: boolean }>) => {
+    setFormSubmitting: (
+      state,
+      action: PayloadAction<{ formId: string; isSubmitting: boolean }>,
+    ) => {
       const { formId, isSubmitting } = action.payload;
       const form = state.forms[formId];
       if (!form) return;
@@ -171,7 +206,10 @@ export const chatSlice = createSlice({
       const formId = action.payload;
       delete state.forms[formId];
     },
-    touchField: (state, action: PayloadAction<{ formId: string; name: string }>) => {
+    touchField: (
+      state,
+      action: PayloadAction<{ formId: string; name: string }>,
+    ) => {
       const { formId, name } = action.payload;
       const form = state.forms[formId];
       if (!form) return;

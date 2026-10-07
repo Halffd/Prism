@@ -1,5 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { AIConfig, ExtensionSettings, PopupDisplayMode, PromptShortcut } from '@prism/shared-types';
+import { useState, useEffect } from 'react';
+import {
+  AIConfig,
+  ExtensionSettings,
+  PopupDisplayMode,
+  PromptShortcut,
+  AIMode,
+  AICapability,
+} from '@prism/shared-types';
 import { UnifiedAIClient } from '@prism/api-client';
 import {
   getSetting,
@@ -8,7 +15,7 @@ import {
   addSiteFilter,
   removeSiteFilter,
   getImageGenConfig,
-  saveImageGenConfig
+  saveImageGenConfig,
 } from '@prism/shared-db';
 import './Settings.scss';
 
@@ -17,11 +24,11 @@ const defaultAIConfig: AIConfig = {
   provider: 'prism-api',
   apiUrl: 'http://localhost:3000/api',
   providerKeys: {
-    'openai': '',
-    'gemini': '',
-    'qwen': '',
-    'prism-api': ''
-  }
+    openai: '',
+    gemini: '',
+    qwen: '',
+    'prism-api': '',
+  },
 };
 
 interface SettingsProps {
@@ -30,8 +37,11 @@ interface SettingsProps {
 
 export function Settings({ onClose }: SettingsProps) {
   const [aiConfig, setAiConfig] = useState<AIConfig>(defaultAIConfig);
-  const [imageGenerationApiKey, setImageGenerationApiKey] = useState<string>('');
-  const [imageGenerationModel, setImageGenerationModel] = useState<string>('stabilityai/stable-diffusion-2-1');
+  const [imageGenerationApiKey, setImageGenerationApiKey] =
+    useState<string>('');
+  const [imageGenerationModel, setImageGenerationModel] = useState<string>(
+    'stabilityai/stable-diffusion-2-1',
+  );
   const [excludedSites, setExcludedSites] = useState<string[]>([]);
   const [whitelistedSites, setWhitelistedSites] = useState<string[]>([]);
   const [promptShortcuts, setPromptShortcuts] = useState<PromptShortcut[]>([]);
@@ -39,16 +49,20 @@ export function Settings({ onClose }: SettingsProps) {
     name: '',
     content: '',
     category: '',
-    shortcutKey: ''
+    shortcutKey: '',
   });
   const [loading, setLoading] = useState<boolean>(true);
   const [fetchingModels, setFetchingModels] = useState<boolean>(false);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [displayMode, setDisplayMode] = useState<PopupDisplayMode>('popup');
-  const [sidebarPosition, setSidebarPosition] = useState<'left' | 'right'>('right');
+  const [sidebarPosition, setSidebarPosition] = useState<'left' | 'right'>(
+    'right',
+  );
   const [sidebarWidth, setSidebarWidth] = useState<number>(350);
-  const [pageContentTokenLimit, setPageContentTokenLimit] = useState<number>(20000);
-  const [totalMessageTokenLimit, setTotalMessageTokenLimit] = useState<number>(20000);
+  const [pageContentTokenLimit, setPageContentTokenLimit] =
+    useState<number>(20000);
+  const [totalMessageTokenLimit, setTotalMessageTokenLimit] =
+    useState<number>(20000);
   // Removed commandPrefix state as we're using individual prompt shortcuts instead of global prefix
   const [buttonPositionTop, setButtonPositionTop] = useState<number>(20);
   const [buttonPositionRight, setButtonPositionRight] = useState<number>(20);
@@ -59,9 +73,20 @@ export function Settings({ onClose }: SettingsProps) {
   const [pageInfoKey, setPageInfoKey] = useState<string>('5');
   const [iframeToggleKey, setIframeToggleKey] = useState<string>('`');
   const [systemPrompt, setSystemPrompt] = useState<string>('');
-  const [buttonSensitivityAreaPercentage, setButtonSensitivityAreaPercentage] = useState<number>(10);
+  const [buttonSensitivityAreaPercentage, setButtonSensitivityAreaPercentage] =
+    useState<number>(10);
   const [saveTimeout, setSaveTimeout] = useState<NodeJS.Timeout | null>(null);
   const [apiClient, setApiClient] = useState<UnifiedAIClient | null>(null);
+  const [adapterMode, setAdapterMode] = useState<AIMode>(
+    aiConfig.mode || 'api',
+  );
+  const [capabilityModes, setCapabilityModes] = useState<
+    Partial<Record<AICapability, AIMode>>
+  >(aiConfig.capabilityModes || {});
+  const [prismApiUrl, setPrismApiUrl] = useState<string>(
+    aiConfig.providerKeys?.['prism-api'] || 'http://localhost:3000/api',
+  );
+  const [prismApiKey, setPrismApiKey] = useState<string>('');
 
   useEffect(() => {
     // Initialize API client with current settings
@@ -77,7 +102,8 @@ export function Settings({ onClose }: SettingsProps) {
 
       const client = new UnifiedAIClient({
         aiConfig: aiConfig,
-        prismApiUrl: aiConfig?.providerKeys?.['prism-api'] || 'http://localhost:3000/api'
+        prismApiUrl:
+          aiConfig?.providerKeys?.['prism-api'] || 'http://localhost:3000/api',
       });
       setApiClient(client);
       loadSettings(client);
@@ -106,7 +132,20 @@ export function Settings({ onClose }: SettingsProps) {
         clearTimeout(timeout);
       }
     };
-  }, [aiConfig, imageGenerationApiKey, imageGenerationModel, excludedSites, whitelistedSites, displayMode, sidebarPosition, sidebarWidth]);
+  }, [
+    aiConfig,
+    imageGenerationApiKey,
+    imageGenerationModel,
+    excludedSites,
+    whitelistedSites,
+    displayMode,
+    sidebarPosition,
+    sidebarWidth,
+    adapterMode,
+    capabilityModes,
+    prismApiUrl,
+    prismApiKey,
+  ]);
 
   const loadSettings = async (client: UnifiedAIClient) => {
     try {
@@ -125,18 +164,19 @@ export function Settings({ onClose }: SettingsProps) {
         // Ensure providerKeys exists and has all providers
         if (!config.providerKeys) {
           config.providerKeys = {
-            'openai': config.apiKey || '',
-            'gemini': config.apiKey || '',
-            'qwen': config.apiKey || '',
-            'prism-api': config.apiKey || config.apiUrl || ''
+            openai: config.apiKey || '',
+            gemini: config.apiKey || '',
+            qwen: config.apiKey || '',
+            'prism-api': config.apiKey || config.apiUrl || '',
           };
         } else {
           // Ensure all provider keys exist
           config.providerKeys = {
-            'openai': config.providerKeys['openai'] || '',
-            'gemini': config.providerKeys['gemini'] || '',
-            'qwen': config.providerKeys['qwen'] || '',
-            'prism-api': config.providerKeys['prism-api'] || config.apiUrl || ''
+            openai: config.providerKeys['openai'] || '',
+            gemini: config.providerKeys['gemini'] || '',
+            qwen: config.providerKeys['qwen'] || '',
+            'prism-api':
+              config.providerKeys['prism-api'] || config.apiUrl || '',
           };
         }
 
@@ -152,7 +192,10 @@ export function Settings({ onClose }: SettingsProps) {
         setImageGenerationModel(imageGenConfig.model);
       } else {
         // Fallback to chrome.storage
-        const result = await chrome.storage.local.get(['imageGenApiKey', 'imageGenModel']);
+        const result = await chrome.storage.local.get([
+          'imageGenApiKey',
+          'imageGenModel',
+        ]);
         if (result.imageGenApiKey) {
           setImageGenerationApiKey(result.imageGenApiKey);
         }
@@ -163,19 +206,24 @@ export function Settings({ onClose }: SettingsProps) {
 
       // Load site filters from local database
       const excludedFilters = await getSiteFilters('exclude');
-      setExcludedSites(excludedFilters.map(f => f.urlPattern));
+      setExcludedSites(excludedFilters.map((f) => f.urlPattern));
 
       const whitelistedFilters = await getSiteFilters('whitelist');
-      setWhitelistedSites(whitelistedFilters.map(f => f.urlPattern));
+      setWhitelistedSites(whitelistedFilters.map((f) => f.urlPattern));
 
       // Load display preferences from local database
-      const displaySettings = await getSetting<ExtensionSettings>('displaySettings');
+      const displaySettings =
+        await getSetting<ExtensionSettings>('displaySettings');
       if (displaySettings) {
         setDisplayMode(displaySettings.popupDisplayMode || 'popup');
         setSidebarPosition(displaySettings.sidebarPosition || 'right');
         setSidebarWidth(displaySettings.sidebarWidth || 350);
-        setPageContentTokenLimit(displaySettings.pageContentTokenLimit || 20000);
-        setTotalMessageTokenLimit(displaySettings.totalMessageTokenLimit || 20000);
+        setPageContentTokenLimit(
+          displaySettings.pageContentTokenLimit || 20000,
+        );
+        setTotalMessageTokenLimit(
+          displaySettings.totalMessageTokenLimit || 20000,
+        );
         // Removed commandPrefix loading as we're using individual prompt shortcuts instead of global prefix
         setButtonPositionTop(displaySettings.buttonPosition?.top || 20);
         setButtonPositionRight(displaySettings.buttonPosition?.right || 20);
@@ -186,7 +234,17 @@ export function Settings({ onClose }: SettingsProps) {
         setPageInfoKey(displaySettings.pageInfoKey || '5');
         setIframeToggleKey(displaySettings.iframeToggleKey || '`');
         setSystemPrompt(displaySettings.systemPrompt || '');
-        setButtonSensitivityAreaPercentage(displaySettings.buttonSensitivityAreaPercentage || 10);
+        setButtonSensitivityAreaPercentage(
+          displaySettings.buttonSensitivityAreaPercentage || 10,
+        );
+        setAdapterMode(displaySettings.adapterMode || aiConfig?.mode || 'api');
+        setCapabilityModes(
+          displaySettings.capabilityModes || aiConfig?.capabilityModes || {},
+        );
+        setPrismApiUrl(
+          displaySettings.prismApiUrl || 'http://localhost:3000/api',
+        );
+        setPrismApiKey(displaySettings.prismApiKey || '');
       } else {
         // Fallback to chrome.storage
         const result = await chrome.storage.local.get(['displaySettings']);
@@ -207,7 +265,13 @@ export function Settings({ onClose }: SettingsProps) {
           setPageInfoKey(settings.pageInfoKey || '5');
           setIframeToggleKey(settings.iframeToggleKey || '`');
           setSystemPrompt(settings.systemPrompt || '');
-          setButtonSensitivityAreaPercentage(settings.buttonSensitivityAreaPercentage || 10);
+          setButtonSensitivityAreaPercentage(
+            settings.buttonSensitivityAreaPercentage || 10,
+          );
+          setAdapterMode(settings.adapterMode || 'api');
+          setCapabilityModes(settings.capabilityModes || {});
+          setPrismApiUrl(settings.prismApiUrl || 'http://localhost:3000/api');
+          setPrismApiKey(settings.prismApiKey || '');
         } else {
           // Set defaults
           setDisplayMode('popup');
@@ -237,11 +301,20 @@ export function Settings({ onClose }: SettingsProps) {
             setPromptShortcuts(response.data.prompts);
 
             // Also sync to chrome.storage.local for content script access
-            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+            if (
+              typeof chrome !== 'undefined' &&
+              chrome.storage &&
+              chrome.storage.local
+            ) {
               try {
-                await chrome.storage.local.set({ promptShortcuts: response.data.prompts });
+                await chrome.storage.local.set({
+                  promptShortcuts: response.data.prompts,
+                });
               } catch (error) {
-                console.warn('Could not sync prompt shortcuts to chrome.storage.local:', error);
+                console.warn(
+                  'Could not sync prompt shortcuts to chrome.storage.local:',
+                  error,
+                );
               }
             }
           } else {
@@ -278,7 +351,10 @@ export function Settings({ onClose }: SettingsProps) {
         tempConfig.apiKey = tempConfig.providerKeys[tempConfig.provider] || '';
 
         // For prism-api, use the apiUrl field
-        if (tempConfig.provider === 'prism-api' && tempConfig.providerKeys['prism-api']) {
+        if (
+          tempConfig.provider === 'prism-api' &&
+          tempConfig.providerKeys['prism-api']
+        ) {
           tempConfig.apiUrl = tempConfig.providerKeys['prism-api'];
         }
       }
@@ -288,7 +364,9 @@ export function Settings({ onClose }: SettingsProps) {
       setAvailableModels(models);
     } catch (error) {
       console.error('Error fetching available models:', error);
-      alert('Failed to fetch available models. Please check your API key and connection.');
+      alert(
+        'Failed to fetch available models. Please check your API key and connection.',
+      );
     } finally {
       setFetchingModels(false);
     }
@@ -297,14 +375,18 @@ export function Settings({ onClose }: SettingsProps) {
   const updateSettings = async () => {
     try {
       // Update the current provider's API key in the providerKeys object
-      const updatedConfig = { ...aiConfig };
+      const updatedConfig = { ...aiConfig, mode: adapterMode, capabilityModes };
 
       if (updatedConfig.providerKeys) {
         // Set the apiKey field to the current provider's key for backward compatibility
-        updatedConfig.apiKey = updatedConfig.providerKeys[updatedConfig.provider] || '';
+        updatedConfig.apiKey =
+          updatedConfig.providerKeys[updatedConfig.provider] || '';
 
         // For prism-api, also use the apiUrl field
-        if (updatedConfig.provider === 'prism-api' && updatedConfig.providerKeys['prism-api']) {
+        if (
+          updatedConfig.provider === 'prism-api' &&
+          updatedConfig.providerKeys['prism-api']
+        ) {
           updatedConfig.apiUrl = updatedConfig.providerKeys['prism-api'];
         }
       }
@@ -314,12 +396,12 @@ export function Settings({ onClose }: SettingsProps) {
 
       // Also save to chrome.storage for compatibility
       await chrome.storage.local.set({
-        aiConfig: updatedConfig
+        aiConfig: updatedConfig,
       });
 
       await chrome.runtime.sendMessage({
         type: 'UPDATE_AI_CONFIG',
-        data: updatedConfig
+        data: updatedConfig,
       });
 
       // Save image generation settings to local database
@@ -328,7 +410,7 @@ export function Settings({ onClose }: SettingsProps) {
       // Also save to chrome.storage for compatibility
       await chrome.storage.local.set({
         imageGenApiKey: imageGenerationApiKey,
-        imageGenModel: imageGenerationModel
+        imageGenModel: imageGenerationModel,
       });
 
       // Save excluded and whitelisted sites to local database
@@ -349,7 +431,7 @@ export function Settings({ onClose }: SettingsProps) {
       // Also save to chrome.storage for compatibility
       await chrome.storage.local.set({
         excludedSites: excludedSites,
-        whitelistedSites: whitelistedSites
+        whitelistedSites: whitelistedSites,
       });
 
       // Save display preferences to local database
@@ -371,16 +453,20 @@ export function Settings({ onClose }: SettingsProps) {
         systemPrompt: systemPrompt,
         buttonPosition: {
           top: buttonPositionTop,
-          right: buttonPositionRight
+          right: buttonPositionRight,
         },
-        buttonSensitivityAreaPercentage: buttonSensitivityAreaPercentage
+        buttonSensitivityAreaPercentage: buttonSensitivityAreaPercentage,
+        adapterMode: adapterMode,
+        capabilityModes: capabilityModes,
+        prismApiUrl: prismApiUrl,
+        prismApiKey: prismApiKey,
       };
 
       await saveSetting('displaySettings', displaySettingsObj);
 
       // Also save to chrome.storage for compatibility
       await chrome.storage.local.set({
-        displaySettings: displaySettingsObj
+        displaySettings: displaySettingsObj,
       });
 
       // Send a message to update the display mode across the extension
@@ -391,8 +477,8 @@ export function Settings({ onClose }: SettingsProps) {
           sidebarPosition: sidebarPosition,
           sidebarWidth: sidebarWidth,
           pageContentTokenLimit: pageContentTokenLimit,
-          totalMessageTokenLimit: totalMessageTokenLimit
-        }
+          totalMessageTokenLimit: totalMessageTokenLimit,
+        },
       });
 
       // Sync prompt shortcuts to the API if available
@@ -416,14 +502,18 @@ export function Settings({ onClose }: SettingsProps) {
   const updateSettingsAuto = async () => {
     try {
       // Update the current provider's API key in the providerKeys object
-      const updatedConfig = { ...aiConfig };
+      const updatedConfig = { ...aiConfig, mode: adapterMode, capabilityModes };
 
       if (updatedConfig.providerKeys) {
         // Set the apiKey field to the current provider's key for backward compatibility
-        updatedConfig.apiKey = updatedConfig.providerKeys[updatedConfig.provider] || '';
+        updatedConfig.apiKey =
+          updatedConfig.providerKeys[updatedConfig.provider] || '';
 
         // For prism-api, also use the apiUrl field
-        if (updatedConfig.provider === 'prism-api' && updatedConfig.providerKeys['prism-api']) {
+        if (
+          updatedConfig.provider === 'prism-api' &&
+          updatedConfig.providerKeys['prism-api']
+        ) {
           updatedConfig.apiUrl = updatedConfig.providerKeys['prism-api'];
         }
       }
@@ -433,12 +523,12 @@ export function Settings({ onClose }: SettingsProps) {
 
       // Also save to chrome.storage for compatibility
       await chrome.storage.local.set({
-        aiConfig: updatedConfig
+        aiConfig: updatedConfig,
       });
 
       await chrome.runtime.sendMessage({
         type: 'UPDATE_AI_CONFIG',
-        data: updatedConfig
+        data: updatedConfig,
       });
 
       // Save image generation settings to local database
@@ -447,7 +537,7 @@ export function Settings({ onClose }: SettingsProps) {
       // Also save to chrome.storage for compatibility
       await chrome.storage.local.set({
         imageGenApiKey: imageGenerationApiKey,
-        imageGenModel: imageGenerationModel
+        imageGenModel: imageGenerationModel,
       });
 
       // Save excluded and whitelisted sites to local database
@@ -468,7 +558,7 @@ export function Settings({ onClose }: SettingsProps) {
       // Also save to chrome.storage for compatibility
       await chrome.storage.local.set({
         excludedSites: excludedSites,
-        whitelistedSites: whitelistedSites
+        whitelistedSites: whitelistedSites,
       });
 
       // Save display preferences to local database
@@ -490,16 +580,20 @@ export function Settings({ onClose }: SettingsProps) {
         systemPrompt: systemPrompt,
         buttonPosition: {
           top: buttonPositionTop,
-          right: buttonPositionRight
+          right: buttonPositionRight,
         },
-        buttonSensitivityAreaPercentage: buttonSensitivityAreaPercentage
+        buttonSensitivityAreaPercentage: buttonSensitivityAreaPercentage,
+        adapterMode: adapterMode,
+        capabilityModes: capabilityModes,
+        prismApiUrl: prismApiUrl,
+        prismApiKey: prismApiKey,
       };
 
       await saveSetting('displaySettings', displaySettingsObj);
 
       // Also save to chrome.storage for compatibility
       await chrome.storage.local.set({
-        displaySettings: displaySettingsObj
+        displaySettings: displaySettingsObj,
       });
 
       // Send a message to update the display mode across the extension
@@ -510,8 +604,8 @@ export function Settings({ onClose }: SettingsProps) {
           sidebarPosition: sidebarPosition,
           sidebarWidth: sidebarWidth,
           pageContentTokenLimit: pageContentTokenLimit,
-          totalMessageTokenLimit: totalMessageTokenLimit
-        }
+          totalMessageTokenLimit: totalMessageTokenLimit,
+        },
       });
 
       // Sync prompt shortcuts to the API if available
@@ -531,7 +625,9 @@ export function Settings({ onClose }: SettingsProps) {
   };
 
   const addExcludedSite = async () => {
-    const site = prompt('Enter site URL to exclude (e.g., example.com or www.example.com):');
+    const site = prompt(
+      'Enter site URL to exclude (e.g., example.com or www.example.com):',
+    );
     if (site && !excludedSites.includes(site)) {
       // Add to local state
       const newExcludedSites = [...excludedSites, site];
@@ -552,7 +648,7 @@ export function Settings({ onClose }: SettingsProps) {
 
     // Remove from local database
     const allFilters = await getSiteFilters('exclude');
-    const filterToRemove = allFilters.find(f => f.urlPattern === removedSite);
+    const filterToRemove = allFilters.find((f) => f.urlPattern === removedSite);
     if (filterToRemove) {
       await removeSiteFilter(filterToRemove.id!);
     }
@@ -562,7 +658,9 @@ export function Settings({ onClose }: SettingsProps) {
   };
 
   const addWhitelistedSite = async () => {
-    const site = prompt('Enter site URL to whitelist (e.g., example.com or www.example.com):');
+    const site = prompt(
+      'Enter site URL to whitelist (e.g., example.com or www.example.com):',
+    );
     if (site && !whitelistedSites.includes(site)) {
       // Add to local state
       const newWhitelistedSites = [...whitelistedSites, site];
@@ -583,7 +681,7 @@ export function Settings({ onClose }: SettingsProps) {
 
     // Remove from local database
     const allFilters = await getSiteFilters('whitelist');
-    const filterToRemove = allFilters.find(f => f.urlPattern === removedSite);
+    const filterToRemove = allFilters.find((f) => f.urlPattern === removedSite);
     if (filterToRemove) {
       await removeSiteFilter(filterToRemove.id!);
     }
@@ -600,7 +698,7 @@ export function Settings({ onClose }: SettingsProps) {
         content: newPrompt.content,
         category: newPrompt.category || 'General',
         shortcutKey: newPrompt.shortcutKey || undefined,
-        createdAt: Date.now()
+        createdAt: Date.now(),
       };
       await savePromptShortcutToAPI(prompt);
       setNewPrompt({ name: '', content: '', category: '', shortcutKey: '' });
@@ -626,11 +724,20 @@ export function Settings({ onClose }: SettingsProps) {
           setPromptShortcuts(syncResponse.data.prompts);
 
           // Also sync to chrome.storage.local for content script access
-          if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+          if (
+            typeof chrome !== 'undefined' &&
+            chrome.storage &&
+            chrome.storage.local
+          ) {
             try {
-              await chrome.storage.local.set({ promptShortcuts: syncResponse.data.prompts });
+              await chrome.storage.local.set({
+                promptShortcuts: syncResponse.data.prompts,
+              });
             } catch (error) {
-              console.warn('Could not sync prompt shortcuts to chrome.storage.local:', error);
+              console.warn(
+                'Could not sync prompt shortcuts to chrome.storage.local:',
+                error,
+              );
             }
           }
         }
@@ -648,10 +755,14 @@ export function Settings({ onClose }: SettingsProps) {
       return;
     }
 
-    if (window.confirm('Are you sure you want to delete this prompt shortcut?')) {
+    if (
+      window.confirm('Are you sure you want to delete this prompt shortcut?')
+    ) {
       try {
         // Remove the prompt from the current list
-        const updatedPrompts = promptShortcuts.filter(prompt => prompt.id !== promptId);
+        const updatedPrompts = promptShortcuts.filter(
+          (prompt) => prompt.id !== promptId,
+        );
 
         // Sync all prompts to the API
         const response = await apiClient.syncPrompts(updatedPrompts);
@@ -662,16 +773,28 @@ export function Settings({ onClose }: SettingsProps) {
             setPromptShortcuts(syncResponse.data.prompts);
 
             // Also sync to chrome.storage.local for content script access
-            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+            if (
+              typeof chrome !== 'undefined' &&
+              chrome.storage &&
+              chrome.storage.local
+            ) {
               try {
-                await chrome.storage.local.set({ promptShortcuts: syncResponse.data.prompts });
+                await chrome.storage.local.set({
+                  promptShortcuts: syncResponse.data.prompts,
+                });
               } catch (error) {
-                console.warn('Could not sync prompt shortcuts to chrome.storage.local:', error);
+                console.warn(
+                  'Could not sync prompt shortcuts to chrome.storage.local:',
+                  error,
+                );
               }
             }
           }
         } else {
-          console.error('Failed to sync prompt shortcuts after deletion:', response.error);
+          console.error(
+            'Failed to sync prompt shortcuts after deletion:',
+            response.error,
+          );
         }
       } catch (error) {
         console.debug('Backend unavailable, using local storage only');
@@ -692,7 +815,9 @@ export function Settings({ onClose }: SettingsProps) {
       <div className="settings-header">
         <h2>Extension Settings</h2>
         {onClose && (
-          <button onClick={onClose} className="close-btn">✕</button>
+          <button onClick={onClose} className="close-btn">
+            ✕
+          </button>
         )}
       </div>
 
@@ -703,7 +828,9 @@ export function Settings({ onClose }: SettingsProps) {
             <label>Active AI Provider</label>
             <select
               value={aiConfig.provider}
-              onChange={(e) => setAiConfig({...aiConfig, provider: e.target.value as any})}
+              onChange={(e) =>
+                setAiConfig({ ...aiConfig, provider: e.target.value as any })
+              }
               className="form-control"
             >
               <option value="prism-api">Prism API</option>
@@ -720,7 +847,156 @@ export function Settings({ onClose }: SettingsProps) {
               <option value="grok">Grok</option>
               <option value="openrouter">OpenRouter</option>
               <option value="poe">Poe</option>
+              <option value="mistral">Mistral</option>
+              <option value="cohere">Cohere</option>
+              <option value="together">Together AI</option>
+              <option value="perplexity">Perplexity</option>
+              <option value="fireworks">Fireworks AI</option>
+              <option value="cloudflare-workers">Cloudflare Workers</option>
+              <option value="elevenlabs">ElevenLabs</option>
+              <option value="stability">Stability AI</option>
+              <option value="huggingface">Hugging Face</option>
+              <option value="meshy">Meshy</option>
+              <option value="tripo">Tripo</option>
+              <option value="runway">Runway</option>
+              <option value="kling">Kling</option>
+              <option value="luma">Luma</option>
             </select>
+          </div>
+        </div>
+
+        <div className="settings-section">
+          <h3>Adapter Mode</h3>
+          <div className="form-group">
+            <label>Global AI Routing Mode</label>
+            <select
+              value={adapterMode}
+              onChange={(e) => setAdapterMode(e.target.value as AIMode)}
+              className="form-control"
+            >
+              <option value="api">Direct API</option>
+              <option value="server">Prism Server</option>
+              <option value="local">Local Inference</option>
+            </select>
+            <small className="form-hint">
+              {adapterMode === 'api' &&
+                'Calls provider APIs directly using your API keys'}
+              {adapterMode === 'server' &&
+                'Routes all AI requests through your Prism backend server'}
+              {adapterMode === 'local' &&
+                'Connects to a local inference server (Ollama, llama.cpp, etc.)'}
+            </small>
+          </div>
+
+          {adapterMode === 'server' && (
+            <>
+              <div className="form-group">
+                <label>Prism Server URL</label>
+                <input
+                  type="text"
+                  value={prismApiUrl}
+                  onChange={(e) => setPrismApiUrl(e.target.value)}
+                  placeholder="http://localhost:3000/api"
+                  className="form-control"
+                />
+                <small className="form-hint">
+                  URL of your Prism backend API endpoint
+                </small>
+              </div>
+              <div className="form-group">
+                <label>Prism Server API Key</label>
+                <input
+                  type="password"
+                  value={prismApiKey}
+                  onChange={(e) => setPrismApiKey(e.target.value)}
+                  placeholder="Enter your Prism server API key"
+                  className="form-control"
+                />
+                <small className="form-hint">
+                  API key for authenticating with your Prism server
+                </small>
+              </div>
+            </>
+          )}
+
+          {adapterMode === 'local' && (
+            <div className="form-group">
+              <label>Local Inference URL</label>
+              <input
+                type="text"
+                value={aiConfig.localApiUrl || ''}
+                onChange={(e) =>
+                  setAiConfig({ ...aiConfig, localApiUrl: e.target.value })
+                }
+                placeholder="http://localhost:11434"
+                className="form-control"
+              />
+              <small className="form-hint">
+                URL of your local inference server (Ollama, llama.cpp,
+                KoboldCPP, SGLang)
+              </small>
+            </div>
+          )}
+
+          <div className="form-group">
+            <label>Per-Capability Mode Overrides</label>
+            <small
+              className="form-hint"
+              style={{ display: 'block', marginBottom: '8px' }}
+            >
+              Override the global mode for specific AI capabilities
+            </small>
+            {(
+              [
+                'llm',
+                'ocr',
+                'stt',
+                'tts',
+                'inpaint',
+                'model-gen',
+                'audio-gen',
+                'video-gen',
+                'agent',
+              ] as AICapability[]
+            ).map((cap) => (
+              <div
+                key={cap}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  marginBottom: '6px',
+                }}
+              >
+                <span
+                  style={{
+                    minWidth: '90px',
+                    fontSize: '0.8rem',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                  }}
+                >
+                  {cap}
+                </span>
+                <select
+                  value={capabilityModes[cap] || adapterMode}
+                  onChange={(e) =>
+                    setCapabilityModes({
+                      ...capabilityModes,
+                      [cap]: e.target.value as AIMode,
+                    })
+                  }
+                  className="form-control"
+                  style={{ flex: 1 }}
+                >
+                  <option value="api">Direct API</option>
+                  <option value="server">Prism Server</option>
+                  {cap === 'llm' && (
+                    <option value="local">Local Inference</option>
+                  )}
+                </select>
+              </div>
+            ))}
           </div>
         </div>
 
@@ -731,17 +1007,21 @@ export function Settings({ onClose }: SettingsProps) {
             <input
               type="password"
               value={aiConfig.providerKeys?.openai || ''}
-              onChange={(e) => setAiConfig({
-                ...aiConfig,
-                providerKeys: {
-                  ...aiConfig.providerKeys,
-                  openai: e.target.value
-                }
-              })}
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    openai: e.target.value,
+                  },
+                })
+              }
               placeholder="Enter your OpenAI API key"
               className="form-control"
             />
-            <small className="form-hint">Required for OpenAI models (GPT-3.5, GPT-4, etc.)</small>
+            <small className="form-hint">
+              Required for OpenAI models (GPT-3.5, GPT-4, etc.)
+            </small>
           </div>
 
           <div className="form-group">
@@ -749,17 +1029,21 @@ export function Settings({ onClose }: SettingsProps) {
             <input
               type="password"
               value={aiConfig.providerKeys?.gemini || ''}
-              onChange={(e) => setAiConfig({
-                ...aiConfig,
-                providerKeys: {
-                  ...aiConfig.providerKeys,
-                  gemini: e.target.value
-                }
-              })}
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    gemini: e.target.value,
+                  },
+                })
+              }
               placeholder="Enter your Google Gemini API key"
               className="form-control"
             />
-            <small className="form-hint">Required for Google's Gemini models</small>
+            <small className="form-hint">
+              Required for Google's Gemini models
+            </small>
           </div>
 
           <div className="form-group">
@@ -767,93 +1051,121 @@ export function Settings({ onClose }: SettingsProps) {
             <input
               type="password"
               value={aiConfig.providerKeys?.qwen || ''}
-              onChange={(e) => setAiConfig({
-                ...aiConfig,
-                providerKeys: {
-                  ...aiConfig.providerKeys,
-                  qwen: e.target.value
-                }
-              })}
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    qwen: e.target.value,
+                  },
+                })
+              }
               placeholder="Enter your Alibaba Qwen API key"
               className="form-control"
             />
-            <small className="form-hint">Required for Alibaba's Qwen models</small>
+            <small className="form-hint">
+              Required for Alibaba's Qwen models
+            </small>
           </div>
 
           <div className="form-group">
             <label>KoboldCPP API URL</label>
             <input
               type="text"
-              value={aiConfig.providerKeys?.koboldcpp || aiConfig.localApiUrl || ''}
-              onChange={(e) => setAiConfig({
-                ...aiConfig,
-                localApiUrl: e.target.value,
-                providerKeys: {
-                  ...aiConfig.providerKeys,
-                  koboldcpp: e.target.value
-                }
-              })}
+              value={
+                aiConfig.providerKeys?.koboldcpp || aiConfig.localApiUrl || ''
+              }
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  localApiUrl: e.target.value,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    koboldcpp: e.target.value,
+                  },
+                })
+              }
               placeholder="Enter your KoboldCPP API URL (e.g., http://localhost:5001)"
               className="form-control"
             />
-            <small className="form-hint">Enter the URL for your KoboldCPP server</small>
+            <small className="form-hint">
+              Enter the URL for your KoboldCPP server
+            </small>
           </div>
 
           <div className="form-group">
             <label>Llama.cpp API URL</label>
             <input
               type="text"
-              value={aiConfig.providerKeys?.llamacpp || aiConfig.localApiUrl || ''}
-              onChange={(e) => setAiConfig({
-                ...aiConfig,
-                localApiUrl: e.target.value,
-                providerKeys: {
-                  ...aiConfig.providerKeys,
-                  llamacpp: e.target.value
-                }
-              })}
+              value={
+                aiConfig.providerKeys?.llamacpp || aiConfig.localApiUrl || ''
+              }
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  localApiUrl: e.target.value,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    llamacpp: e.target.value,
+                  },
+                })
+              }
               placeholder="Enter your Llama.cpp API URL (e.g., http://localhost:8080)"
               className="form-control"
             />
-            <small className="form-hint">Enter the URL for your Llama.cpp server</small>
+            <small className="form-hint">
+              Enter the URL for your Llama.cpp server
+            </small>
           </div>
 
           <div className="form-group">
             <label>Ollama API URL</label>
             <input
               type="text"
-              value={aiConfig.providerKeys?.ollama || aiConfig.localApiUrl || ''}
-              onChange={(e) => setAiConfig({
-                ...aiConfig,
-                localApiUrl: e.target.value,
-                providerKeys: {
-                  ...aiConfig.providerKeys,
-                  ollama: e.target.value
-                }
-              })}
+              value={
+                aiConfig.providerKeys?.ollama || aiConfig.localApiUrl || ''
+              }
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  localApiUrl: e.target.value,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    ollama: e.target.value,
+                  },
+                })
+              }
               placeholder="Enter your Ollama API URL (e.g., http://localhost:11434)"
               className="form-control"
             />
-            <small className="form-hint">Enter the URL for your Ollama server</small>
+            <small className="form-hint">
+              Enter the URL for your Ollama server
+            </small>
           </div>
 
           <div className="form-group">
             <label>SGLang API URL</label>
             <input
               type="text"
-              value={aiConfig.providerKeys?.sglang || aiConfig.localApiUrl || ''}
-              onChange={(e) => setAiConfig({
-                ...aiConfig,
-                localApiUrl: e.target.value,
-                providerKeys: {
-                  ...aiConfig.providerKeys,
-                  sglang: e.target.value
-                }
-              })}
+              value={
+                aiConfig.providerKeys?.sglang || aiConfig.localApiUrl || ''
+              }
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  localApiUrl: e.target.value,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    sglang: e.target.value,
+                  },
+                })
+              }
               placeholder="Enter your SGLang API URL (e.g., http://localhost:30000)"
               className="form-control"
             />
-            <small className="form-hint">Enter the URL for your SGLang server</small>
+            <small className="form-hint">
+              Enter the URL for your SGLang server
+            </small>
           </div>
 
           <div className="form-group">
@@ -861,17 +1173,21 @@ export function Settings({ onClose }: SettingsProps) {
             <input
               type="password"
               value={aiConfig.providerKeys?.transformers || ''}
-              onChange={(e) => setAiConfig({
-                ...aiConfig,
-                providerKeys: {
-                  ...aiConfig.providerKeys,
-                  transformers: e.target.value
-                }
-              })}
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    transformers: e.target.value,
+                  },
+                })
+              }
               placeholder="Enter your Transformers API key (Hugging Face token)"
               className="form-control"
             />
-            <small className="form-hint">API key for Hugging Face Transformers API</small>
+            <small className="form-hint">
+              API key for Hugging Face Transformers API
+            </small>
           </div>
 
           <div className="form-group">
@@ -879,17 +1195,21 @@ export function Settings({ onClose }: SettingsProps) {
             <input
               type="password"
               value={aiConfig.providerKeys?.claude || ''}
-              onChange={(e) => setAiConfig({
-                ...aiConfig,
-                providerKeys: {
-                  ...aiConfig.providerKeys,
-                  claude: e.target.value
-                }
-              })}
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    claude: e.target.value,
+                  },
+                })
+              }
               placeholder="Enter your Anthropic Claude API key"
               className="form-control"
             />
-            <small className="form-hint">API key for Anthropic Claude API</small>
+            <small className="form-hint">
+              API key for Anthropic Claude API
+            </small>
           </div>
 
           <div className="form-group">
@@ -897,13 +1217,15 @@ export function Settings({ onClose }: SettingsProps) {
             <input
               type="password"
               value={aiConfig.providerKeys?.deepseek || ''}
-              onChange={(e) => setAiConfig({
-                ...aiConfig,
-                providerKeys: {
-                  ...aiConfig.providerKeys,
-                  deepseek: e.target.value
-                }
-              })}
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    deepseek: e.target.value,
+                  },
+                })
+              }
               placeholder="Enter your DeepSeek API key"
               className="form-control"
             />
@@ -915,13 +1237,15 @@ export function Settings({ onClose }: SettingsProps) {
             <input
               type="password"
               value={aiConfig.providerKeys?.grok || ''}
-              onChange={(e) => setAiConfig({
-                ...aiConfig,
-                providerKeys: {
-                  ...aiConfig.providerKeys,
-                  grok: e.target.value
-                }
-              })}
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    grok: e.target.value,
+                  },
+                })
+              }
               placeholder="Enter your Grok API key"
               className="form-control"
             />
@@ -933,13 +1257,15 @@ export function Settings({ onClose }: SettingsProps) {
             <input
               type="password"
               value={aiConfig.providerKeys?.openrouter || ''}
-              onChange={(e) => setAiConfig({
-                ...aiConfig,
-                providerKeys: {
-                  ...aiConfig.providerKeys,
-                  openrouter: e.target.value
-                }
-              })}
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    openrouter: e.target.value,
+                  },
+                })
+              }
               placeholder="Enter your OpenRouter API key"
               className="form-control"
             />
@@ -951,36 +1277,344 @@ export function Settings({ onClose }: SettingsProps) {
             <input
               type="password"
               value={aiConfig.providerKeys?.poe || ''}
-              onChange={(e) => setAiConfig({
-                ...aiConfig,
-                providerKeys: {
-                  ...aiConfig.providerKeys,
-                  poe: e.target.value
-                }
-              })}
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    poe: e.target.value,
+                  },
+                })
+              }
               placeholder="Enter your Poe API key"
               className="form-control"
             />
-            <small className="form-hint">API key for Poe API (if available)</small>
+            <small className="form-hint">
+              API key for Poe API (if available)
+            </small>
+          </div>
+
+          <div className="form-group">
+            <label>Mistral API Key</label>
+            <input
+              type="password"
+              value={aiConfig.providerKeys?.mistral || ''}
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    mistral: e.target.value,
+                  },
+                })
+              }
+              placeholder="Enter your Mistral API key"
+              className="form-control"
+            />
+            <small className="form-hint">API key for Mistral AI</small>
+          </div>
+
+          <div className="form-group">
+            <label>Cohere API Key</label>
+            <input
+              type="password"
+              value={aiConfig.providerKeys?.cohere || ''}
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    cohere: e.target.value,
+                  },
+                })
+              }
+              placeholder="Enter your Cohere API key"
+              className="form-control"
+            />
+            <small className="form-hint">API key for Cohere</small>
+          </div>
+
+          <div className="form-group">
+            <label>Together AI API Key</label>
+            <input
+              type="password"
+              value={aiConfig.providerKeys?.together || ''}
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    together: e.target.value,
+                  },
+                })
+              }
+              placeholder="Enter your Together AI API key"
+              className="form-control"
+            />
+            <small className="form-hint">API key for Together AI</small>
+          </div>
+
+          <div className="form-group">
+            <label>Perplexity API Key</label>
+            <input
+              type="password"
+              value={aiConfig.providerKeys?.perplexity || ''}
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    perplexity: e.target.value,
+                  },
+                })
+              }
+              placeholder="Enter your Perplexity API key"
+              className="form-control"
+            />
+            <small className="form-hint">API key for Perplexity</small>
+          </div>
+
+          <div className="form-group">
+            <label>Fireworks AI API Key</label>
+            <input
+              type="password"
+              value={aiConfig.providerKeys?.fireworks || ''}
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    fireworks: e.target.value,
+                  },
+                })
+              }
+              placeholder="Enter your Fireworks AI API key"
+              className="form-control"
+            />
+            <small className="form-hint">API key for Fireworks AI</small>
+          </div>
+
+          <div className="form-group">
+            <label>Cloudflare Workers API Key</label>
+            <input
+              type="password"
+              value={aiConfig.providerKeys?.['cloudflare-workers'] || ''}
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    'cloudflare-workers': e.target.value,
+                  },
+                })
+              }
+              placeholder="Enter your Cloudflare Workers API key"
+              className="form-control"
+            />
+            <small className="form-hint">
+              API key for Cloudflare Workers AI
+            </small>
+          </div>
+
+          <div className="form-group">
+            <label>ElevenLabs API Key</label>
+            <input
+              type="password"
+              value={aiConfig.providerKeys?.elevenlabs || ''}
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    elevenlabs: e.target.value,
+                  },
+                })
+              }
+              placeholder="Enter your ElevenLabs API key"
+              className="form-control"
+            />
+            <small className="form-hint">
+              API key for ElevenLabs (TTS/audio-gen)
+            </small>
+          </div>
+
+          <div className="form-group">
+            <label>Stability AI API Key</label>
+            <input
+              type="password"
+              value={aiConfig.providerKeys?.stability || ''}
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    stability: e.target.value,
+                  },
+                })
+              }
+              placeholder="Enter your Stability AI API key"
+              className="form-control"
+            />
+            <small className="form-hint">
+              API key for Stability AI (inpaint/image-gen)
+            </small>
+          </div>
+
+          <div className="form-group">
+            <label>Hugging Face API Key</label>
+            <input
+              type="password"
+              value={aiConfig.providerKeys?.huggingface || ''}
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    huggingface: e.target.value,
+                  },
+                })
+              }
+              placeholder="Enter your Hugging Face API key"
+              className="form-control"
+            />
+            <small className="form-hint">
+              API key for Hugging Face (inpaint/audio-gen)
+            </small>
+          </div>
+
+          <div className="form-group">
+            <label>Meshy API Key</label>
+            <input
+              type="password"
+              value={aiConfig.providerKeys?.meshy || ''}
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    meshy: e.target.value,
+                  },
+                })
+              }
+              placeholder="Enter your Meshy API key"
+              className="form-control"
+            />
+            <small className="form-hint">
+              API key for Meshy (3D model generation)
+            </small>
+          </div>
+
+          <div className="form-group">
+            <label>Tripo API Key</label>
+            <input
+              type="password"
+              value={aiConfig.providerKeys?.tripo || ''}
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    tripo: e.target.value,
+                  },
+                })
+              }
+              placeholder="Enter your Tripo API key"
+              className="form-control"
+            />
+            <small className="form-hint">
+              API key for Tripo (3D model generation)
+            </small>
+          </div>
+
+          <div className="form-group">
+            <label>Runway API Key</label>
+            <input
+              type="password"
+              value={aiConfig.providerKeys?.runway || ''}
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    runway: e.target.value,
+                  },
+                })
+              }
+              placeholder="Enter your Runway API key"
+              className="form-control"
+            />
+            <small className="form-hint">
+              API key for Runway (video generation)
+            </small>
+          </div>
+
+          <div className="form-group">
+            <label>Kling API Key</label>
+            <input
+              type="password"
+              value={aiConfig.providerKeys?.kling || ''}
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    kling: e.target.value,
+                  },
+                })
+              }
+              placeholder="Enter your Kling API key"
+              className="form-control"
+            />
+            <small className="form-hint">
+              API key for Kling (video generation)
+            </small>
+          </div>
+
+          <div className="form-group">
+            <label>Luma API Key</label>
+            <input
+              type="password"
+              value={aiConfig.providerKeys?.luma || ''}
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    luma: e.target.value,
+                  },
+                })
+              }
+              placeholder="Enter your Luma API key"
+              className="form-control"
+            />
+            <small className="form-hint">
+              API key for Luma (video generation)
+            </small>
           </div>
 
           <div className="form-group">
             <label>Prism API URL</label>
             <input
               type="text"
-              value={aiConfig.providerKeys?.['prism-api'] || aiConfig.apiUrl || ''}
-              onChange={(e) => setAiConfig({
-                ...aiConfig,
-                apiUrl: e.target.value,
-                providerKeys: {
-                  ...aiConfig.providerKeys,
-                  'prism-api': e.target.value
-                }
-              })}
+              value={
+                aiConfig.providerKeys?.['prism-api'] || aiConfig.apiUrl || ''
+              }
+              onChange={(e) =>
+                setAiConfig({
+                  ...aiConfig,
+                  apiUrl: e.target.value,
+                  providerKeys: {
+                    ...aiConfig.providerKeys,
+                    'prism-api': e.target.value,
+                  },
+                })
+              }
               placeholder="Enter your Prism API URL"
               className="form-control"
             />
-            <small className="form-hint">Enter the URL for your Prism API endpoint</small>
+            <small className="form-hint">
+              Enter the URL for your Prism API endpoint
+            </small>
           </div>
         </div>
 
@@ -991,11 +1625,15 @@ export function Settings({ onClose }: SettingsProps) {
             <input
               type="text"
               value={aiConfig.model || ''}
-              onChange={(e) => setAiConfig({...aiConfig, model: e.target.value})}
+              onChange={(e) =>
+                setAiConfig({ ...aiConfig, model: e.target.value })
+              }
               placeholder="e.g., gpt-3.5-turbo, gemini-pro, qwen-max"
               className="form-control"
             />
-            <small className="form-hint">Specify the model to use with the current provider</small>
+            <small className="form-hint">
+              Specify the model to use with the current provider
+            </small>
           </div>
 
           <div className="form-group">
@@ -1016,7 +1654,7 @@ export function Settings({ onClose }: SettingsProps) {
                       key={index}
                       type="button"
                       className="model-btn"
-                      onClick={() => setAiConfig({...aiConfig, model})}
+                      onClick={() => setAiConfig({ ...aiConfig, model })}
                     >
                       {model}
                     </button>
@@ -1041,7 +1679,9 @@ export function Settings({ onClose }: SettingsProps) {
               <option value="sidebar">Sidebar</option>
               <option value="iframe">Popup as Iframe</option>
             </select>
-            <small className="form-hint">Choose how the Prism interface appears on web pages</small>
+            <small className="form-hint">
+              Choose how the Prism interface appears on web pages
+            </small>
           </div>
 
           {displayMode === 'sidebar' && (
@@ -1089,7 +1729,9 @@ export function Settings({ onClose }: SettingsProps) {
               placeholder="e.g., 1"
               maxLength={1}
             />
-            <small className="form-hint">Key to toggle text selection mode (default: 1)</small>
+            <small className="form-hint">
+              Key to toggle text selection mode (default: 1)
+            </small>
           </div>
           <div className="form-group">
             <label>Page Context (Shift + Key)</label>
@@ -1101,7 +1743,9 @@ export function Settings({ onClose }: SettingsProps) {
               placeholder="e.g., 2"
               maxLength={1}
             />
-            <small className="form-hint">Key to toggle page context mode (default: 2)</small>
+            <small className="form-hint">
+              Key to toggle page context mode (default: 2)
+            </small>
           </div>
           <div className="form-group">
             <label>Page Screenshot (Shift + Key)</label>
@@ -1113,7 +1757,9 @@ export function Settings({ onClose }: SettingsProps) {
               placeholder="e.g., 3"
               maxLength={1}
             />
-            <small className="form-hint">Key to toggle page screenshot mode (default: 3)</small>
+            <small className="form-hint">
+              Key to toggle page screenshot mode (default: 3)
+            </small>
           </div>
           <div className="form-group">
             <label>Clipboard (Shift + Key)</label>
@@ -1125,7 +1771,9 @@ export function Settings({ onClose }: SettingsProps) {
               placeholder="e.g., 4"
               maxLength={1}
             />
-            <small className="form-hint">Key to toggle clipboard mode (default: 4)</small>
+            <small className="form-hint">
+              Key to toggle clipboard mode (default: 4)
+            </small>
           </div>
           <div className="form-group">
             <label>Page Info (Shift + Key)</label>
@@ -1137,7 +1785,9 @@ export function Settings({ onClose }: SettingsProps) {
               placeholder="e.g., 5"
               maxLength={1}
             />
-            <small className="form-hint">Key to toggle page info mode (default: 5)</small>
+            <small className="form-hint">
+              Key to toggle page info mode (default: 5)
+            </small>
           </div>
         </div>
 
@@ -1153,7 +1803,9 @@ export function Settings({ onClose }: SettingsProps) {
               placeholder="e.g., ` (backtick)"
               maxLength={1}
             />
-            <small className="form-hint">Key to toggle iframe show/hide (default: backtick `)</small>
+            <small className="form-hint">
+              Key to toggle iframe show/hide (default: backtick `)
+            </small>
           </div>
         </div>
 
@@ -1168,7 +1820,10 @@ export function Settings({ onClose }: SettingsProps) {
               placeholder="Enter a system prompt that will be applied to all conversations (e.g., 'You are a helpful assistant')"
               rows={4}
             />
-            <small className="form-hint">This prompt will be applied to all conversations as a system message. Leave blank to disable.</small>
+            <small className="form-hint">
+              This prompt will be applied to all conversations as a system
+              message. Leave blank to disable.
+            </small>
           </div>
         </div>
 
@@ -1184,7 +1839,9 @@ export function Settings({ onClose }: SettingsProps) {
               max="100000"
               className="form-control"
             />
-            <small className="form-hint">Maximum tokens to extract from page content (default: 20000)</small>
+            <small className="form-hint">
+              Maximum tokens to extract from page content (default: 20000)
+            </small>
           </div>
 
           <div className="form-group">
@@ -1192,12 +1849,16 @@ export function Settings({ onClose }: SettingsProps) {
             <input
               type="number"
               value={totalMessageTokenLimit}
-              onChange={(e) => setTotalMessageTokenLimit(Number(e.target.value))}
+              onChange={(e) =>
+                setTotalMessageTokenLimit(Number(e.target.value))
+              }
               min="1000"
               max="100000"
               className="form-control"
             />
-            <small className="form-hint">Maximum total tokens for message + context (default: 20000)</small>
+            <small className="form-hint">
+              Maximum total tokens for message + context (default: 20000)
+            </small>
           </div>
         </div>
 
@@ -1221,10 +1882,18 @@ export function Settings({ onClose }: SettingsProps) {
               onChange={(e) => setImageGenerationModel(e.target.value)}
               className="form-control"
             >
-              <option value="stabilityai/stable-diffusion-2-1">Stable Diffusion 2.1</option>
-              <option value="runwayml/stable-diffusion-v1-5">Stable Diffusion 1.5</option>
-              <option value="stabilityai/stable-diffusion-xl-base-1.0">SDXL</option>
-              <option value="black-forest-labs/FLUX.1-schnell">FLUX Schnell</option>
+              <option value="stabilityai/stable-diffusion-2-1">
+                Stable Diffusion 2.1
+              </option>
+              <option value="runwayml/stable-diffusion-v1-5">
+                Stable Diffusion 1.5
+              </option>
+              <option value="stabilityai/stable-diffusion-xl-base-1.0">
+                SDXL
+              </option>
+              <option value="black-forest-labs/FLUX.1-schnell">
+                FLUX Schnell
+              </option>
               <option value="black-forest-labs/FLUX.1-dev">FLUX Dev</option>
             </select>
           </div>
@@ -1299,7 +1968,9 @@ export function Settings({ onClose }: SettingsProps) {
               max="100"
               className="form-control"
             />
-            <small className="form-hint">Distance from the top of the screen in pixels</small>
+            <small className="form-hint">
+              Distance from the top of the screen in pixels
+            </small>
           </div>
 
           <div className="form-group">
@@ -1312,7 +1983,9 @@ export function Settings({ onClose }: SettingsProps) {
               max="100"
               className="form-control"
             />
-            <small className="form-hint">Distance from the right of the screen in pixels</small>
+            <small className="form-hint">
+              Distance from the right of the screen in pixels
+            </small>
           </div>
 
           <div className="form-group">
@@ -1320,12 +1993,17 @@ export function Settings({ onClose }: SettingsProps) {
             <input
               type="number"
               value={buttonSensitivityAreaPercentage}
-              onChange={(e) => setButtonSensitivityAreaPercentage(Number(e.target.value))}
+              onChange={(e) =>
+                setButtonSensitivityAreaPercentage(Number(e.target.value))
+              }
               min="1"
               max="50"
               className="form-control"
             />
-            <small className="form-hint">Percentage of screen width/height that triggers button visibility when mouse enters (default: 10%)</small>
+            <small className="form-hint">
+              Percentage of screen width/height that triggers button visibility
+              when mouse enters (default: 10%)
+            </small>
           </div>
         </div>
 
@@ -1337,20 +2015,26 @@ export function Settings({ onClose }: SettingsProps) {
                 type="text"
                 placeholder="Prompt name"
                 value={newPrompt.name}
-                onChange={(e) => setNewPrompt({...newPrompt, name: e.target.value})}
+                onChange={(e) =>
+                  setNewPrompt({ ...newPrompt, name: e.target.value })
+                }
                 className="prompt-input form-control"
               />
               <input
                 type="text"
                 placeholder="Slash command (e.g. /fix)"
                 value={newPrompt.shortcutKey}
-                onChange={(e) => setNewPrompt({...newPrompt, shortcutKey: e.target.value})}
+                onChange={(e) =>
+                  setNewPrompt({ ...newPrompt, shortcutKey: e.target.value })
+                }
                 className="prompt-input form-control"
               />
               <textarea
                 placeholder="Prompt content"
                 value={newPrompt.content}
-                onChange={(e) => setNewPrompt({...newPrompt, content: e.target.value})}
+                onChange={(e) =>
+                  setNewPrompt({ ...newPrompt, content: e.target.value })
+                }
                 className="prompt-textarea form-control"
                 rows={3}
               />
@@ -1358,13 +2042,12 @@ export function Settings({ onClose }: SettingsProps) {
                 type="text"
                 placeholder="Category (optional)"
                 value={newPrompt.category}
-                onChange={(e) => setNewPrompt({...newPrompt, category: e.target.value})}
+                onChange={(e) =>
+                  setNewPrompt({ ...newPrompt, category: e.target.value })
+                }
                 className="prompt-input form-control"
               />
-              <button
-                onClick={addNewPrompt}
-                className="prompt-add-btn"
-              >
+              <button onClick={addNewPrompt} className="prompt-add-btn">
                 Add Prompt
               </button>
             </div>
@@ -1372,14 +2055,21 @@ export function Settings({ onClose }: SettingsProps) {
 
           <div className="form-group">
             <div className="prompt-list">
-              {promptShortcuts.map(prompt => (
+              {promptShortcuts.map((prompt) => (
                 <div key={prompt.id} className="prompt-item">
                   <div className="prompt-content">
                     <div className="prompt-name">{prompt.name}</div>
                     <div className="prompt-info">
-                      {prompt.shortcutKey && <span className="shortcut-tag">{prompt.shortcutKey}</span>}
+                      {prompt.shortcutKey && (
+                        <span className="shortcut-tag">
+                          {prompt.shortcutKey}
+                        </span>
+                      )}
                     </div>
-                    <div className="prompt-text">{prompt.content.substring(0, 50)}{prompt.content.length > 50 ? '...' : ''}</div>
+                    <div className="prompt-text">
+                      {prompt.content.substring(0, 50)}
+                      {prompt.content.length > 50 ? '...' : ''}
+                    </div>
                   </div>
                   <div className="prompt-actions">
                     <button
@@ -1401,16 +2091,10 @@ export function Settings({ onClose }: SettingsProps) {
       </div>
 
       <div className="settings-actions">
-        <button
-          onClick={updateSettings}
-          className="save-btn"
-        >
+        <button onClick={updateSettings} className="save-btn">
           Save Settings
         </button>
-        <button
-          onClick={onClose}
-          className="cancel-btn"
-        >
+        <button onClick={onClose} className="cancel-btn">
           Cancel
         </button>
       </div>

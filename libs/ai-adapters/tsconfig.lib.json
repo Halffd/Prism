@@ -1,0 +1,72 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": "../..",
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/tsconfig.lib.tsbuildinfo",
+    "emitDeclarationOnly": false,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "forceConsistentCasingInFileNames": true,
+    "lib": [
+      "es2022",
+      "dom"
+    ],
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "src/**/*.ts"
+  ],
+  "references": [
+    {
+      "path": "../shared-types/tsconfig.lib.json"
+    },
+    {
+      "path": "../ai-factory/tsconfig.lib.json"
+    },
+    {
+      "path": "../ocr/tsconfig.lib.json"
+    },
+    {
+      "path": "../stt/tsconfig.lib.json"
+    },
+    {
+      "path": "../tts/tsconfig.lib.json"
+    },
+    {
+      "path": "../inpaint/tsconfig.lib.json"
+    },
+    {
+      "path": "../model-gen/tsconfig.lib.json"
+    },
+    {
+      "path": "../audio-gen/tsconfig.lib.json"
+    },
+    {
+      "path": "../video-gen/tsconfig.lib.json"
+    },
+    {
+      "path": "../llm/tsconfig.lib.json"
+    },
+    {
+      "path": "../agent/tsconfig.lib.json"
+    },
+    {
+      "path": "../web-search/tsconfig.lib.json"
+    },
+    {
+      "path": "../deepsearch/tsconfig.lib.json"
+    },
+    {
+      "path": "../council/tsconfig.lib.json"
+    }
+  ],
+  "exclude": [
+    "jest.config.ts",
+    "src/**/*.spec.ts",
+    "src/**/*.test.ts"
+  ]
+}

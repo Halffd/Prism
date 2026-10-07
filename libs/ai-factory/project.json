@@ -1,0 +1,20 @@
+{
+  "name": "ai-factory",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/ai-factory/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}"],
+      "options": {
+        "outputPath": "dist/libs/ai-factory",
+        "tsConfig": "libs/ai-factory/tsconfig.lib.json",
+        "packageJson": "libs/ai-factory/package.json",
+        "main": "libs/ai-factory/src/index.ts",
+        "assets": ["libs/ai-factory/*.md"]
+      }
+    }
+  },
+  "tags": []
+}

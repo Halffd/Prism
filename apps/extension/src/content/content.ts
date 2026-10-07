@@ -1,7 +1,16 @@
-import type { ContextData, ExtensionSettings, PopupDisplayMode } from '@prism/shared-types';
-import { createIframe, createIframeContainer, attachShadowToElement, createButton, removeIframe } from './iframe-manager';
+import type {
+  ContextData,
+  ExtensionSettings,
+  PopupDisplayMode,
+} from '@prism/shared-types';
+import {
+  createIframe,
+  createIframeContainer,
+  attachShadowToElement,
+  createButton,
+} from './iframe-manager';
 import { showToast, createFloatingButton } from './ui-controls';
-import { estimateTokenCount, truncateToTokenLimit, isIgnoredElement } from './utils';
+import { estimateTokenCount, isIgnoredElement } from './utils';
 
 // Default settings
 let currentDisplayMode: PopupDisplayMode = 'popup';
@@ -68,26 +77,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return true;
 });
 
-// Simple token estimation function (roughly 1 token = 4 characters or 1 word)
-function estimateTokenCount(text: string): number {
-  if (!text || text.length === 0) return 0;
-
-  // Simple estimation: split by whitespace and punctuation
-  const words = text.trim().split(/\s+/).filter(word => word.length > 0);
-  // Rough estimation: about 1 token per word, but longer words might be multiple tokens
-  let tokenCount = 0;
-  for (const word of words) {
-    // For longer words, count as multiple tokens (common in tokenizers)
-    if (word.length <= 4) {
-      tokenCount += 1;
-    } else {
-      // Estimate: 1 token per 4-5 characters
-      tokenCount += Math.ceil(word.length / 4);
-    }
-  }
-  return Math.max(1, tokenCount);
-}
-
 function updateDisplaySettings(settings: Partial<ExtensionSettings>) {
   if (settings.popupDisplayMode) {
     currentDisplayMode = settings.popupDisplayMode;
@@ -100,7 +89,10 @@ function updateDisplaySettings(settings: Partial<ExtensionSettings>) {
   }
 
   // Update button settings if they exist
-  if (settings.buttonPosition || settings.buttonSensitivityAreaPercentage !== undefined) {
+  if (
+    settings.buttonPosition ||
+    settings.buttonSensitivityAreaPercentage !== undefined
+  ) {
     // Update button position and sensitivity if the button exists
     const button = document.getElementById('prism-floating-button');
     if (button && settings.buttonPosition) {
@@ -123,9 +115,15 @@ function extractPageContext(tokenLimit: number = 20000): ContextData {
 
   // Get metadata
   const metadata = {
-    description: document.querySelector('meta[name="description"]')?.getAttribute('content'),
-    author: document.querySelector('meta[name="author"]')?.getAttribute('content'),
-    keywords: document.querySelector('meta[name="keywords"]')?.getAttribute('content'),
+    description: document
+      .querySelector('meta[name="description"]')
+      ?.getAttribute('content'),
+    author: document
+      .querySelector('meta[name="author"]')
+      ?.getAttribute('content'),
+    keywords: document
+      .querySelector('meta[name="keywords"]')
+      ?.getAttribute('content'),
   };
 
   const context: ContextData = {
@@ -134,7 +132,7 @@ function extractPageContext(tokenLimit: number = 20000): ContextData {
     title: document.title,
     selectedText,
     fullText: mainContent,
-    metadata
+    metadata,
   };
 
   return context;
@@ -144,7 +142,7 @@ function getMainContent(): string {
   // Get the viewport height to determine where we are scrolled
   const viewportHeight = window.innerHeight;
   const scrollY = window.scrollY;
-  const middleOfViewport = scrollY + (viewportHeight / 2);
+  const middleOfViewport = scrollY + viewportHeight / 2;
 
   // Try common content selectors
   const selectors = [
@@ -154,7 +152,7 @@ function getMainContent(): string {
     '.content',
     '#content',
     '.post-content',
-    '.article-content'
+    '.article-content',
   ];
 
   let mainElement = null;
@@ -168,7 +166,10 @@ function getMainContent(): string {
       const elementBottom = rect.bottom + window.scrollY;
 
       // Check if the element is visible or near the viewport
-      if (elementTop <= window.scrollY + window.innerHeight && elementBottom >= window.scrollY) {
+      if (
+        elementTop <= window.scrollY + window.innerHeight &&
+        elementBottom >= window.scrollY
+      ) {
         mainElement = element;
         break;
       }
@@ -182,28 +183,24 @@ function getMainContent(): string {
   }
 
   // Get all text content with positions
-  const textWithPositions: { text: string, top: number }[] = [];
+  const textWithPositions: { text: string; top: number }[] = [];
 
-  const walker = document.createTreeWalker(
-    mainElement,
-    NodeFilter.SHOW_TEXT,
-    {
-      acceptNode: function(node) {
-        // Only accept text nodes that are not empty or just whitespace
-        if (node.nodeValue?.trim()) {
-          // Check if the parent element is an ignored element (form, input, etc.)
-          if (isIgnoredElement(node.parentElement)) {
-            return NodeFilter.FILTER_REJECT;
-          }
-          return NodeFilter.FILTER_ACCEPT;
+  const walker = document.createTreeWalker(mainElement, NodeFilter.SHOW_TEXT, {
+    acceptNode: function (node) {
+      // Only accept text nodes that are not empty or just whitespace
+      if (node.nodeValue?.trim()) {
+        // Check if the parent element is an ignored element (form, input, etc.)
+        if (isIgnoredElement(node.parentElement)) {
+          return NodeFilter.FILTER_REJECT;
         }
-        return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
       }
-    }
-  );
+      return NodeFilter.FILTER_REJECT;
+    },
+  });
 
   let node: Node | null;
-  while (node = walker.nextNode()) {
+  while ((node = walker.nextNode())) {
     // Get the position of the parent element
     const parentElement = node.parentElement;
     if (parentElement) {
@@ -214,7 +211,7 @@ function getMainContent(): string {
       if (top >= 0) {
         textWithPositions.push({
           text: node.nodeValue?.trim() || '',
-          top
+          top,
         });
       }
     }
@@ -245,43 +242,14 @@ function getMainContent(): string {
     result.unshift(textWithPositions[i].text);
   }
 
-  return result.filter(text => text.trim()).join('\n\n');
-}
-
-function isIgnoredElement(element: Element | null): boolean {
-  if (!element) return false;
-
-  const tagName = element.tagName.toLowerCase();
-  const className = element.className.toLowerCase();
-  const id = element.id.toLowerCase();
-
-  // Ignore form elements
-  if (['input', 'textarea', 'select', 'option', 'button', 'form'].includes(tagName)) {
-    return true;
-  }
-
-  // Ignore elements that might contain emails or sensitive info
-  if (className.includes('email') || className.includes('contact') ||
-      id.includes('email') || id.includes('contact') ||
-      className.includes('form') || id.includes('form') ||
-      className.includes('login') || id.includes('login') ||
-      className.includes('password') || id.includes('password')) {
-    return true;
-  }
-
-  // Ignore script and style tags
-  if (['script', 'style', 'noscript'].includes(tagName)) {
-    return true;
-  }
-
-  return false;
+  return result.filter((text) => text.trim()).join('\n\n');
 }
 
 function getMainContentWithTokenLimit(tokenLimit: number): string {
   // Get the viewport height to determine where we are scrolled
   const viewportHeight = window.innerHeight;
   const scrollY = window.scrollY;
-  const middleOfViewport = scrollY + (viewportHeight / 2);
+  const middleOfViewport = scrollY + viewportHeight / 2;
 
   // Try common content selectors
   const selectors = [
@@ -291,7 +259,7 @@ function getMainContentWithTokenLimit(tokenLimit: number): string {
     '.content',
     '#content',
     '.post-content',
-    '.article-content'
+    '.article-content',
   ];
 
   let mainElement = null;
@@ -305,7 +273,10 @@ function getMainContentWithTokenLimit(tokenLimit: number): string {
       const elementBottom = rect.bottom + window.scrollY;
 
       // Check if the element is visible or near the viewport
-      if (elementTop <= window.scrollY + window.innerHeight && elementBottom >= window.scrollY) {
+      if (
+        elementTop <= window.scrollY + window.innerHeight &&
+        elementBottom >= window.scrollY
+      ) {
         mainElement = element;
         break;
       }
@@ -319,28 +290,24 @@ function getMainContentWithTokenLimit(tokenLimit: number): string {
   }
 
   // Get all text content with positions
-  const textWithPositions: { text: string, top: number }[] = [];
+  const textWithPositions: { text: string; top: number }[] = [];
 
-  const walker = document.createTreeWalker(
-    mainElement,
-    NodeFilter.SHOW_TEXT,
-    {
-      acceptNode: function(node) {
-        // Only accept text nodes that are not empty or just whitespace
-        if (node.nodeValue?.trim()) {
-          // Check if the parent element is an ignored element (form, input, etc.)
-          if (isIgnoredElement(node.parentElement)) {
-            return NodeFilter.FILTER_REJECT;
-          }
-          return NodeFilter.FILTER_ACCEPT;
+  const walker = document.createTreeWalker(mainElement, NodeFilter.SHOW_TEXT, {
+    acceptNode: function (node) {
+      // Only accept text nodes that are not empty or just whitespace
+      if (node.nodeValue?.trim()) {
+        // Check if the parent element is an ignored element (form, input, etc.)
+        if (isIgnoredElement(node.parentElement)) {
+          return NodeFilter.FILTER_REJECT;
         }
-        return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
       }
-    }
-  );
+      return NodeFilter.FILTER_REJECT;
+    },
+  });
 
   let node: Node | null;
-  while (node = walker.nextNode()) {
+  while ((node = walker.nextNode())) {
     // Get the position of the parent element
     const parentElement = node.parentElement;
     if (parentElement) {
@@ -351,7 +318,7 @@ function getMainContentWithTokenLimit(tokenLimit: number): string {
       if (top >= 0) {
         textWithPositions.push({
           text: node.nodeValue?.trim() || '',
-          top
+          top,
         });
       }
     }
@@ -375,7 +342,10 @@ function getMainContentWithTokenLimit(tokenLimit: number): string {
   let leftIndex = startIndex - 1;
   let rightIndex = startIndex;
 
-  while ((leftIndex >= 0 || rightIndex < textWithPositions.length) && tokensUsed < tokenLimit) {
+  while (
+    (leftIndex >= 0 || rightIndex < textWithPositions.length) &&
+    tokensUsed < tokenLimit
+  ) {
     // Add content from the right (current position and below)
     if (rightIndex < textWithPositions.length) {
       const rightText = textWithPositions[rightIndex].text;
@@ -423,7 +393,7 @@ function getMainContentWithTokenLimit(tokenLimit: number): string {
     }
   }
 
-  return result.filter(text => text.trim()).join('\n\n');
+  return result.filter((text) => text.trim()).join('\n\n');
 }
 
 function truncateToTokenLimit(text: string, tokenLimit: number): string {
@@ -442,7 +412,7 @@ function truncateToTokenLimit(text: string, tokenLimit: number): string {
     result = testResult;
   }
 
-  return result;
+  return result + (result ? '...' : '');
 }
 
 // Open chat interface based on current display mode
@@ -495,8 +465,9 @@ function removeExistingInterfaces() {
   }
 
   // Remove any injected styles
-  const existingStyles = document.getElementById('prism-sidebar-styles') ||
-                         document.getElementById('prism-iframe-styles');
+  const existingStyles =
+    document.getElementById('prism-sidebar-styles') ||
+    document.getElementById('prism-iframe-styles');
   if (existingStyles) {
     existingStyles.remove();
   }
@@ -511,15 +482,18 @@ function removeExistingInterfaces() {
 // Import dynamic components for sidebar and iframe
 async function injectSidebar() {
   // Dynamically import the sidebar component
-  const { injectSidebar: injectSidebarComponent } = await import('../sidebar/Sidebar.js');
+  const { injectSidebar: injectSidebarComponent } =
+    await import('../sidebar/Sidebar.js');
   injectSidebarComponent(currentSidebarPosition, currentSidebarWidth);
 }
 
 async function injectIframePopup() {
   // Dynamically import the iframe component
-  const { injectIframePopup: injectIframeComponent } = await import('../iframe/IframePopup.js');
+  const { injectIframePopup: injectIframeComponent } =
+    await import('../iframe/IframePopup.js');
   injectIframeComponent();
 }
+void injectIframePopup;
 
 async function injectFloatingPopup() {
   // Check if floating popup already exists to avoid duplicates
@@ -579,22 +553,22 @@ async function injectFloatingPopup() {
 
   // Add drag functionality to the header
   let isDragging = false;
-  let currentX;
-  let currentY;
-  let initialX;
-  let initialY;
+  let currentX: number;
+  let currentY: number;
+  let initialX: number;
+  let initialY: number;
   let xOffset = 0;
   let yOffset = 0;
 
-  header.addEventListener("mousedown", dragStart);
-  document.addEventListener("mouseup", dragEnd);
-  document.addEventListener("mousemove", drag);
+  header.addEventListener('mousedown', dragStart);
+  document.addEventListener('mouseup', dragEnd);
+  document.addEventListener('mousemove', drag);
 
-  function dragStart(e) {
+  function dragStart(e: MouseEvent) {
     initialX = e.clientX - xOffset;
     initialY = e.clientY - yOffset;
 
-    if (e.target === header || header.contains(e.target)) {
+    if (e.target === header || header.contains(e.target as Node)) {
       isDragging = true;
     }
   }
@@ -606,7 +580,7 @@ async function injectFloatingPopup() {
     isDragging = false;
   }
 
-  function drag(e) {
+  function drag(e: MouseEvent) {
     if (isDragging) {
       e.preventDefault();
       currentX = e.clientX - initialX;
@@ -619,7 +593,7 @@ async function injectFloatingPopup() {
     }
   }
 
-  function setTranslate(xPos, yPos, el) {
+  function setTranslate(xPos: number, yPos: number, el: HTMLElement) {
     el.style.transform = `translate3d(${xPos}px, ${yPos}px, 0)`;
   }
 
@@ -677,9 +651,12 @@ async function injectFloatingPopup() {
 
   // Add resize functionality
   let isResizing = false;
-  let initialWidth, initialHeight, initialMouseX, initialMouseY;
+  let initialWidth = 0;
+  let initialHeight = 0;
+  let initialMouseX = 0;
+  let initialMouseY = 0;
 
-  resizer.addEventListener('mousedown', function(e) {
+  resizer.addEventListener('mousedown', function (e: MouseEvent) {
     e.preventDefault();
     isResizing = true;
 
@@ -692,7 +669,7 @@ async function injectFloatingPopup() {
     document.addEventListener('mouseup', stopResize);
   });
 
-  function handleResize(e) {
+  function handleResize(e: MouseEvent) {
     if (!isResizing) return;
 
     const width = initialWidth + (e.clientX - initialMouseX);
@@ -762,7 +739,7 @@ function injectFloatingButton() {
       user-select: none;
       opacity: 1; /* Changed from 0 to 1 to make it always visible */
       pointer-events: auto; /* Changed from none to auto to make it clickable */
-    `
+    `,
   );
 
   // Add close button functionality
@@ -824,7 +801,7 @@ function injectChatPopup() {
       z-index: 2147483647;
       border: none;
       background: white;
-    `
+    `,
   });
 
   // Add the iframe to the shadow DOM
@@ -861,7 +838,7 @@ function injectChatPopup() {
     () => {
       // Send message to clear the chat in the iframe
       iframe.contentWindow?.postMessage({ type: 'CLEAR_CHAT' }, '*');
-    }
+    },
   );
 
   // Add retry button
@@ -884,7 +861,7 @@ function injectChatPopup() {
     () => {
       // Send message to retry the last message in the iframe
       iframe.contentWindow?.postMessage({ type: 'RETRY_LAST_MESSAGE' }, '*');
-    }
+    },
   );
 
   // Add close button
@@ -906,7 +883,7 @@ function injectChatPopup() {
     `,
     () => {
       removeChatPopup();
-    }
+    },
   );
 
   // Add escape key listener to close the iframe
@@ -938,19 +915,18 @@ function injectChatPopup() {
   };
 }
 
-
-
-// Mouse tracking function to show/hide button based on mouse position
+// setupMouseTracking is intentionally not wired up — currently a no-op helper
 function setupMouseTracking(button: HTMLElement) {
   // Default settings
   let buttonPosition: { top: number; right: number } = { top: 20, right: 20 };
   let sensitivityAreaPercentage: number = 10; // 10% of screen width/height
 
   // Load settings from storage
-  loadButtonSettings().then(settings => {
+  loadButtonSettings().then((settings) => {
     if (settings) {
       buttonPosition = settings.position || buttonPosition;
-      sensitivityAreaPercentage = settings.sensitivityAreaPercentage || sensitivityAreaPercentage;
+      sensitivityAreaPercentage =
+        settings.sensitivityAreaPercentage || sensitivityAreaPercentage;
     }
 
     // Update button position based on settings
@@ -984,6 +960,7 @@ function setupMouseTracking(button: HTMLElement) {
     }
   });
 }
+void setupMouseTracking;
 
 // Load button settings from storage
 async function loadButtonSettings() {
@@ -995,6 +972,9 @@ async function loadButtonSettings() {
     return null;
   }
 }
+
+// Check if button was previously removed by the user
+let buttonRemovedByUser = localStorage.getItem('prismButtonRemoved') === 'true';
 
 // Enable floating button
 if (document.readyState === 'loading') {
@@ -1020,14 +1000,18 @@ if (document.readyState === 'loading') {
 }
 
 // Check if button was previously removed by the user
-let buttonRemovedByUser = localStorage.getItem('prismButtonRemoved') === 'true';
+// (declared above to avoid TDZ errors)
 
 // Initialize prompt shortcuts in chrome.storage.local when content script loads
 async function initializePromptShortcuts() {
   try {
     // Get all prompt shortcuts from storage and sync them to chrome.storage.local
     // This is needed for the keyboard shortcut detection in the content script
-    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+    if (
+      typeof chrome !== 'undefined' &&
+      chrome.storage &&
+      chrome.storage.local
+    ) {
       // We'll sync from the extension's main storage when the popup sends us the updated list
       // For now, we rely on the popup to sync the prompt shortcuts to chrome.storage.local
     }
@@ -1053,7 +1037,7 @@ if (!buttonRemovedByUser) {
   // Start observing
   observer.observe(document.body, {
     childList: true,
-    subtree: true
+    subtree: true,
   });
 }
 
@@ -1075,9 +1059,15 @@ async function initializeFontScale() {
 function applyFontScale() {
   if (!document.documentElement.style.getPropertyValue('--font-scale')) {
     // Add the CSS variable if it doesn't exist yet
-    document.documentElement.style.setProperty('--font-scale', currentFontScale.toString());
+    document.documentElement.style.setProperty(
+      '--font-scale',
+      currentFontScale.toString(),
+    );
   } else {
-    document.documentElement.style.setProperty('--font-scale', currentFontScale.toString());
+    document.documentElement.style.setProperty(
+      '--font-scale',
+      currentFontScale.toString(),
+    );
   }
 
   // Also update the root font size
@@ -1102,254 +1092,281 @@ function decreaseFontSize() {
 // Add hotkey listener for Ctrl+'
 function setupHotkeyListener() {
   // Listen in the capture phase to intercept keys before the website
-  document.addEventListener('keydown', async (event) => {
-    // Check if Ctrl key is pressed and the apostrophe key (' or `) is pressed
-    if (event.ctrlKey && (event.key === "'" || event.key === '`' || event.code === 'Quote')) {
-      event.preventDefault();
+  document.addEventListener(
+    'keydown',
+    async (event) => {
+      // Check if Ctrl key is pressed and the apostrophe key (' or `) is pressed
+      if (
+        event.ctrlKey &&
+        (event.key === "'" || event.key === '`' || event.code === 'Quote')
+      ) {
+        event.preventDefault();
 
-      // Only handle iframe mode specifically
-      if (currentDisplayMode === 'iframe') {
-        // Check if iframe already exists, if so remove it
-        const existingIframe = document.getElementById('prism-iframe-container');
-        if (existingIframe) {
-          existingIframe.remove();
+        // Only handle iframe mode specifically
+        if (currentDisplayMode === 'iframe') {
+          // Check if iframe already exists, if so remove it
+          const existingIframe = document.getElementById(
+            'prism-iframe-container',
+          );
+          if (existingIframe) {
+            existingIframe.remove();
+          } else {
+            // Otherwise, open the chat interface which will use iframe mode
+            openChatInterface();
+          }
         } else {
-          // Otherwise, open the chat interface which will use iframe mode
+          // If not in iframe mode, temporarily switch to iframe mode and open
+          const originalMode = currentDisplayMode;
+          currentDisplayMode = 'iframe';
           openChatInterface();
-        }
-      } else {
-        // If not in iframe mode, temporarily switch to iframe mode and open
-        const originalMode = currentDisplayMode;
-        currentDisplayMode = 'iframe';
-        openChatInterface();
 
-        // Reset to original mode after opening
-        currentDisplayMode = originalMode;
-      }
-    }
-
-    // Check if Ctrl+key is pressed to toggle iframe (configurable)
-    // Get extension settings to check for custom key binding
-    try {
-      const result = await chrome.storage.local.get(['displaySettings']);
-      const settings = result.displaySettings || {};
-      const iframeToggleKey = settings.iframeToggleKey || '`';
-
-      if (event.ctrlKey && event.key === iframeToggleKey) {
-        event.preventDefault();
-        toggleChatPopup();
-        return;
-      }
-    } catch (error) {
-      console.error('Error checking iframe toggle key:', error);
-      // Fallback to default key if settings can't be loaded
-      if (event.ctrlKey && event.key === '`') {
-        event.preventDefault();
-        toggleChatPopup();
-        return;
-      }
-    }
-
-    // Check if the target is an input field (input, textarea, or contenteditable)
-    const target = event.target as HTMLElement;
-    const isInputElement = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA';
-    const isContentEditable = target.isContentEditable;
-
-    // Only handle mode toggles and other shortcuts if not in an input field or contenteditable element
-    if (!isInputElement && !isContentEditable) {
-      // Check for Shift+- or Shift+= keys for font size adjustment
-      if (event.shiftKey && event.key === '-') {
-        event.preventDefault();
-        decreaseFontSize();
-      } else if (event.shiftKey && (event.key === '=' || event.key === '+')) {
-        event.preventDefault();
-        increaseFontSize();
-      }
-
-      // Check for mode toggle keys (Shift + number keys)
-      if (event.shiftKey) {
-        // Get extension settings to check for custom key bindings
-        try {
-          const result = await chrome.storage.local.get(['displaySettings']);
-          const settings = result.displaySettings || {};
-
-          // Default key bindings
-          const textSelectionKey = settings.textSelectionKey || '1';
-          const pageContextKey = settings.pageContextKey || '2';
-          const pageScreenshotKey = settings.pageScreenshotKey || '3';
-          const clipboardKey = settings.clipboardKey || '4';
-          const pageInfoKey = settings.pageInfoKey || '5';
-
-          // Check which mode key was pressed
-          if (event.key === textSelectionKey) {
-            event.preventDefault();
-            // Toggle text selection mode
-            chrome.runtime.sendMessage({
-              type: 'TOGGLE_MODE',
-              mode: 'textSelection',
-              value: true
-            });
-            showToast('Text selection mode enabled');
-          } else if (event.key === pageContextKey) {
-            event.preventDefault();
-            // Toggle page context mode
-            chrome.runtime.sendMessage({
-              type: 'TOGGLE_MODE',
-              mode: 'pageContext',
-              value: true
-            });
-            showToast('Page context mode enabled');
-          } else if (event.key === pageScreenshotKey) {
-            event.preventDefault();
-            // Toggle page screenshot mode
-            chrome.runtime.sendMessage({
-              type: 'TOGGLE_MODE',
-              mode: 'pageScreenshot',
-              value: true
-            });
-            showToast('Page screenshot mode enabled');
-          } else if (event.key === clipboardKey) {
-            event.preventDefault();
-            // Toggle clipboard mode
-            chrome.runtime.sendMessage({
-              type: 'TOGGLE_MODE',
-              mode: 'clipboard',
-              value: true
-            });
-            showToast('Clipboard mode enabled');
-          } else if (event.key === pageInfoKey) {
-            event.preventDefault();
-            // Toggle page info mode
-            chrome.runtime.sendMessage({
-              type: 'TOGGLE_MODE',
-              mode: 'pageInfo',
-              value: true
-            });
-            showToast('Page info mode enabled');
-          }
-        } catch (error) {
-          console.error('Error checking mode toggle keys:', error);
+          // Reset to original mode after opening
+          currentDisplayMode = originalMode;
         }
       }
 
-      // Check for registered keyboard shortcuts for prompt shortcuts
-      // Only do this if not in an input field or contenteditable element
-      // (already checked at the beginning of the function)
-      // Get all registered prompt shortcuts from storage
+      // Check if Ctrl+key is pressed to toggle iframe (configurable)
+      // Get extension settings to check for custom key binding
       try {
-        const result = await chrome.storage.local.get(['promptShortcuts']);
-        const promptShortcuts = result.promptShortcuts || [];
+        const result = await chrome.storage.local.get(['displaySettings']);
+        const settings = result.displaySettings || {};
+        const iframeToggleKey = settings.iframeToggleKey || '`';
 
-        // Check if any prompt shortcut matches the current key combination
-        for (const prompt of promptShortcuts) {
-          if (prompt.keyboardShortcut) {
-            // Parse the keyboard shortcut (e.g., "Ctrl+Shift+F")
-            const keys = prompt.keyboardShortcut.split('+');
-            let matches = true;
-
-            // Check modifier keys
-            if (keys.includes('Ctrl') && !event.ctrlKey) matches = false;
-            if (keys.includes('Cmd') && !event.metaKey) matches = false;  // For Mac
-            if (keys.includes('Alt') && !event.altKey) matches = false;
-            if (keys.includes('Shift') && !event.shiftKey) matches = false;
-
-            // Check the actual key
-            const actualKey = keys[keys.length - 1].toLowerCase();
-            if (event.key.toLowerCase() !== actualKey) matches = false;
-
-            if (matches) {
-              event.preventDefault();
-
-              // Send a message to the popup to insert the prompt content
-              chrome.runtime.sendMessage({
-                type: 'INSERT_PROMPT_SHORTCUT',
-                content: prompt.content
-              });
-
-              break; // Stop checking other shortcuts once one is found
-            }
-          }
+        if (event.ctrlKey && event.key === iframeToggleKey) {
+          event.preventDefault();
+          injectIframePopup().catch(() => {
+            /* ignore */
+          });
+          return;
         }
       } catch (error) {
-        console.error('Error checking keyboard shortcuts:', error);
+        console.error('Error checking iframe toggle key:', error);
+        // Fallback to default key if settings can't be loaded
+        if (event.ctrlKey && event.key === '`') {
+          event.preventDefault();
+          injectIframePopup().catch(() => {
+            /* ignore */
+          });
+          return;
+        }
       }
-    }
-  }, true); // Use capture phase to intercept keys before the website
+
+      // Check if the target is an input field (input, textarea, or contenteditable)
+      const target = event.target as HTMLElement;
+      const isInputElement =
+        target.tagName === 'INPUT' || target.tagName === 'TEXTAREA';
+      const isContentEditable = target.isContentEditable;
+
+      // Only handle mode toggles and other shortcuts if not in an input field or contenteditable element
+      if (!isInputElement && !isContentEditable) {
+        // Check for Shift+- or Shift+= keys for font size adjustment
+        if (event.shiftKey && event.key === '-') {
+          event.preventDefault();
+          decreaseFontSize();
+        } else if (event.shiftKey && (event.key === '=' || event.key === '+')) {
+          event.preventDefault();
+          increaseFontSize();
+        }
+
+        // Check for mode toggle keys (Shift + number keys)
+        if (event.shiftKey) {
+          // Get extension settings to check for custom key bindings
+          try {
+            const result = await chrome.storage.local.get(['displaySettings']);
+            const settings = result.displaySettings || {};
+
+            // Default key bindings
+            const textSelectionKey = settings.textSelectionKey || '1';
+            const pageContextKey = settings.pageContextKey || '2';
+            const pageScreenshotKey = settings.pageScreenshotKey || '3';
+            const clipboardKey = settings.clipboardKey || '4';
+            const pageInfoKey = settings.pageInfoKey || '5';
+
+            // Check which mode key was pressed
+            if (event.key === textSelectionKey) {
+              event.preventDefault();
+              // Toggle text selection mode
+              chrome.runtime.sendMessage({
+                type: 'TOGGLE_MODE',
+                mode: 'textSelection',
+                value: true,
+              });
+              showToast('Text selection mode enabled');
+            } else if (event.key === pageContextKey) {
+              event.preventDefault();
+              // Toggle page context mode
+              chrome.runtime.sendMessage({
+                type: 'TOGGLE_MODE',
+                mode: 'pageContext',
+                value: true,
+              });
+              showToast('Page context mode enabled');
+            } else if (event.key === pageScreenshotKey) {
+              event.preventDefault();
+              // Toggle page screenshot mode
+              chrome.runtime.sendMessage({
+                type: 'TOGGLE_MODE',
+                mode: 'pageScreenshot',
+                value: true,
+              });
+              showToast('Page screenshot mode enabled');
+            } else if (event.key === clipboardKey) {
+              event.preventDefault();
+              // Toggle clipboard mode
+              chrome.runtime.sendMessage({
+                type: 'TOGGLE_MODE',
+                mode: 'clipboard',
+                value: true,
+              });
+              showToast('Clipboard mode enabled');
+            } else if (event.key === pageInfoKey) {
+              event.preventDefault();
+              // Toggle page info mode
+              chrome.runtime.sendMessage({
+                type: 'TOGGLE_MODE',
+                mode: 'pageInfo',
+                value: true,
+              });
+              showToast('Page info mode enabled');
+            }
+          } catch (error) {
+            console.error('Error checking mode toggle keys:', error);
+          }
+        }
+
+        // Check for registered keyboard shortcuts for prompt shortcuts
+        // Only do this if not in an input field or contenteditable element
+        // (already checked at the beginning of the function)
+        // Get all registered prompt shortcuts from storage
+        try {
+          const result = await chrome.storage.local.get(['promptShortcuts']);
+          const promptShortcuts = result.promptShortcuts || [];
+
+          // Check if any prompt shortcut matches the current key combination
+          for (const prompt of promptShortcuts) {
+            if (prompt.keyboardShortcut) {
+              // Parse the keyboard shortcut (e.g., "Ctrl+Shift+F")
+              const keys = prompt.keyboardShortcut.split('+');
+              let matches = true;
+
+              // Check modifier keys
+              if (keys.includes('Ctrl') && !event.ctrlKey) matches = false;
+              if (keys.includes('Cmd') && !event.metaKey) matches = false; // For Mac
+              if (keys.includes('Alt') && !event.altKey) matches = false;
+              if (keys.includes('Shift') && !event.shiftKey) matches = false;
+
+              // Check the actual key
+              const actualKey = keys[keys.length - 1].toLowerCase();
+              if (event.key.toLowerCase() !== actualKey) matches = false;
+
+              if (matches) {
+                event.preventDefault();
+
+                // Send a message to the popup to insert the prompt content
+                chrome.runtime.sendMessage({
+                  type: 'INSERT_PROMPT_SHORTCUT',
+                  content: prompt.content,
+                });
+
+                break; // Stop checking other shortcuts once one is found
+              }
+            }
+          }
+        } catch (error) {
+          console.error('Error checking keyboard shortcuts:', error);
+        }
+      }
+    },
+    true,
+  ); // Use capture phase to intercept keys before the website
 
   // Listen for prompt sequence shortcuts in capture phase
-  let inputBuffer = "";
-  const PROMPT_SHORTCUT = "/prompt"; // The sequence to trigger
-  const PARTIAL_TRIGGER = "/p"; // Start blocking propagation at this point
+  let inputBuffer = '';
+  const PROMPT_SHORTCUT = '/prompt'; // The sequence to trigger
+  const PARTIAL_TRIGGER = '/p'; // Start blocking propagation at this point
+  void PARTIAL_TRIGGER;
 
-  document.addEventListener('keydown', (event) => {
-    const target = event.target as HTMLElement;
+  document.addEventListener(
+    'keydown',
+    (event) => {
+      const target = event.target as HTMLElement;
 
-    // Only care if the user is typing in an input or textarea
-    if (!(target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
-      return;
-    }
-
-    const char = event.key;
-
-    // 1. Check for Partial Match to block Search Bar interference
-    const potentialBuffer = inputBuffer + char;
-
-    if (PROMPT_SHORTCUT.startsWith(potentialBuffer)) {
-      // This stops YouTube/X from seeing the key and triggering their own shortcuts
-      event.stopPropagation();
-      inputBuffer = potentialBuffer;
-
-      // 2. Check for Full Match
-      if (inputBuffer === PROMPT_SHORTCUT) {
-        event.preventDefault(); // Stop the last character from being typed
-
-        deleteTypedSequence(target, PROMPT_SHORTCUT.length - 1); // Delete the prefix
-        launchIframe();
-        inputBuffer = ""; // Reset
+      // Only care if the user is typing in an input or textarea
+      if (!(
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable
+      )) {
+        return;
       }
-    } else {
-      inputBuffer = ""; // Reset if user types something else
-    }
-  }, true); // The 'true' here is CRITICAL: it enables the Capture Phase
+
+      const char = event.key;
+
+      // 1. Check for Partial Match to block Search Bar interference
+      const potentialBuffer = inputBuffer + char;
+
+      if (PROMPT_SHORTCUT.startsWith(potentialBuffer)) {
+        // This stops YouTube/X from seeing the key and triggering their own shortcuts
+        event.stopPropagation();
+        inputBuffer = potentialBuffer;
+
+        // 2. Check for Full Match
+        if (inputBuffer === PROMPT_SHORTCUT) {
+          event.preventDefault(); // Stop the last character from being typed
+
+          deleteTypedSequence(target, PROMPT_SHORTCUT.length - 1); // Delete the prefix
+          launchIframe();
+          inputBuffer = ''; // Reset
+        }
+      } else {
+        inputBuffer = ''; // Reset if user types something else
+      }
+    },
+    true,
+  ); // The 'true' here is CRITICAL: it enables the Capture Phase
 
   // Global sequence detection for anywhere on the page
-  let keyBuffer = "";
-  const GLOBAL_SHORTCUT = "prompt"; // No slash needed if you want it purely global
+  let keyBuffer = '';
+  const GLOBAL_SHORTCUT = 'prompt'; // No slash needed if you want it purely global
   const MAX_BUFFER_LENGTH = 20;
 
-  document.addEventListener('keydown', (event) => {
-    // 1. Ignore modifier keys (Shift, Control, etc.)
-    if (event.key.length > 1 && event.key !== "Backspace") return;
+  document.addEventListener(
+    'keydown',
+    (event) => {
+      // 1. Ignore modifier keys (Shift, Control, etc.)
+      if (event.key.length > 1 && event.key !== 'Backspace') return;
 
-    // 2. Handle Backspace (optional: allows users to correct typos in the sequence)
-    if (event.key === "Backspace") {
-      keyBuffer = keyBuffer.slice(0, -1);
-      return;
-    }
-
-    keyBuffer += event.key.toLowerCase();
-
-    // 3. Keep buffer lean
-    if (keyBuffer.length > MAX_BUFFER_LENGTH) {
-      keyBuffer = keyBuffer.substring(keyBuffer.length - MAX_BUFFER_LENGTH);
-    }
-
-    // 4. Check for Partial Match to block site hotkeys
-    // If the user starts typing "pro...", we stop the site from reacting.
-    if (GLOBAL_SHORTCUT.startsWith(keyBuffer) && keyBuffer.length > 0) {
-      event.stopPropagation();
-
-      // 5. Check for Full Match
-      if (keyBuffer === GLOBAL_SHORTCUT) {
-        event.preventDefault();
-        launchIframe();
-        keyBuffer = ""; // Reset
+      // 2. Handle Backspace (optional: allows users to correct typos in the sequence)
+      if (event.key === 'Backspace') {
+        keyBuffer = keyBuffer.slice(0, -1);
+        return;
       }
-    } else {
-      // If the sequence is broken (e.g., they typed "prx"), reset
-      keyBuffer = event.key.toLowerCase();
-    }
-  }, true); // Capture phase is still mandatory
+
+      keyBuffer += event.key.toLowerCase();
+
+      // 3. Keep buffer lean
+      if (keyBuffer.length > MAX_BUFFER_LENGTH) {
+        keyBuffer = keyBuffer.substring(keyBuffer.length - MAX_BUFFER_LENGTH);
+      }
+
+      // 4. Check for Partial Match to block site hotkeys
+      // If the user starts typing "pro...", we stop the site from reacting.
+      if (GLOBAL_SHORTCUT.startsWith(keyBuffer) && keyBuffer.length > 0) {
+        event.stopPropagation();
+
+        // 5. Check for Full Match
+        if (keyBuffer === GLOBAL_SHORTCUT) {
+          event.preventDefault();
+          launchIframe();
+          keyBuffer = ''; // Reset
+        }
+      } else {
+        // If the sequence is broken (e.g., they typed "prx"), reset
+        keyBuffer = event.key.toLowerCase();
+      }
+    },
+    true,
+  ); // Capture phase is still mandatory
 }
 
 // Function to delete the typed sequence from the input
@@ -1358,9 +1375,9 @@ function deleteTypedSequence(element: HTMLElement, length: number) {
     // For sites like Gmail or Twitter/X composer
     const selection = window.getSelection();
     if (selection && selection.rangeCount > 0) {
-      const range = selection.getRangeAt(0);
+      void selection.getRangeAt(0);
       for (let i = 0; i < length; i++) {
-        document.execCommand("delete", false, null);
+        document.execCommand('delete', false, undefined);
       }
     }
   } else {
@@ -1413,7 +1430,7 @@ function launchIframe() {
       z-index: 2147483647;
       border: none;
       background: white;
-    `
+    `,
   });
 
   // Add the iframe to the shadow DOM
@@ -1450,7 +1467,7 @@ function launchIframe() {
     () => {
       // Send message to clear the chat in the iframe
       iframe.contentWindow?.postMessage({ type: 'CLEAR_CHAT' }, '*');
-    }
+    },
   );
 
   // Add retry button
@@ -1473,7 +1490,7 @@ function launchIframe() {
     () => {
       // Send message to retry the last message in the iframe
       iframe.contentWindow?.postMessage({ type: 'RETRY_LAST_MESSAGE' }, '*');
-    }
+    },
   );
 
   // Add close button
@@ -1495,7 +1512,7 @@ function launchIframe() {
     `,
     () => {
       removeChatPopup();
-    }
+    },
   );
 
   // Add escape key listener to close the iframe
@@ -1538,105 +1555,66 @@ function removeChatPopup() {
 // Function to replace prompt shortcuts in text fields
 function setupPromptShortcutReplacement() {
   // Listen for input events on text fields
-  document.addEventListener('input', async (event) => {
-    const target = event.target as HTMLInputElement | HTMLTextAreaElement | HTMLElement;
+  document.addEventListener(
+    'input',
+    async (event) => {
+      const target = event.target as
+        HTMLInputElement | HTMLTextAreaElement | HTMLElement;
 
-    // Only process if the target is an input, textarea, or contenteditable element
-    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
-      const currentValue = target.value || target.textContent || '';
+      // Only process if the target is an input, textarea, or contenteditable element
+      if (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable
+      ) {
+        const currentValue =
+          ('value' in target ? target.value : target.textContent) || '';
 
-      try {
-        // Get all prompt shortcuts from storage
-        const result = await chrome.storage.local.get(['promptShortcuts']);
-        const promptShortcuts = result.promptShortcuts || [];
+        try {
+          // Get all prompt shortcuts from storage
+          const result = await chrome.storage.local.get(['promptShortcuts']);
+          const promptShortcuts = result.promptShortcuts || [];
 
-        // Check if the current value contains any prompt shortcuts
-        for (const prompt of promptShortcuts) {
-          if (prompt.shortcutKey && currentValue.includes(prompt.shortcutKey)) {
-            // Replace the shortcut with the full prompt content
-            const newValue = currentValue.replace(prompt.shortcutKey, prompt.content);
+          // Check if the current value contains any prompt shortcuts
+          for (const prompt of promptShortcuts) {
+            if (
+              prompt.shortcutKey &&
+              currentValue.includes(prompt.shortcutKey)
+            ) {
+              // Replace the shortcut with the full prompt content
+              const newValue = currentValue.replace(
+                prompt.shortcutKey,
+                prompt.content,
+              );
 
-            if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
-              // For input and textarea elements
-              (target as HTMLInputElement | HTMLTextAreaElement).value = newValue;
+              if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+                // For input and textarea elements
+                (target as HTMLInputElement | HTMLTextAreaElement).value =
+                  newValue;
 
-              // Trigger input event to notify other listeners
-              target.dispatchEvent(new Event('input', { bubbles: true }));
-            } else if (target.isContentEditable) {
-              // For contenteditable elements
-              target.textContent = newValue;
+                // Trigger input event to notify other listeners
+                target.dispatchEvent(new Event('input', { bubbles: true }));
+              } else if (target.isContentEditable) {
+                // For contenteditable elements
+                target.textContent = newValue;
 
-              // Trigger input event to notify other listeners
-              target.dispatchEvent(new Event('input', { bubbles: true }));
+                // Trigger input event to notify other listeners
+                target.dispatchEvent(new Event('input', { bubbles: true }));
+              }
+
+              // Show a notification that the replacement occurred
+              showToast(`Replaced ${prompt.shortcutKey} with prompt`);
+
+              break; // Only replace the first match to avoid conflicts
             }
-
-            // Show a notification that the replacement occurred
-            showToast(`Replaced ${prompt.shortcutKey} with prompt`);
-
-            break; // Only replace the first match to avoid conflicts
           }
-        }
-      } catch (error) {
-        console.error('Error processing prompt shortcuts:', error);
-      }
-    }
-  }, true); // Use capture phase
-}
-
-// Function to show toast notifications
-function showToast(message: string) {
-  // Remove any existing toasts
-  const existingToast = document.getElementById('prism-toast');
-  if (existingToast) {
-    existingToast.remove();
-  }
-
-  // Create toast element
-  const toast = document.createElement('div');
-  toast.id = 'prism-toast';
-  toast.textContent = message;
-  toast.style.cssText = `
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    background: #333;
-    color: white;
-    padding: 12px 20px;
-    border-radius: 4px;
-    z-index: 2147483647;
-    font-size: 14px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    animation: prismToastSlideIn 0.3s ease-out;
-  `;
-
-  // Add CSS animation
-  if (!document.getElementById('prism-toast-styles')) {
-    const style = document.createElement('style');
-    style.id = 'prism-toast-styles';
-    style.textContent = `
-      @keyframes prismToastSlideIn {
-        from {
-          transform: translateX(100%);
-          opacity: 0;
-        }
-        to {
-          transform: translateX(0);
-          opacity: 1;
+        } catch (error) {
+          console.error('Error processing prompt shortcuts:', error);
         }
       }
-    `;
-    document.head.appendChild(style);
-  }
-
-  // Add toast to the page
-  document.body.appendChild(toast);
-
-  // Remove toast after 3 seconds
-  setTimeout(() => {
-    if (toast.parentNode) {
-      toast.remove();
-    }
-  }, 3000);
+    },
+    true,
+  ); // Use capture phase
 }
 
 // Load display settings from storage

@@ -5,9 +5,10 @@ export {
   persistor,
   type RootState,
   type AppDispatch,
-  // Export action creators from store.ts (avoiding duplicates with slices)
-  addMessage,
+  useAppDispatch,
+  useAppSelector,
   setMessages,
+  addMessage,
   updateMessage,
   deleteMessage,
   setCurrentSession,
@@ -36,7 +37,14 @@ export {
   deletePromptShortcut,
   setPromptsLoading,
   setOnlineStatus,
-  setLastSync
+  setLastSync,
+  // Group chat action creators
+  setGroupChatActive,
+  setSpeakingCharacter,
+  setPendingCharacters,
+  setAddressedCharacters,
+  clearPendingCharacters,
+  resetGroupChatState,
 } from './store';
 export * from './types';
 
@@ -44,6 +52,11 @@ export * from './types';
 export { default as chatReducer } from './chatSlice';
 export { default as aiConfigReducer } from './aiConfigSlice';
 export { default as contextReducer } from './contextSlice';
+export { default as characterReducer } from './characterSlice';
+export { default as personaReducer } from './personaSlice';
+export { default as presetReducer } from './presetSlice';
+export { default as worldInfoReducer } from './worldInfoSlice';
+export { default as agentReducer } from './agentSlice';
 
 // Export individual slice actions if needed separately
 export {
@@ -63,6 +76,69 @@ export {
   resetForm,
   touchField,
 } from './chatSlice';
+
+// Export SillyTavern-style slice actions
+export {
+  setCharacters,
+  addCharacter,
+  updateCharacter,
+  removeCharacter,
+  setActiveCharacter,
+  setCharactersLoading,
+  setActiveCharacterIds,
+  toggleCharacterInGroup,
+  setGroupChatMode,
+  setGroupChatTurnOrder,
+  advanceGroupChatTurn,
+  resetGroupChatTurn,
+} from './characterSlice';
+
+export {
+  setPersonas,
+  addPersona,
+  updatePersona,
+  removePersona,
+  setActivePersona,
+  setPersonasLoading,
+} from './personaSlice';
+
+export {
+  setPresets,
+  addPreset,
+  updatePreset,
+  removePreset,
+  setActivePreset,
+  setPresetsLoading,
+  addPromptEntry,
+  updatePromptEntry,
+  removePromptEntry,
+} from './presetSlice';
+
+export {
+  setWorldInfoList,
+  addWorldInfo,
+  updateWorldInfo,
+  removeWorldInfo,
+  setActiveWorldInfo,
+  setWorldInfoLoading,
+  setEntries,
+  addEntry,
+  updateEntry,
+  removeEntry,
+} from './worldInfoSlice';
+
+export {
+  setAgents,
+  addAgent,
+  updateAgent,
+  removeAgent,
+  setActiveAgent,
+  setAgentsLoading,
+  setEditingAgent,
+  addToolToEditing,
+  updateToolInEditing,
+  removeToolFromEditing,
+} from './agentSlice';
 
 // Export hooks
 export { useChatForm } from './hooks/useChatForm';

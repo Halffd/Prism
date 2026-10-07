@@ -1,0 +1,20 @@
+{
+  "name": "stt",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/stt/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}"],
+      "options": {
+        "outputPath": "dist/libs/stt",
+        "tsConfig": "libs/stt/tsconfig.lib.json",
+        "packageJson": "libs/stt/package.json",
+        "main": "libs/stt/src/index.ts",
+        "assets": ["libs/stt/*.md"]
+      }
+    }
+  },
+  "tags": []
+}

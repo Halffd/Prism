@@ -1,0 +1,20 @@
+{
+  "name": "web-search",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/web-search/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}"],
+      "options": {
+        "outputPath": "dist/libs/web-search",
+        "tsConfig": "libs/web-search/tsconfig.lib.json",
+        "packageJson": "libs/web-search/package.json",
+        "main": "libs/web-search/src/index.ts",
+        "assets": ["libs/web-search/*.md"]
+      }
+    }
+  },
+  "tags": []
+}

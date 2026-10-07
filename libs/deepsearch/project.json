@@ -1,0 +1,20 @@
+{
+  "name": "deepsearch",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/deepsearch/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}"],
+      "options": {
+        "outputPath": "dist/libs/deepsearch",
+        "tsConfig": "libs/deepsearch/tsconfig.lib.json",
+        "packageJson": "libs/deepsearch/package.json",
+        "main": "libs/deepsearch/src/index.ts",
+        "assets": ["libs/deepsearch/*.md"]
+      }
+    }
+  },
+  "tags": []
+}

@@ -1,0 +1,20 @@
+{
+  "name": "inpaint",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/inpaint/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}"],
+      "options": {
+        "outputPath": "dist/libs/inpaint",
+        "tsConfig": "libs/inpaint/tsconfig.lib.json",
+        "packageJson": "libs/inpaint/package.json",
+        "main": "libs/inpaint/src/index.ts",
+        "assets": ["libs/inpaint/*.md"]
+      }
+    }
+  },
+  "tags": []
+}

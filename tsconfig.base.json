@@ -26,7 +26,24 @@
       "@prism/image-gen": ["libs/image-gen/src/index.ts"],
       "@prism/llm-service": ["libs/llm-service/src/index.ts"],
       "@prism/firebase-auth": ["libs/firebase-auth/src/index.ts"],
-      "@prism/supabase-client": ["libs/supabase-client/src/index.ts"]
-    }
+      "@prism/supabase-client": ["libs/supabase-client/src/index.ts"],
+      "@prism/ocr": ["libs/ocr/src/index.ts"],
+      "@prism/stt": ["libs/stt/src/index.ts"],
+      "@prism/tts": ["libs/tts/src/index.ts"],
+      "@prism/inpaint": ["libs/inpaint/src/index.ts"],
+      "@prism/model-gen": ["libs/model-gen/src/index.ts"],
+      "@prism/audio-gen": ["libs/audio-gen/src/index.ts"],
+      "@prism/ai-factory": ["libs/ai-factory/src/index.ts"],
+      "@prism/ai-builder": ["libs/ai-builder/src/index.ts"],
+      "@prism/video-gen": ["libs/video-gen/src/index.ts"],
+      "@prism/llm": ["libs/llm/src/index.ts"],
+      "@prism/agent": ["libs/agent/src/index.ts"],
+    "@prism/ai-adapters": ["libs/ai-adapters/src/index.ts"],
+    "@prism/context-manager": ["libs/context-manager/src/index.ts"],
+    "@prism/ui-components": ["libs/ui-components/src/index.ts"],
+    "@prism/web-search": ["libs/web-search/src/index.ts"],
+    "@prism/deepsearch": ["libs/deepsearch/src/index.ts"],
+"@prism/council": ["libs/council/src/index.ts"]
+  }
   }
 }

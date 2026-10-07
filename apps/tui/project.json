@@ -1,0 +1,42 @@
+{
+  "name": "@prism/tui",
+  "projectType": "application",
+  "sourceRoot": "apps/tui/src",
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/dist/apps/tui"],
+      "options": {
+        "commands": [
+          "esbuild apps/tui/src/index.tsx --bundle --platform=node --format=esm --outdir=dist/apps/tui --external:ink --external:ink-text-input --external:ink-spinner --external:react --external:react-reconciler --external:nanoid '--banner:js=import { createRequire } from \"module\"; const require = createRequire(import.meta.url);' --sourcemap"
+        ],
+        "cwd": "."
+      },
+      "configurations": {
+        "development": {},
+        "production": {
+          "commands": [
+            "esbuild apps/tui/src/index.tsx --bundle --platform=node --format=esm --outdir=dist/apps/tui --external:ink --external:ink-text-input --external:ink-spinner --external:react --external:react-reconciler --external:nanoid '--banner:js=import { createRequire } from \"module\"; const require = createRequire(import.meta.url);' --minify"
+          ]
+        }
+      }
+    },
+    "typecheck": {
+      "executor": "@nx/js:tsc",
+      "options": {
+        "tsConfig": "apps/tui/tsconfig.app.json"
+      }
+    },
+    "serve": {
+      "executor": "nx:run-commands",
+      "defaultConfiguration": "development",
+      "options": {
+        "commands": [
+          "node --enable-source-maps dist/apps/tui/index.js"
+        ],
+        "cwd": "."
+      }
+    }
+  },
+  "tags": []
+}

@@ -1,6 +1,4 @@
-import React from 'react';
 import type { AIConfig } from '@prism/shared-types';
-import { RootState } from '@prism/redux-store';
 
 interface HeaderSectionProps {
   context: any;
@@ -39,13 +37,15 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
   isAuthenticated,
   signInWithGoogle,
   signOut,
-  autoSyncEnabled
+  autoSyncEnabled,
 }) => {
   return (
     <div className="popup-header">
       <h1>💎 Prism</h1>
       <div className="header-actions">
-        <button onClick={() => setShowMenu(true)} className="menu-btn">☰</button>
+        <button onClick={() => setShowMenu(true)} className="menu-btn">
+          ☰
+        </button>
         {/* Close button for popup when in browser action mode */}
         <button
           onClick={() => {
@@ -55,7 +55,13 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
           }}
           className="close-btn"
           title="Close popup"
-          style={{ display: typeof window !== 'undefined' && window.location?.pathname?.includes('index.html') ? 'block' : 'none' }}
+          style={{
+            display:
+              typeof window !== 'undefined' &&
+              window.location?.pathname?.includes('index.html')
+                ? 'block'
+                : 'none',
+          }}
         >
           ✕
         </button>
@@ -106,7 +112,7 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
           {fetchingModels ? (
             <option value="">Loading models...</option>
           ) : availableModels.length > 0 ? (
-            availableModels.map(model => (
+            availableModels.map((model) => (
               <option key={model} value={model}>
                 {model}
               </option>
@@ -124,8 +130,10 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
         >
           {fetchingModels ? '🔄' : '♻️'}
         </button>
-        <div className={`w-2 h-2 rounded-full mr-2 ${isOnline ? 'bg-green-500' : 'bg-red-500'}`}
-             title={isOnline ? 'Online' : 'Offline'}></div>
+        <div
+          className={`w-2 h-2 rounded-full mr-2 ${isOnline ? 'bg-green-500' : 'bg-red-500'}`}
+          title={isOnline ? 'Online' : 'Offline'}
+        ></div>
         <button
           onClick={syncFromAPI}
           className="sync-from-btn"
@@ -145,7 +153,7 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
         <button
           onClick={toggleAutoSync}
           className="autosync-btn"
-          title={autoSyncEnabled ? "Stop Auto-Sync" : "Start Auto-Sync"}
+          title={autoSyncEnabled ? 'Stop Auto-Sync' : 'Start Auto-Sync'}
           disabled={!isOnline}
         >
           {autoSyncEnabled ? '⏸️' : '▶️'}
@@ -168,7 +176,9 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
         </button>
         {isAuthenticated ? (
           <div className="flex items-center gap-2">
-            <span className="text-xs truncate max-w-[100px]">{user?.displayName || user?.email}</span>
+            <span className="text-xs truncate max-w-[100px]">
+              {user?.displayName || user?.email}
+            </span>
             <button
               onClick={signOut}
               className="auth-signout-btn"
@@ -187,7 +197,10 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
             🔐
           </button>
         )}
-        <span className="provider-indicator" title={`Current provider: ${aiConfig.provider}`}>
+        <span
+          className="provider-indicator"
+          title={`Current provider: ${aiConfig.provider}`}
+        >
           {aiConfig.provider === 'openai' && '🤖'}
           {aiConfig.provider === 'gemini' && '⭐'}
           {aiConfig.provider === 'claude' && '🤝'}
