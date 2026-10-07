@@ -17,6 +17,7 @@ import {
   OCRResult,
   STTRequest,
   STTResult,
+  ResponseMetrics,
   TTSRequest,
   TTSResult,
   InpaintRequest,
@@ -133,17 +134,61 @@ export class UnifiedAIClient {
     const sc = this.toServiceConfig(config);
     const provider = config.provider as string;
 
-    try { this.ocrService = AIFactory.create('ocr', provider, sc); } catch { /* provider not supported for this capability */ }
-    try { this.sttService = AIFactory.create('stt', provider, sc); } catch { /* provider not supported */ }
-    try { this.ttsService = AIFactory.create('tts', provider, sc); } catch { /* provider not supported */ }
-    try { this.inpaintService = AIFactory.create('inpaint', provider, sc); } catch { /* provider not supported */ }
-    try { this.modelGenService = AIFactory.create('model-gen', provider, sc); } catch { /* provider not supported */ }
-    try { this.audioGenService = AIFactory.create('audio-gen', provider, sc); } catch { /* provider not supported */ }
-    try { this.videoGenService = AIFactory.create('video-gen', provider, sc); } catch { /* provider not supported */ }
-    try { this.llmService = AIFactory.create('llm', provider, sc); } catch { /* provider not supported */ }
-    try { this.agentService = AIFactory.create('agent', provider, sc); } catch { /* provider not supported */ }
-  try { this.webSearchService = AIFactory.create('web-search', provider, sc); } catch { /* provider not supported */ }
-  try { this.deepSearchService = AIFactory.create('deepsearch', provider, sc); } catch { /* provider not supported */ }
+    try {
+      this.ocrService = AIFactory.create('ocr', provider, sc);
+    } catch {
+      /* provider not supported for this capability */
+    }
+    try {
+      this.sttService = AIFactory.create('stt', provider, sc);
+    } catch {
+      /* provider not supported */
+    }
+    try {
+      this.ttsService = AIFactory.create('tts', provider, sc);
+    } catch {
+      /* provider not supported */
+    }
+    try {
+      this.inpaintService = AIFactory.create('inpaint', provider, sc);
+    } catch {
+      /* provider not supported */
+    }
+    try {
+      this.modelGenService = AIFactory.create('model-gen', provider, sc);
+    } catch {
+      /* provider not supported */
+    }
+    try {
+      this.audioGenService = AIFactory.create('audio-gen', provider, sc);
+    } catch {
+      /* provider not supported */
+    }
+    try {
+      this.videoGenService = AIFactory.create('video-gen', provider, sc);
+    } catch {
+      /* provider not supported */
+    }
+    try {
+      this.llmService = AIFactory.create('llm', provider, sc);
+    } catch {
+      /* provider not supported */
+    }
+    try {
+      this.agentService = AIFactory.create('agent', provider, sc);
+    } catch {
+      /* provider not supported */
+    }
+    try {
+      this.webSearchService = AIFactory.create('web-search', provider, sc);
+    } catch {
+      /* provider not supported */
+    }
+    try {
+      this.deepSearchService = AIFactory.create('deepsearch', provider, sc);
+    } catch {
+      /* provider not supported */
+    }
   }
 
   private initAdapterRouter(config: AIConfig): void {
@@ -158,26 +203,58 @@ export class UnifiedAIClient {
     this.adapterRouter = new AdapterRouter(sc, adapterConfig);
   }
 
-  setCapabilityProvider(capability: AICapability, provider: string, config?: Partial<ServiceConfig>): void {
+  setCapabilityProvider(
+    capability: AICapability,
+    provider: string,
+    config?: Partial<ServiceConfig>,
+  ): void {
     const sc: ServiceConfig = {
-      provider: (config?.provider || this.aiConfig?.provider || 'openai') as AIConfig['provider'],
-      apiKey: config?.apiKey || this.aiConfig?.providerKeys?.[this.aiConfig?.provider] || this.aiConfig?.apiKey || '',
+      provider: (config?.provider ||
+        this.aiConfig?.provider ||
+        'openai') as AIConfig['provider'],
+      apiKey:
+        config?.apiKey ||
+        this.aiConfig?.providerKeys?.[this.aiConfig?.provider] ||
+        this.aiConfig?.apiKey ||
+        '',
       apiUrl: config?.apiUrl || this.aiConfig?.apiUrl,
       model: config?.model || this.aiConfig?.model,
     };
     const service = AIFactory.create(capability, provider, sc);
     switch (capability) {
-      case 'ocr': this.ocrService = service as OCRService; break;
-      case 'stt': this.sttService = service as STTService; break;
-      case 'tts': this.ttsService = service as TTSService; break;
-      case 'inpaint': this.inpaintService = service as InpaintService; break;
-      case 'model-gen': this.modelGenService = service as ModelGenService; break;
-      case 'audio-gen': this.audioGenService = service as AudioGenService; break;
-      case 'video-gen': this.videoGenService = service as VideoGenService; break;
-      case 'llm': this.llmService = service as LLMService; break;
-      case 'agent': this.agentService = service as AgentService; break;
-    case 'web-search': this.webSearchService = service as WebSearchService; break;
-    case 'deepsearch': this.deepSearchService = service as DeepSearchService; break;
+      case 'ocr':
+        this.ocrService = service as OCRService;
+        break;
+      case 'stt':
+        this.sttService = service as STTService;
+        break;
+      case 'tts':
+        this.ttsService = service as TTSService;
+        break;
+      case 'inpaint':
+        this.inpaintService = service as InpaintService;
+        break;
+      case 'model-gen':
+        this.modelGenService = service as ModelGenService;
+        break;
+      case 'audio-gen':
+        this.audioGenService = service as AudioGenService;
+        break;
+      case 'video-gen':
+        this.videoGenService = service as VideoGenService;
+        break;
+      case 'llm':
+        this.llmService = service as LLMService;
+        break;
+      case 'agent':
+        this.agentService = service as AgentService;
+        break;
+      case 'web-search':
+        this.webSearchService = service as WebSearchService;
+        break;
+      case 'deepsearch':
+        this.deepSearchService = service as DeepSearchService;
+        break;
     }
     this.adapterRouter?.setProvider(capability, provider, sc);
   }
@@ -200,15 +277,21 @@ export class UnifiedAIClient {
 
     // Set the appropriate API key based on the provider
     if (serviceConfig.providerKeys) {
-      serviceConfig.apiKey = serviceConfig.providerKeys[serviceConfig.provider] || '';
+      serviceConfig.apiKey =
+        serviceConfig.providerKeys[serviceConfig.provider] || '';
     }
 
     // Set the appropriate API URL based on the provider (for local providers)
-    if (serviceConfig.provider === 'koboldcpp' ||
-        serviceConfig.provider === 'llamacpp' ||
-        serviceConfig.provider === 'ollama' ||
-        serviceConfig.provider === 'sglang') {
-      serviceConfig.localApiUrl = serviceConfig.providerKeys?.[serviceConfig.provider] || serviceConfig.localApiUrl || serviceConfig.apiUrl;
+    if (
+      serviceConfig.provider === 'koboldcpp' ||
+      serviceConfig.provider === 'llamacpp' ||
+      serviceConfig.provider === 'ollama' ||
+      serviceConfig.provider === 'sglang'
+    ) {
+      serviceConfig.localApiUrl =
+        serviceConfig.providerKeys?.[serviceConfig.provider] ||
+        serviceConfig.localApiUrl ||
+        serviceConfig.apiUrl;
     }
 
     // Set the appropriate API URL based on the provider (for OpenRouter)
@@ -218,7 +301,8 @@ export class UnifiedAIClient {
 
     // Set API URLs for new providers
     if (serviceConfig.provider === 'nvidia-nim') {
-      serviceConfig.apiUrl = serviceConfig.apiUrl || 'https://integrate.api.nvidia.com/v1';
+      serviceConfig.apiUrl =
+        serviceConfig.apiUrl || 'https://integrate.api.nvidia.com/v1';
     }
 
     if (serviceConfig.provider === 'groq') {
@@ -233,7 +317,9 @@ export class UnifiedAIClient {
       // Cloudflare Workers AI requires account ID in URL
       // Format: https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/...
       // The account_id should be set in the apiUrl or providerKey
-      serviceConfig.apiUrl = serviceConfig.apiUrl || 'https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run';
+      serviceConfig.apiUrl =
+        serviceConfig.apiUrl ||
+        'https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run';
     }
 
     if (serviceConfig.provider === 'fireworks') {
@@ -252,7 +338,7 @@ export class UnifiedAIClient {
     context?: ContextData,
     sessionId?: string,
     images?: string[],
-    conversationHistory?: Message[]
+    conversationHistory?: Message[],
   ): Promise<ApiResponse<Message>> {
     // Check network status
     const isOnline = networkStatusService.isCurrentlyOnline();
@@ -261,7 +347,9 @@ export class UnifiedAIClient {
     if (this.aiService && this.aiConfig) {
       try {
         // Check if provider is a local model or if we're offline
-        const isLocalProvider = this.isLocalModelProvider(this.aiConfig.provider);
+        const isLocalProvider = this.isLocalModelProvider(
+          this.aiConfig.provider,
+        );
         const shouldUseLocal = isLocalProvider || !isOnline;
 
         if (shouldUseLocal) {
@@ -272,19 +360,46 @@ export class UnifiedAIClient {
             content,
             images,
             context,
-            timestamp: Date.now()
+            timestamp: Date.now(),
           };
 
           // Prepare the messages array with conversation history if provided
-          const messagesToSend = conversationHistory ? [...conversationHistory, userMessage] : [userMessage];
+          const messagesToSend = conversationHistory
+            ? [...conversationHistory, userMessage]
+            : [userMessage];
 
           const request: ChatCompletionRequest = {
             messages: messagesToSend,
             context,
-            config: this.aiConfig
+            config: this.aiConfig,
           };
 
+          const startTime = Date.now();
           const response = await this.aiService.chatCompletion(request);
+          const latencyMs = Date.now() - startTime;
+
+          const promptTokens = response.tokensUsed
+            ? Math.max(
+                0,
+                response.tokensUsed - Math.ceil(response.content.length / 4),
+              )
+            : undefined;
+          const completionTokens = response.tokensUsed
+            ? Math.ceil(response.content.length / 4)
+            : undefined;
+          const totalTokens = response.tokensUsed;
+          const messagesWithContext = conversationHistory
+            ? conversationHistory.length + 1
+            : 1;
+          const charsInContext = messagesToSend.reduce(
+            (acc, m) => acc + m.content.length,
+            0,
+          );
+          const contextSize = Math.ceil(charsInContext / 4);
+          const tokensPerSecond =
+            latencyMs > 0 && completionTokens
+              ? completionTokens / (latencyMs / 1000)
+              : undefined;
 
           const assistantMessage: Message = {
             id: `assistant-${Date.now()}`,
@@ -292,12 +407,24 @@ export class UnifiedAIClient {
             content: response.content,
             timestamp: Date.now(),
             context,
-            tokens: response.tokensUsed
-          };
+            tokens: response.tokensUsed,
+            metrics: {
+              latencyMs,
+              promptTokens,
+              completionTokens,
+              totalTokens,
+              contextSize,
+              tokensPerSecond,
+              model: this.aiConfig.model,
+              provider: this.aiConfig.provider as string,
+            },
+          } as Message & { metrics: ResponseMetrics };
+
+          void messagesWithContext;
 
           return {
             success: true,
-            data: assistantMessage
+            data: assistantMessage,
           };
         }
       } catch (error: any) {
@@ -311,7 +438,10 @@ export class UnifiedAIClient {
       try {
         // Get tokens from authentication providers - prioritize Supabase, then Firebase, then API key
         const supabase = await getSupabaseClient();
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        const {
+          data: { session },
+          error: sessionError,
+        } = await supabase.auth.getSession();
         let supabaseToken: string | null = null;
         if (!sessionError && session) {
           supabaseToken = session.access_token;
@@ -320,7 +450,7 @@ export class UnifiedAIClient {
         const firebaseToken = await getFirebaseIdToken();
 
         const headers: Record<string, string> = {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
         };
 
         // Add authentication token in priority order
@@ -334,21 +464,28 @@ export class UnifiedAIClient {
         }
 
         // Prepare the messages array with conversation history if provided
-        const messagesToSend = conversationHistory ? [...conversationHistory, {
-          id: Date.now().toString(),
-          role: 'user',
-          content,
-          images,
-          context,
-          timestamp: Date.now()
-        }] : [{
-          id: Date.now().toString(),
-          role: 'user',
-          content,
-          images,
-          context,
-          timestamp: Date.now()
-        }];
+        const messagesToSend = conversationHistory
+          ? [
+              ...conversationHistory,
+              {
+                id: Date.now().toString(),
+                role: 'user',
+                content,
+                images,
+                context,
+                timestamp: Date.now(),
+              },
+            ]
+          : [
+              {
+                id: Date.now().toString(),
+                role: 'user',
+                content,
+                images,
+                context,
+                timestamp: Date.now(),
+              },
+            ];
 
         const response = await fetch(`${this.prismApiUrl}/chat`, {
           method: 'POST',
@@ -356,11 +493,11 @@ export class UnifiedAIClient {
           body: JSON.stringify({
             messages: messagesToSend,
             context,
-            sessionId
-          })
+            sessionId,
+          }),
         });
 
-        return await response.json() as Promise<ApiResponse<Message>>;
+        return (await response.json()) as Promise<ApiResponse<Message>>;
       } catch (error: any) {
         console.warn('API request failed:', error.message);
       }
@@ -375,13 +512,13 @@ export class UnifiedAIClient {
           content,
           images,
           context,
-          timestamp: Date.now()
+          timestamp: Date.now(),
         };
 
         const request: ChatCompletionRequest = {
           messages: [userMessage],
           context,
-          config: this.aiConfig
+          config: this.aiConfig,
         };
 
         const response = await this.aiService.chatCompletion(request);
@@ -392,28 +529,28 @@ export class UnifiedAIClient {
           content: response.content,
           timestamp: Date.now(),
           context,
-          tokens: response.tokensUsed
+          tokens: response.tokensUsed,
         };
 
         return {
           success: true,
-          data: assistantMessage
+          data: assistantMessage,
         };
       } catch (error: any) {
         return {
           success: false,
-          error: error.message || 'Failed to get response from AI provider'
+          error: error.message || 'Failed to get response from AI provider',
         };
       }
     }
 
-  // Finally, return an error if no method worked
-  return {
-    success: false,
-    error: isOnline
-      ? 'No API configuration found and local model failed'
-      : 'Offline and no local model configured or available'
-  };
+    // Finally, return an error if no method worked
+    return {
+      success: false,
+      error: isOnline
+        ? 'No API configuration found and local model failed'
+        : 'Offline and no local model configured or available',
+    };
   }
 
   /**
@@ -434,7 +571,7 @@ export class UnifiedAIClient {
       addressedCharacterIds?: string[]; // For selective: which characters were @mentioned
       allowSelfInteractions?: boolean; // Whether characters can reference each other
       maxResponsesPerTurn?: number; // Limit responses in reactive mode
-    }
+    },
   ): Promise<ApiResponse<GroupChatResponse>> {
     const respondingCharacterIds: string[] = [];
     const messages: Message[] = [];
@@ -444,26 +581,38 @@ export class UnifiedAIClient {
         // Single LLM call with next-character prompt appended
         const speakingId = options?.speakingCharacterId ?? characters[0]?.id;
         if (!speakingId) {
-          return { success: false, error: 'No speaking character specified for round-robin mode' };
+          return {
+            success: false,
+            error: 'No speaking character specified for round-robin mode',
+          };
         }
-        const speakingChar = characters.find(c => c.id === speakingId);
-if (!speakingChar) {
-      return { success: false, error: `Character ${speakingId} not found` };
-    }
+        const speakingChar = characters.find((c) => c.id === speakingId);
+        if (!speakingChar) {
+          return { success: false, error: `Character ${speakingId} not found` };
+        }
 
-    const userMessage: Message = {
-      id: `msg_${Date.now()}`,
-      role: 'user',
-      content,
-      images,
-      context: assembledContext.messages.length > 0 ? assembledContext.messages[0]?.context : undefined,
-      timestamp: Date.now(),
-    };
+        const userMessage: Message = {
+          id: `msg_${Date.now()}`,
+          role: 'user',
+          content,
+          images,
+          context:
+            assembledContext.messages.length > 0
+              ? assembledContext.messages[0]?.context
+              : undefined,
+          timestamp: Date.now(),
+        };
 
         const messagesToSend = [...assembledContext.messages, userMessage];
 
         // Use the underlying AI service or API
-        const result = await this.sendMessage(content, undefined, sessionId, images, messagesToSend);
+        const result = await this.sendMessage(
+          content,
+          undefined,
+          sessionId,
+          images,
+          messagesToSend,
+        );
 
         if (result.success && result.data) {
           const assistantMessage: Message = {
@@ -473,7 +622,10 @@ if (!speakingChar) {
           respondingCharacterIds.push(speakingId);
           messages.push(assistantMessage);
         } else {
-          return { success: false, error: result.error || 'Round-robin group message failed' };
+          return {
+            success: false,
+            error: result.error || 'Round-robin group message failed',
+          };
         }
       } else if (mode === 'reactive') {
         // Sequential per-character calls; each sees the previous character's response
@@ -481,18 +633,28 @@ if (!speakingChar) {
         const charsToRespond = characters.slice(0, maxResponses);
 
         for (const char of charsToRespond) {
-              const userMsg: Message = {
+          const userMsg: Message = {
             id: `${Date.now()}-user`,
             role: 'user',
             content,
             images,
-            timestamp: Date.now()
+            timestamp: Date.now(),
           };
 
           // Include prior group responses in the conversation history
-          const historyWithPriorResponses = [...assembledContext.messages, userMsg, ...messages];
+          const historyWithPriorResponses = [
+            ...assembledContext.messages,
+            userMsg,
+            ...messages,
+          ];
 
-          const result = await this.sendMessage(content, undefined, sessionId, images, historyWithPriorResponses);
+          const result = await this.sendMessage(
+            content,
+            undefined,
+            sessionId,
+            images,
+            historyWithPriorResponses,
+          );
 
           if (result.success && result.data) {
             const charMessage: Message = {
@@ -507,10 +669,15 @@ if (!speakingChar) {
       } else if (mode === 'selective') {
         // Only addressed characters respond
         const addressedIds = options?.addressedCharacterIds ?? [];
-        const charsToRespond = characters.filter(c => addressedIds.includes(c.id));
+        const charsToRespond = characters.filter((c) =>
+          addressedIds.includes(c.id),
+        );
 
         if (charsToRespond.length === 0) {
-          return { success: false, error: 'No addressed characters specified for selective mode' };
+          return {
+            success: false,
+            error: 'No addressed characters specified for selective mode',
+          };
         }
 
         for (const char of charsToRespond) {
@@ -519,12 +686,22 @@ if (!speakingChar) {
             role: 'user',
             content,
             images,
-            timestamp: Date.now()
+            timestamp: Date.now(),
           };
 
-          const historyWithPriorResponses = [...assembledContext.messages, userMsg, ...messages];
+          const historyWithPriorResponses = [
+            ...assembledContext.messages,
+            userMsg,
+            ...messages,
+          ];
 
-          const result = await this.sendMessage(content, undefined, sessionId, images, historyWithPriorResponses);
+          const result = await this.sendMessage(
+            content,
+            undefined,
+            sessionId,
+            images,
+            historyWithPriorResponses,
+          );
 
           if (result.success && result.data) {
             const charMessage: Message = {
@@ -543,12 +720,12 @@ if (!speakingChar) {
           messages,
           mode,
           respondingCharacterIds,
-        }
+        },
       };
     } catch (error: any) {
       return {
         success: false,
-        error: error.message || 'Group chat message failed'
+        error: error.message || 'Group chat message failed',
       };
     }
   }
@@ -560,7 +737,7 @@ if (!speakingChar) {
       'llamacpp',
       'ollama',
       'sglang',
-      'transformers'
+      'transformers',
     ];
     return localProviders.includes(provider);
   }
@@ -590,7 +767,7 @@ if (!speakingChar) {
       return await this.aiService.getAvailableModels();
     }
     // Return default models if service is not initialized
-    switch(this.aiConfig?.provider) {
+    switch (this.aiConfig?.provider) {
       case 'openai':
         return ['gpt-3.5-turbo', 'gpt-4', 'gpt-4o', 'gpt-4-turbo'];
       case 'gemini':
@@ -598,26 +775,71 @@ if (!speakingChar) {
       case 'qwen':
         return ['qwen-max', 'qwen-plus', 'qwen-turbo', 'qwen-7b', 'qwen-14b'];
       case 'prism-api':
-        return ['gpt-3.5-turbo', 'gpt-4', 'gpt-4o', 'gemini-pro', 'gemini-1.5-pro', 'qwen-max', 'qwen-plus'];
+        return [
+          'gpt-3.5-turbo',
+          'gpt-4',
+          'gpt-4o',
+          'gemini-pro',
+          'gemini-1.5-pro',
+          'qwen-max',
+          'qwen-plus',
+        ];
       case 'koboldcpp':
-        return ['llama-2-7b', 'llama-2-13b', 'llama-2-70b', 'mistral-7b', 'mixtral-8x7b', 'vicuna-7b', 'vicuna-13b'];
+        return [
+          'llama-2-7b',
+          'llama-2-13b',
+          'llama-2-70b',
+          'mistral-7b',
+          'mixtral-8x7b',
+          'vicuna-7b',
+          'vicuna-13b',
+        ];
       case 'llamacpp':
-        return ['llama-2-7b', 'llama-2-13b', 'llama-3-8b', 'mistral-7b', 'mixtral-8x7b', 'phi-2', 'gemma-2b', 'gemma-7b'];
+        return [
+          'llama-2-7b',
+          'llama-2-13b',
+          'llama-3-8b',
+          'mistral-7b',
+          'mixtral-8x7b',
+          'phi-2',
+          'gemma-2b',
+          'gemma-7b',
+        ];
       case 'ollama':
         return ['llama2', 'llama3', 'mistral', 'mixtral', 'gemma', 'phi'];
       case 'sglang':
-        return ['llama-2-7b', 'llama-2-13b', 'llama-3-8b', 'mistral-7b', 'mixtral-8x7b'];
+        return [
+          'llama-2-7b',
+          'llama-2-13b',
+          'llama-3-8b',
+          'mistral-7b',
+          'mixtral-8x7b',
+        ];
       case 'transformers':
-        return ['microsoft/DialoGPT-medium', 'microsoft/DialoGPT-large', 'facebook/blenderbot-400M-distill', 'gpt2'];
+        return [
+          'microsoft/DialoGPT-medium',
+          'microsoft/DialoGPT-large',
+          'facebook/blenderbot-400M-distill',
+          'gpt2',
+        ];
       case 'claude':
-        return ['claude-3-5-sonnet-20241022', 'claude-3-sonnet-20240229', 'claude-3-opus-20240229', 'claude-3-haiku-20240307'];
+        return [
+          'claude-3-5-sonnet-20241022',
+          'claude-3-sonnet-20240229',
+          'claude-3-opus-20240229',
+          'claude-3-haiku-20240307',
+        ];
       case 'deepseek':
         return ['deepseek-chat', 'deepseek-coder'];
       case 'grok':
         return ['grok-beta', 'grok-1', 'grok-1.5'];
       case 'openrouter':
         if (!this.aiService) {
-          return ['openchat/openchat-7b', 'neversleep/noromaid-mixtral-8x7b', 'microsoft/wizardlm-2-8x22b'];
+          return [
+            'openchat/openchat-7b',
+            'neversleep/noromaid-mixtral-8x7b',
+            'microsoft/wizardlm-2-8x22b',
+          ];
         }
         return await (this.aiService as any).getOpenrouterModels();
       case 'poe':
@@ -628,18 +850,23 @@ if (!speakingChar) {
   }
 
   // Sync methods for chat history and configuration
-  async syncMessages(messages: Message[]): Promise<ApiResponse<{ message: string; count: number }>> {
+  async syncMessages(
+    messages: Message[],
+  ): Promise<ApiResponse<{ message: string; count: number }>> {
     if (!this.prismApiUrl) {
       return {
         success: false,
-        error: 'No API configuration found'
+        error: 'No API configuration found',
       };
     }
 
     try {
       // Get tokens from authentication providers - prioritize Supabase, then Firebase, then API key
       const supabase = await getSupabaseClient();
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
       let supabaseToken: string | null = null;
       if (!sessionError && session) {
         supabaseToken = session.access_token;
@@ -648,7 +875,7 @@ if (!speakingChar) {
       const firebaseToken = await getFirebaseIdToken();
 
       const headers: Record<string, string> = {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
       };
 
       // Add authentication token in priority order
@@ -664,30 +891,37 @@ if (!speakingChar) {
       const response = await fetch(`${this.prismApiUrl}/sync/messages`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ messages })
+        body: JSON.stringify({ messages }),
       });
 
-      return await response.json() as Promise<ApiResponse<{ message: string; count: number }>>;
+      return (await response.json()) as Promise<
+        ApiResponse<{ message: string; count: number }>
+      >;
     } catch (error: any) {
       return {
         success: false,
-        error: error.message || 'Failed to sync messages'
+        error: error.message || 'Failed to sync messages',
       };
     }
   }
 
-  async syncSessions(sessions: ChatSession[]): Promise<ApiResponse<{ message: string; count: number }>> {
+  async syncSessions(
+    sessions: ChatSession[],
+  ): Promise<ApiResponse<{ message: string; count: number }>> {
     if (!this.prismApiUrl) {
       return {
         success: false,
-        error: 'No API configuration found'
+        error: 'No API configuration found',
       };
     }
 
     try {
       // Get tokens from authentication providers - prioritize Supabase, then Firebase, then API key
       const supabase = await getSupabaseClient();
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
       let supabaseToken: string | null = null;
       if (!sessionError && session) {
         supabaseToken = session.access_token;
@@ -696,7 +930,7 @@ if (!speakingChar) {
       const firebaseToken = await getFirebaseIdToken();
 
       const headers: Record<string, string> = {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
       };
 
       // Add authentication token in priority order
@@ -712,30 +946,37 @@ if (!speakingChar) {
       const response = await fetch(`${this.prismApiUrl}/sync/sessions`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ sessions })
+        body: JSON.stringify({ sessions }),
       });
 
-      return await response.json() as Promise<ApiResponse<{ message: string; count: number }>>;
+      return (await response.json()) as Promise<
+        ApiResponse<{ message: string; count: number }>
+      >;
     } catch (error: any) {
       return {
         success: false,
-        error: error.message || 'Failed to sync sessions'
+        error: error.message || 'Failed to sync sessions',
       };
     }
   }
 
-  async syncPrompts(prompts: PromptShortcut[]): Promise<ApiResponse<{ message: string; count: number }>> {
+  async syncPrompts(
+    prompts: PromptShortcut[],
+  ): Promise<ApiResponse<{ message: string; count: number }>> {
     if (!this.prismApiUrl) {
       return {
         success: false,
-        error: 'No API configuration found'
+        error: 'No API configuration found',
       };
     }
 
     try {
       // Get tokens from authentication providers - prioritize Supabase, then Firebase, then API key
       const supabase = await getSupabaseClient();
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
       let supabaseToken: string | null = null;
       if (!sessionError && session) {
         supabaseToken = session.access_token;
@@ -744,7 +985,7 @@ if (!speakingChar) {
       const firebaseToken = await getFirebaseIdToken();
 
       const headers: Record<string, string> = {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
       };
 
       // Add authentication token in priority order
@@ -760,34 +1001,41 @@ if (!speakingChar) {
       const response = await fetch(`${this.prismApiUrl}/sync/prompts`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ prompts })
+        body: JSON.stringify({ prompts }),
       });
 
-      return await response.json() as Promise<ApiResponse<{ message: string; count: number }>>;
+      return (await response.json()) as Promise<
+        ApiResponse<{ message: string; count: number }>
+      >;
     } catch (error: any) {
       return {
         success: false,
-        error: error.message || 'Failed to sync prompts'
+        error: error.message || 'Failed to sync prompts',
       };
     }
   }
 
-  async getSyncedData(): Promise<ApiResponse<{
-    messages: Message[];
-    sessions: ChatSession[];
-    prompts: PromptShortcut[];
-  }>> {
+  async getSyncedData(): Promise<
+    ApiResponse<{
+      messages: Message[];
+      sessions: ChatSession[];
+      prompts: PromptShortcut[];
+    }>
+  > {
     if (!this.prismApiUrl) {
       return {
         success: false,
-        error: 'No API configuration found'
+        error: 'No API configuration found',
       };
     }
 
     try {
       // Get tokens from authentication providers - prioritize Supabase, then Firebase, then API key
       const supabase = await getSupabaseClient();
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
       let supabaseToken: string | null = null;
       if (!sessionError && session) {
         supabaseToken = session.access_token;
@@ -796,7 +1044,7 @@ if (!speakingChar) {
       const firebaseToken = await getFirebaseIdToken();
 
       const headers: Record<string, string> = {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
       };
 
       // Add authentication token in priority order
@@ -811,18 +1059,20 @@ if (!speakingChar) {
 
       const response = await fetch(`${this.prismApiUrl}/sync/data`, {
         method: 'GET',
-        headers
+        headers,
       });
 
-      return await response.json() as Promise<ApiResponse<{
-        messages: Message[];
-        sessions: ChatSession[];
-        prompts: PromptShortcut[];
-      }>>;
+      return (await response.json()) as Promise<
+        ApiResponse<{
+          messages: Message[];
+          sessions: ChatSession[];
+          prompts: PromptShortcut[];
+        }>
+      >;
     } catch (error: any) {
       return {
         success: false,
-        error: error.message || 'Failed to get synced data'
+        error: error.message || 'Failed to get synced data',
       };
     }
   }
@@ -831,14 +1081,17 @@ if (!speakingChar) {
     if (!this.prismApiUrl) {
       return {
         success: false,
-        error: 'No API configuration found'
+        error: 'No API configuration found',
       };
     }
 
     try {
       // Get tokens from authentication providers - prioritize Supabase, then Firebase, then API key
       const supabase = await getSupabaseClient();
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
       let supabaseToken: string | null = null;
       if (!sessionError && session) {
         supabaseToken = session.access_token;
@@ -847,7 +1100,7 @@ if (!speakingChar) {
       const firebaseToken = await getFirebaseIdToken();
 
       const headers: Record<string, string> = {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
       };
 
       // Add authentication token in priority order
@@ -862,19 +1115,23 @@ if (!speakingChar) {
 
       const response = await fetch(`${this.prismApiUrl}/sync/clear`, {
         method: 'DELETE',
-        headers
+        headers,
       });
 
-      return await response.json() as Promise<ApiResponse<{ message: string }>>;
+      return (await response.json()) as Promise<
+        ApiResponse<{ message: string }>
+      >;
     } catch (error: any) {
       return {
         success: false,
-        error: error.message || 'Failed to clear synced data'
+        error: error.message || 'Failed to clear synced data',
       };
     }
   }
 
-  async transcribeAudio(audioBlob: Blob): Promise<ApiResponse<AudioTranscriptionResponse>> {
+  async transcribeAudio(
+    audioBlob: Blob,
+  ): Promise<ApiResponse<AudioTranscriptionResponse>> {
     try {
       if (!this.aiService) {
         return { success: false, error: 'AI service not initialized' };
@@ -888,22 +1145,32 @@ if (!speakingChar) {
     }
   }
 
-  async textToSpeech(text: string, options?: TTSOptions): Promise<ApiResponse<Blob>> {
+  async textToSpeech(
+    text: string,
+    options?: TTSOptions,
+  ): Promise<ApiResponse<Blob>> {
     try {
       if (!this.aiService) {
         return { success: false, error: 'AI service not initialized' };
       }
 
       const config = this.getAudioServiceConfig();
-      const audioBlob = await this.aiService.textToSpeech(text, options || {}, config);
+      const audioBlob = await this.aiService.textToSpeech(
+        text,
+        options || {},
+        config,
+      );
       return { success: true, data: audioBlob };
     } catch (error: any) {
-      return { success: false, error: error.message || 'Text-to-speech failed' };
+      return {
+        success: false,
+        error: error.message || 'Text-to-speech failed',
+      };
     }
   }
 
   private getAudioServiceConfig(): AudioServiceConfig {
-    const config = this.aiConfig || {} as AIConfig;
+    const config = this.aiConfig || ({} as AIConfig);
     return {
       apiKey: config.providerKeys?.['openai'] || config.apiKey || '',
       apiUrl: config.apiUrl || 'https://api.openai.com/v1',
@@ -920,13 +1187,21 @@ if (!speakingChar) {
 
   async ocr(request: OCRRequest): Promise<ApiResponse<OCRResult>> {
     if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(await this.adapterRouter.ocr(request));
+      return this.capabilityResultToApiResponse(
+        await this.adapterRouter.ocr(request),
+      );
     }
     if (!this.ocrService) {
-      return { success: false, error: 'OCR service not initialized — use setCapabilityProvider("ocr", provider)' };
+      return {
+        success: false,
+        error:
+          'OCR service not initialized — use setCapabilityProvider("ocr", provider)',
+      };
     }
     try {
-      return this.capabilityResultToApiResponse(await this.ocrService.recognize(request));
+      return this.capabilityResultToApiResponse(
+        await this.ocrService.recognize(request),
+      );
     } catch (error: any) {
       return { success: false, error: error.message || 'OCR failed' };
     }
@@ -934,13 +1209,21 @@ if (!speakingChar) {
 
   async stt(request: STTRequest): Promise<ApiResponse<STTResult>> {
     if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(await this.adapterRouter.stt(request));
+      return this.capabilityResultToApiResponse(
+        await this.adapterRouter.stt(request),
+      );
     }
     if (!this.sttService) {
-      return { success: false, error: 'STT service not initialized — use setCapabilityProvider("stt", provider)' };
+      return {
+        success: false,
+        error:
+          'STT service not initialized — use setCapabilityProvider("stt", provider)',
+      };
     }
     try {
-      return this.capabilityResultToApiResponse(await this.sttService.transcribe(request));
+      return this.capabilityResultToApiResponse(
+        await this.sttService.transcribe(request),
+      );
     } catch (error: any) {
       return { success: false, error: error.message || 'STT failed' };
     }
@@ -948,13 +1231,21 @@ if (!speakingChar) {
 
   async tts(request: TTSRequest): Promise<ApiResponse<TTSResult>> {
     if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(await this.adapterRouter.tts(request));
+      return this.capabilityResultToApiResponse(
+        await this.adapterRouter.tts(request),
+      );
     }
     if (!this.ttsService) {
-      return { success: false, error: 'TTS service not initialized — use setCapabilityProvider("tts", provider)' };
+      return {
+        success: false,
+        error:
+          'TTS service not initialized — use setCapabilityProvider("tts", provider)',
+      };
     }
     try {
-      return this.capabilityResultToApiResponse(await this.ttsService.synthesize(request));
+      return this.capabilityResultToApiResponse(
+        await this.ttsService.synthesize(request),
+      );
     } catch (error: any) {
       return { success: false, error: error.message || 'TTS failed' };
     }
@@ -962,140 +1253,250 @@ if (!speakingChar) {
 
   async inpaint(request: InpaintRequest): Promise<ApiResponse<InpaintResult>> {
     if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(await this.adapterRouter.inpaint(request));
+      return this.capabilityResultToApiResponse(
+        await this.adapterRouter.inpaint(request),
+      );
     }
     if (!this.inpaintService) {
-      return { success: false, error: 'Inpaint service not initialized — use setCapabilityProvider("inpaint", provider)' };
+      return {
+        success: false,
+        error:
+          'Inpaint service not initialized — use setCapabilityProvider("inpaint", provider)',
+      };
     }
     try {
-      return this.capabilityResultToApiResponse(await this.inpaintService.inpaint(request));
+      return this.capabilityResultToApiResponse(
+        await this.inpaintService.inpaint(request),
+      );
     } catch (error: any) {
       return { success: false, error: error.message || 'Inpaint failed' };
     }
   }
 
-  async modelGen(request: ModelGenRequest): Promise<ApiResponse<ModelGenResult>> {
+  async modelGen(
+    request: ModelGenRequest,
+  ): Promise<ApiResponse<ModelGenResult>> {
     if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(await this.adapterRouter.modelGen(request));
+      return this.capabilityResultToApiResponse(
+        await this.adapterRouter.modelGen(request),
+      );
     }
     if (!this.modelGenService) {
-      return { success: false, error: 'Model-gen service not initialized — use setCapabilityProvider("model-gen", provider)' };
+      return {
+        success: false,
+        error:
+          'Model-gen service not initialized — use setCapabilityProvider("model-gen", provider)',
+      };
     }
     try {
-      return this.capabilityResultToApiResponse(await this.modelGenService.generate(request));
+      return this.capabilityResultToApiResponse(
+        await this.modelGenService.generate(request),
+      );
     } catch (error: any) {
-      return { success: false, error: error.message || 'Model generation failed' };
+      return {
+        success: false,
+        error: error.message || 'Model generation failed',
+      };
     }
   }
 
-  async audioGen(request: AudioGenRequest): Promise<ApiResponse<AudioGenResult>> {
+  async audioGen(
+    request: AudioGenRequest,
+  ): Promise<ApiResponse<AudioGenResult>> {
     if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(await this.adapterRouter.audioGen(request));
+      return this.capabilityResultToApiResponse(
+        await this.adapterRouter.audioGen(request),
+      );
     }
     if (!this.audioGenService) {
-      return { success: false, error: 'Audio-gen service not initialized — use setCapabilityProvider("audio-gen", provider)' };
+      return {
+        success: false,
+        error:
+          'Audio-gen service not initialized — use setCapabilityProvider("audio-gen", provider)',
+      };
     }
     try {
-      return this.capabilityResultToApiResponse(await this.audioGenService.generate(request));
+      return this.capabilityResultToApiResponse(
+        await this.audioGenService.generate(request),
+      );
     } catch (error: any) {
-      return { success: false, error: error.message || 'Audio generation failed' };
+      return {
+        success: false,
+        error: error.message || 'Audio generation failed',
+      };
     }
   }
 
-  async videoGen(request: VideoGenRequest): Promise<ApiResponse<VideoGenResult>> {
+  async videoGen(
+    request: VideoGenRequest,
+  ): Promise<ApiResponse<VideoGenResult>> {
     if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(await this.adapterRouter.videoGen(request));
+      return this.capabilityResultToApiResponse(
+        await this.adapterRouter.videoGen(request),
+      );
     }
     if (!this.videoGenService) {
-      return { success: false, error: 'Video-gen service not initialized — use setCapabilityProvider("video-gen", provider)' };
+      return {
+        success: false,
+        error:
+          'Video-gen service not initialized — use setCapabilityProvider("video-gen", provider)',
+      };
     }
     try {
-      return this.capabilityResultToApiResponse(await this.videoGenService.generate(request));
+      return this.capabilityResultToApiResponse(
+        await this.videoGenService.generate(request),
+      );
     } catch (error: any) {
-      return { success: false, error: error.message || 'Video generation failed' };
+      return {
+        success: false,
+        error: error.message || 'Video generation failed',
+      };
     }
   }
 
   async llm(request: LLMRequest): Promise<ApiResponse<LLMResult>> {
     if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(await this.adapterRouter.llm(request));
+      return this.capabilityResultToApiResponse(
+        await this.adapterRouter.llm(request),
+      );
     }
     if (!this.llmService) {
-      return { success: false, error: 'LLM service not initialized — use setCapabilityProvider("llm", provider)' };
+      return {
+        success: false,
+        error:
+          'LLM service not initialized — use setCapabilityProvider("llm", provider)',
+      };
     }
     try {
-      return this.capabilityResultToApiResponse(await this.llmService.complete(request));
+      return this.capabilityResultToApiResponse(
+        await this.llmService.complete(request),
+      );
     } catch (error: any) {
-      return { success: false, error: error.message || 'LLM completion failed' };
+      return {
+        success: false,
+        error: error.message || 'LLM completion failed',
+      };
     }
   }
 
   async agent(request: AgentRequest): Promise<ApiResponse<AgentResult>> {
     if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(await this.adapterRouter.agent(request));
+      return this.capabilityResultToApiResponse(
+        await this.adapterRouter.agent(request),
+      );
     }
     if (!this.agentService) {
-      return { success: false, error: 'Agent service not initialized — use setCapabilityProvider("agent", provider)' };
+      return {
+        success: false,
+        error:
+          'Agent service not initialized — use setCapabilityProvider("agent", provider)',
+      };
     }
     try {
-      return this.capabilityResultToApiResponse(await this.agentService.run(request));
+      return this.capabilityResultToApiResponse(
+        await this.agentService.run(request),
+      );
     } catch (error: any) {
-      return { success: false, error: error.message || 'Agent execution failed' };
+      return {
+        success: false,
+        error: error.message || 'Agent execution failed',
+      };
     }
   }
 
-  async webSearch(request: WebSearchRequest): Promise<ApiResponse<WebSearchResult>> {
+  async webSearch(
+    request: WebSearchRequest,
+  ): Promise<ApiResponse<WebSearchResult>> {
     if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(await this.adapterRouter.webSearch(request));
+      return this.capabilityResultToApiResponse(
+        await this.adapterRouter.webSearch(request),
+      );
     }
     if (!this.webSearchService) {
-      return { success: false, error: 'Web-search service not initialized — use setCapabilityProvider("web-search", provider)' };
+      return {
+        success: false,
+        error:
+          'Web-search service not initialized — use setCapabilityProvider("web-search", provider)',
+      };
     }
     try {
-      return this.capabilityResultToApiResponse(await this.webSearchService.search(request));
+      return this.capabilityResultToApiResponse(
+        await this.webSearchService.search(request),
+      );
     } catch (error: any) {
       return { success: false, error: error.message || 'Web search failed' };
     }
   }
 
-  async deepSearch(request: DeepSearchRequest): Promise<ApiResponse<DeepSearchResult>> {
+  async deepSearch(
+    request: DeepSearchRequest,
+  ): Promise<ApiResponse<DeepSearchResult>> {
     if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(await this.adapterRouter.deepSearch(request));
+      return this.capabilityResultToApiResponse(
+        await this.adapterRouter.deepSearch(request),
+      );
     }
     if (!this.deepSearchService) {
-      return { success: false, error: 'Deepsearch service not initialized — use setCapabilityProvider("deepsearch", provider)' };
+      return {
+        success: false,
+        error:
+          'Deepsearch service not initialized — use setCapabilityProvider("deepsearch", provider)',
+      };
     }
     try {
-      return this.capabilityResultToApiResponse(await this.deepSearchService.research(request));
+      return this.capabilityResultToApiResponse(
+        await this.deepSearchService.research(request),
+      );
     } catch (error: any) {
       return { success: false, error: error.message || 'Deep search failed' };
     }
   }
 
-  async council(request: CouncilRequest): Promise<ApiResponse<CouncilResponse>> {
+  async council(
+    request: CouncilRequest,
+  ): Promise<ApiResponse<CouncilResponse>> {
     if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(await this.adapterRouter.council(request));
+      return this.capabilityResultToApiResponse(
+        await this.adapterRouter.council(request),
+      );
     }
     if (!this.councilService) {
-      return { success: false, error: 'Council service not initialized — use setCapabilityProvider("council", provider)' };
+      return {
+        success: false,
+        error:
+          'Council service not initialized — use setCapabilityProvider("council", provider)',
+      };
     }
     try {
-      return this.capabilityResultToApiResponse(await this.councilService.deliberate(request));
+      return this.capabilityResultToApiResponse(
+        await this.councilService.deliberate(request),
+      );
     } catch (error: any) {
-      return { success: false, error: error.message || 'Council deliberation failed' };
+      return {
+        success: false,
+        error: error.message || 'Council deliberation failed',
+      };
     }
   }
 
-  async multiSend(request: MultiSendRequest): Promise<ApiResponse<MultiSendResponse>> {
+  async multiSend(
+    request: MultiSendRequest,
+  ): Promise<ApiResponse<MultiSendResponse>> {
     if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(await this.adapterRouter.multiSend(request));
+      return this.capabilityResultToApiResponse(
+        await this.adapterRouter.multiSend(request),
+      );
     }
-    return { success: false, error: 'Multi-send requires adapter router — initialize UnifiedAIClient with adapterConfig' };
+    return {
+      success: false,
+      error:
+        'Multi-send requires adapter router — initialize UnifiedAIClient with adapterConfig',
+    };
   }
 
   multiSendToSwipes(response: MultiSendResponse): MessageSwipe[] {
     return response.responses
-      .filter(r => !r.error && r.content)
+      .filter((r) => !r.error && r.content)
       .map((r, i) => ({
         id: `ms_${Date.now()}_${i}`,
         content: r.content,
@@ -1106,14 +1507,20 @@ if (!speakingChar) {
 
   async debate(request: DebateRequest): Promise<ApiResponse<DebateResult>> {
     if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(await this.adapterRouter.debate(request));
+      return this.capabilityResultToApiResponse(
+        await this.adapterRouter.debate(request),
+      );
     }
-    return { success: false, error: 'Debate requires adapter router — initialize UnifiedAIClient with adapterConfig' };
+    return {
+      success: false,
+      error:
+        'Debate requires adapter router — initialize UnifiedAIClient with adapterConfig',
+    };
   }
 
   debateToMessages(result: DebateResult): Message[] {
     return result.turns
-      .filter(t => !t.error && t.content)
+      .filter((t) => !t.error && t.content)
       .map((t, i) => ({
         id: `debate_${Date.now()}_${i}`,
         role: 'assistant' as const,

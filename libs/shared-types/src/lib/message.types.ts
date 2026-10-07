@@ -7,6 +7,19 @@ export interface Message {
   timestamp: number;
   tokens?: number;
   characterId?: string;
+  metrics?: ResponseMetrics;
+}
+
+export interface ResponseMetrics {
+  tokensPerSecond?: number;
+  latencyMs?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  contextSize?: number;
+  finishReason?: string;
+  model?: string;
+  provider?: string;
 }
 
 export interface ContextData {
