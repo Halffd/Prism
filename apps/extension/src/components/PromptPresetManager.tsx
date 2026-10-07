@@ -1,13 +1,18 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import type { RootState } from '@prism/redux-store';
 import {
+  setPresets,
   addPreset,
   updatePreset,
   removePreset,
   setActivePreset,
 } from '@prism/redux-store';
-import { savePromptPreset, deletePromptPreset } from '@prism/shared-db';
+import {
+  savePromptPreset,
+  deletePromptPreset,
+  getAllPromptPresets,
+} from '@prism/shared-db';
 import type {
   PromptPreset,
   PromptEntry,
@@ -285,11 +290,23 @@ export function PromptPresetManager() {
   );
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (presets.length === 0) {
+      getAllPromptPresets()
+        .then((list) => {
+          if (list.length > 0) dispatch(setPresets(list));
+        })
+        .catch((err) =>
+          console.warn('Failed to load prompt presets from DB:', err),
+        );
+    }
+  }, [presets.length, dispatch]);
+
   return (
     <div className="st-preset-manager">
-      {editingId !== undefined && editingId !== null ? (
+      {editingId !== null && (
         <PresetEditor presetId={editingId} onClose={() => setEditingId(null)} />
-      ) : editingId === null && editingId !== undefined ? null : null}
+      )}
 
       <div className="st-selector-header">
         <span className="st-selector-label">PROMPT PRESETS</span>
