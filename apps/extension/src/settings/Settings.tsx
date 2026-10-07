@@ -8,6 +8,7 @@ import {
   AICapability,
 } from '@prism/shared-types';
 import { UnifiedAIClient } from '@prism/api-client';
+import { ModelRecentsEditor } from './ModelRecentsEditor';
 import {
   getSetting,
   saveSetting,
@@ -362,6 +363,17 @@ export function Settings({ onClose }: SettingsProps) {
       const client = new UnifiedAIClient({ aiConfig: tempConfig });
       const models = await client.getAvailableModels();
       setAvailableModels(models);
+
+      // Cache fetched models per provider so they persist across provider switches
+      setAiConfig((prev) => ({
+        ...prev,
+        modelCache: {
+          ...(prev.modelCache ?? {}),
+          [prev.provider]: Array.from(
+            new Set([...(prev.modelCache?.[prev.provider] ?? []), ...models]),
+          ),
+        },
+      }));
     } catch (error) {
       console.error('Error fetching available models:', error);
       alert(
@@ -1628,11 +1640,13 @@ export function Settings({ onClose }: SettingsProps) {
               onChange={(e) =>
                 setAiConfig({ ...aiConfig, model: e.target.value })
               }
-              placeholder="e.g., gpt-3.5-turbo, gemini-pro, qwen-max"
+              placeholder="e.g., gpt-5, claude-sonnet-4-6, llama3.3"
               className="form-control"
             />
             <small className="form-hint">
-              Specify the model to use with the current provider
+              Free-form model name — not validated against a hardcoded list. Use{' '}
+              <strong>Fetch Available Models</strong> to see what your provider
+              exposes, or enter any valid model ID.
             </small>
           </div>
 
@@ -1662,6 +1676,16 @@ export function Settings({ onClose }: SettingsProps) {
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Per-provider model list (user-editable cache of what "Fetch Available Models" returned) */}
+          <div className="form-group">
+            <label>Recent Models (per provider)</label>
+            <ModelRecentsEditor aiConfig={aiConfig} setAiConfig={setAiConfig} />
+            <small className="form-hint">
+              Manage the cached model list for each provider — useful for adding
+              aliases or removing stale entries.
+            </small>
           </div>
         </div>
 

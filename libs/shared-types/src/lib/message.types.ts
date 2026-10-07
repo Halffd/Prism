@@ -184,6 +184,7 @@ export interface AIConfig {
   mode?: AIMode;
   capabilityModes?: Partial<Record<AICapability, AIMode>>;
   systemPrompt?: string;
+  modelCache?: Record<string, string[]>;
 }
 
 export type PopupDisplayMode = 'popup' | 'sidebar' | 'iframe' | 'floating';

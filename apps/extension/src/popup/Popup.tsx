@@ -389,7 +389,7 @@ export function Popup() {
         ]);
         let currentFontScale = 1.0;
         if (result.fontScale) {
-          currentFontScale = Math.max(0.5, Math.min(2.0, result.fontScale)); // Clamp between 0.5 and 2.0
+          currentFontScale = Math.max(0.5, Math.min(8.0, result.fontScale)); // Clamp between 0.5 and 2.0
         }
 
         // Apply font scale to the document root (for the popup)
@@ -903,7 +903,7 @@ export function Popup() {
         // Calculate new scale and clamp between 0.5 and 2.0
         currentFontScale = Math.max(
           0.5,
-          Math.min(2.0, currentFontScale + delta),
+          Math.min(8.0, currentFontScale + delta),
         );
 
         // Apply font scale to the document root (for the popup)

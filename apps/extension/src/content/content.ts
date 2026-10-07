@@ -66,7 +66,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.type === 'UPDATE_FONT_SCALE') {
-    currentFontScale = Math.max(0.5, Math.min(2.0, request.scale));
+    currentFontScale = Math.max(0.5, Math.min(8.0, request.scale));
     applyFontScale();
     return true;
   }
@@ -1047,7 +1047,7 @@ async function initializeFontScale() {
   try {
     const result = await chrome.storage.local.get(['fontScale']);
     if (result.fontScale) {
-      currentFontScale = Math.max(0.5, Math.min(2.0, result.fontScale)); // Clamp between 0.5 and 2.0
+      currentFontScale = Math.max(0.5, Math.min(8.0, result.fontScale)); // Clamp between 0.5 and 2.0
     }
     applyFontScale();
   } catch (error) {
