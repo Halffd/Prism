@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { MermaidRenderer } from '@prism/ui-components';
+import { MermaidRenderer, Icon } from '@prism/ui-components';
 import { UnifiedAIClient } from '@prism/api-client';
 import {
   saveChatHistory,
@@ -869,12 +869,62 @@ export function ChatPage() {
           </select>
 
           <button onClick={() => setShowMenu(true)} className="menu-btn">
-            📋
+            <Icon name="menu" title="Menu" />
           </button>
           <button onClick={clearHistory} className="clear-btn">
-            🗑️
+            <Icon name="delete" title="Clear chat" />
           </button>
         </div>
+      </div>
+
+      <div className="metrics-bar" data-testid="metrics-bar">
+        <span className="metrics-item">
+          {reduxAIConfig.provider}
+          {reduxAIConfig.model ? ` · ${reduxAIConfig.model}` : ''}
+        </span>
+        {(() => {
+          const tpsSamples = messages
+            .map((m) => m.metrics?.tokensPerSecond)
+            .filter((t): t is number => typeof t === 'number' && t > 0);
+          if (tpsSamples.length === 0) return null;
+          const avg = tpsSamples.reduce((a, b) => a + b, 0) / tpsSamples.length;
+          return <span className="metrics-item">{avg.toFixed(1)} tok/s</span>;
+        })()}
+        {(() => {
+          const last = [...messages]
+            .reverse()
+            .find((m) => m.role === 'assistant' && m.metrics);
+          if (!last?.metrics) return null;
+          return (
+            <>
+              {last.metrics.latencyMs ? (
+                <span className="metrics-item">
+                  {(last.metrics.latencyMs / 1000).toFixed(2)}s
+                </span>
+              ) : null}
+              {last.metrics.totalTokens ? (
+                <span className="metrics-item">
+                  {last.metrics.totalTokens} tok
+                </span>
+              ) : null}
+              {last.metrics.contextSize ? (
+                <span className="metrics-item">
+                  ctx {last.metrics.contextSize}
+                </span>
+              ) : null}
+            </>
+          );
+        })()}
+        {(() => {
+          const sessionTokens = messages.reduce(
+            (sum, m) => sum + (m.tokens ?? Math.ceil(m.content.length / 4)),
+            0,
+          );
+          if (sessionTokens === 0) return null;
+          return (
+            <span className="metrics-item">session {sessionTokens} tok</span>
+          );
+        })()}
       </div>
 
       <div className="messages-container">
@@ -1172,7 +1222,7 @@ export function ChatPage() {
             className={`mode-toggle-btn ${webSearchEnabled ? 'active' : ''}`}
             title="Web Search"
           >
-            🔍
+            <Icon name="search" title="Web Search" />
           </button>
           <button
             onClick={() => {
@@ -1188,7 +1238,7 @@ export function ChatPage() {
             className={`mode-toggle-btn ${deepSearchEnabled ? 'active' : ''}`}
             title="Deep Research"
           >
-            🔬
+            <Icon name="science" title="Deep Research" />
           </button>
           <button
             onClick={() => {
@@ -1203,7 +1253,7 @@ export function ChatPage() {
             className={`mode-toggle-btn ${councilEnabled ? 'active' : ''}`}
             title="AI Council (multi-model voting)"
           >
-            ⚖️
+            <Icon name="balance" title="AI Council" />
           </button>
           <button
             onClick={sendMessage}
@@ -1211,16 +1261,16 @@ export function ChatPage() {
             className="send-btn"
           >
             {agentInProgress
-              ? '🤖...'
+              ? 'Agent…'
               : debateInProgress
-                ? '🤝...'
+                ? 'Debate…'
                 : multiSendInProgress
-                  ? '🔀...'
+                  ? 'Multi…'
                   : councilInProgress
-                    ? '⚖️...'
+                    ? 'Council…'
                     : loading
-                      ? '⏳'
-                      : '🚀 Send'}
+                      ? '…'
+                      : 'Send'}
           </button>
         </div>
       </div>

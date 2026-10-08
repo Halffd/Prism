@@ -588,3 +588,22 @@
   }
 }
 
+
+// Per-response telemetry strip: provider · model · tok/s · latency · context
+.metrics-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 16px;
+  font-size: 11px;
+  color: var(--on-surface-variant);
+  border-top: 1px solid var(--outline-variant, rgba(255, 255, 255, 0.08));
+  background: var(--surface-container, rgba(20, 18, 24, 0.6));
+
+  .metrics-item {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.85;
+  }
+}

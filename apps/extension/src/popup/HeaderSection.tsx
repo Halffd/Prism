@@ -1,4 +1,5 @@
 import type { AIConfig } from '@prism/shared-types';
+import { Icon } from '@prism/ui-components';
 
 interface HeaderSectionProps {
   context: any;
@@ -163,7 +164,7 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
           className="settings-btn"
           title="Settings"
         >
-          ⚙️
+          <Icon name="settings" title="Settings" />
         </button>
         <button
           onClick={() => {
@@ -172,7 +173,7 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
           className="clear-btn"
           title="Clear Chat"
         >
-          🗑️
+          <Icon name="delete" title="Clear Chat" />
         </button>
         {isAuthenticated ? (
           <div className="flex items-center gap-2">
@@ -184,7 +185,7 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
               className="auth-signout-btn"
               title="Sign Out"
             >
-              👤
+              <Icon name="smart_toy" title="Signed in" />
             </button>
           </div>
         ) : (
@@ -194,7 +195,7 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
             title="Sign In with Google"
             disabled={!isOnline}
           >
-            🔐
+            <Icon name="keyboard" title="Sign In with Google" />
           </button>
         )}
         <span

@@ -463,6 +463,21 @@ export function ChatScreen() {
       ? 'WEB SEARCH'
       : null;
 
+  const sessionTokens = chat.messages.reduce(
+    (sum, m) => sum + (m.tokens ?? Math.ceil(m.content.length / 4)),
+    0,
+  );
+  const assistantWithMetrics = [...chat.messages]
+    .reverse()
+    .find((m) => m.role === 'assistant' && m.metrics);
+  const tpsSamples = chat.messages
+    .map((m) => m.metrics?.tokensPerSecond)
+    .filter((t): t is number => typeof t === 'number' && t > 0);
+  const avgTokensPerSecond =
+    tpsSamples.length > 0
+      ? tpsSamples.reduce((a, b) => a + b, 0) / tpsSamples.length
+      : undefined;
+
   return (
     <Box flexDirection="column">
       <StatusBar
@@ -473,6 +488,9 @@ export function ChatScreen() {
         isGroupChat={st.isGroupChat}
         messageCount={chat.messages.length}
         isOnline={true}
+        sessionTokens={sessionTokens}
+        avgTokensPerSecond={avgTokensPerSecond}
+        lastMetrics={assistantWithMetrics?.metrics ?? null}
       />
 
       {searchModeLabel && (

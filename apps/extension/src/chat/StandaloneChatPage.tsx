@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Icon } from '@prism/ui-components';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { UnifiedAIClient } from '@prism/api-client';
@@ -1222,7 +1223,14 @@ export function StandaloneChatPage() {
                             speaking === msg.id ? 'Stop reading' : 'Read aloud'
                           }
                         >
-                          {speaking === msg.id ? '⏹️' : '🔊'}
+                          <Icon
+                            name={speaking === msg.id ? 'stop' : 'volume_up'}
+                            title={
+                              speaking === msg.id
+                                ? 'Stop reading'
+                                : 'Read aloud'
+                            }
+                          />
                         </button>
                       )}
                     </div>

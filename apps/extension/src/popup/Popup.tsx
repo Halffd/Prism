@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useAuth } from '../auth-provider';
+import { Icon } from '@prism/ui-components';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -1642,7 +1643,7 @@ export function Popup() {
                     onClick={() => deleteSession(session.id)}
                     className="delete-session-btn"
                   >
-                    🗑️
+                    <Icon name="delete" title="Delete session" />
                   </button>
                 </div>
               ))}
@@ -1769,21 +1770,21 @@ export function Popup() {
                       className="prompt-use-btn"
                       title="Use this prompt"
                     >
-                      ✅
+                      <Icon name="check" title="Use this prompt" />
                     </button>
                     <button
                       onClick={() => assignKeyboardShortcut(prompt.id)}
                       className="prompt-keyboard-btn"
                       title="Assign keyboard shortcut"
                     >
-                      ⌨️
+                      <Icon name="keyboard" title="Assign keyboard shortcut" />
                     </button>
                     <button
                       onClick={() => deletePromptShortcutFromDB(prompt.id)}
                       className="prompt-delete-btn"
                       title="Delete this prompt"
                     >
-                      🗑️
+                      <Icon name="delete" title="Delete this prompt" />
                     </button>
                   </div>
                 </div>
@@ -1872,6 +1873,46 @@ export function Popup() {
         autoSyncEnabled={autoSyncEnabled}
       />
 
+      <div className="metrics-bar">
+        <span className="metrics-item">
+          {reduxAIConfig.provider}
+          {reduxAIConfig.model ? ` · ${reduxAIConfig.model}` : ''}
+        </span>
+        {(() => {
+          const tpsSamples = messages
+            .map((m) => m.metrics?.tokensPerSecond)
+            .filter((t): t is number => typeof t === 'number' && t > 0);
+          if (tpsSamples.length === 0) return null;
+          const avg = tpsSamples.reduce((a, b) => a + b, 0) / tpsSamples.length;
+          return <span className="metrics-item">{avg.toFixed(1)} tok/s</span>;
+        })()}
+        {(() => {
+          const last = [...messages]
+            .reverse()
+            .find((m) => m.role === 'assistant' && m.metrics);
+          if (!last?.metrics) return null;
+          return (
+            <>
+              {last.metrics.latencyMs ? (
+                <span className="metrics-item">
+                  {(last.metrics.latencyMs / 1000).toFixed(2)}s
+                </span>
+              ) : null}
+              {last.metrics.totalTokens ? (
+                <span className="metrics-item">
+                  {last.metrics.totalTokens} tok
+                </span>
+              ) : null}
+              {last.metrics.contextSize ? (
+                <span className="metrics-item">
+                  ctx {last.metrics.contextSize}
+                </span>
+              ) : null}
+            </>
+          );
+        })()}
+      </div>
+
       <div className="messages-container">
         {messages.length === 0 ? (
           <div className="empty-state">
@@ -1940,7 +1981,12 @@ export function Popup() {
                     onClick={() => speakMessage(msg)}
                     title={speaking === msg.id ? 'Stop reading' : 'Read aloud'}
                   >
-                    {speaking === msg.id ? '⏹️' : '🔊'}
+                    <Icon
+                      name={speaking === msg.id ? 'stop' : 'volume_up'}
+                      title={
+                        speaking === msg.id ? 'Stop reading' : 'Read aloud'
+                      }
+                    />
                   </button>
                 )}
               </div>
