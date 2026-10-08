@@ -730,7 +730,7 @@ export interface AssembledContext {
     history: number;
     input: number;
   };
-  activatedWorldInfoEntries: string[];
+  activatedWorldInfoEntries: WorldInfoEntry[];
 }
 
 export interface CouncilMember {

@@ -50,14 +50,20 @@ function scanWorldInfo(
 
   const checkEntry = (entry: WorldInfoEntry): boolean => {
     if (!entry.enabled || visited.has(entry.id)) return false;
-    if (entry.probability < 1 && Math.random() > entry.probability) return false;
+    if (entry.probability < 1 && Math.random() > entry.probability)
+      return false;
 
     const haystack = entry.caseSensitive ? scanText : scanText.toLowerCase();
-    const keys = entry.caseSensitive ? entry.keys : entry.keys.map(k => k.toLowerCase());
+    const keys = entry.caseSensitive
+      ? entry.keys
+      : entry.keys.map((k) => k.toLowerCase());
 
-    const primaryMatch = keys.some(k => {
+    const primaryMatch = keys.some((k) => {
       if (entry.matchWholeWords) {
-        const regex = new RegExp(`\\b${escapeRegex(k)}\\b`, entry.caseSensitive ? '' : 'i');
+        const regex = new RegExp(
+          `\\b${escapeRegex(k)}\\b`,
+          entry.caseSensitive ? '' : 'i',
+        );
         return regex.test(haystack);
       }
       return haystack.includes(k);
@@ -66,14 +72,19 @@ function scanWorldInfo(
     if (!primaryMatch) return false;
 
     if (entry.secondaryKeys.length > 0) {
-      const secondaryHaystack = entry.caseSensitive ? scanText : scanText.toLowerCase();
+      const secondaryHaystack = entry.caseSensitive
+        ? scanText
+        : scanText.toLowerCase();
       const secondaryKeys = entry.caseSensitive
         ? entry.secondaryKeys
-        : entry.secondaryKeys.map(k => k.toLowerCase());
-      const secondaryMatch = secondaryKeys.some(k =>
+        : entry.secondaryKeys.map((k) => k.toLowerCase());
+      const secondaryMatch = secondaryKeys.some((k) =>
         entry.matchWholeWords
-          ? new RegExp(`\\b${escapeRegex(k)}\\b`, entry.caseSensitive ? '' : 'i').test(secondaryHaystack)
-          : secondaryHaystack.includes(k)
+          ? new RegExp(
+              `\\b${escapeRegex(k)}\\b`,
+              entry.caseSensitive ? '' : 'i',
+            ).test(secondaryHaystack)
+          : secondaryHaystack.includes(k),
       );
       if (!secondaryMatch) return false;
     }
@@ -83,7 +94,9 @@ function scanWorldInfo(
 
   const pass = (remaining: number): void => {
     let changed = false;
-    for (const entry of entries.sort((a, b) => a.insertionOrder - b.insertionOrder)) {
+    for (const entry of entries.sort(
+      (a, b) => a.insertionOrder - b.insertionOrder,
+    )) {
       if (visited.has(entry.id)) continue;
       if (tokensUsed >= tokenBudget) break;
 
@@ -123,6 +136,7 @@ export function assembleContext(params: {
   config?: Partial<ContextAssemblerConfig>;
 }): AssembledContext {
   const cfg = { ...DEFAULT_ASSEMBLER_CONFIG, ...params.config };
+  const activatedWorldInfo: WorldInfoEntry[] = [];
   const breakdown = {
     system: 0,
     character: 0,
@@ -134,7 +148,12 @@ export function assembleContext(params: {
     input: 0,
   };
 
-  const sections: { position: PromptPosition; role: 'system' | 'user' | 'assistant'; text: string; key: 'system' | 'character' | 'persona' | 'worldInfo' | 'preset' }[] = [];
+  const sections: {
+    position: PromptPosition;
+    role: 'system' | 'user' | 'assistant';
+    text: string;
+    key: 'system' | 'character' | 'persona' | 'worldInfo' | 'preset';
+  }[] = [];
 
   sections.push({
     position: 'system',
@@ -144,13 +163,23 @@ export function assembleContext(params: {
   });
 
   // Multi-character group chat mode
-  if (cfg.includeCharacterCard && params.characters && params.characters.length > 1) {
+  if (
+    cfg.includeCharacterCard &&
+    params.characters &&
+    params.characters.length > 1
+  ) {
     const charBudget = cfg.groupChat?.characterTokenBudget ?? 1024;
     const separator = cfg.groupChat?.characterSeparator ?? '\n---\n';
-    const multiCharText = buildMultiCharacterPrompt(params.characters, charBudget, separator);
+    const multiCharText = buildMultiCharacterPrompt(
+      params.characters,
+      charBudget,
+      separator,
+    );
     // Track per-character token counts
     for (const card of params.characters) {
-      breakdown.characters[card.id] = estimateTokens(truncateToTokenBudget(buildCharacterPrompt(card), charBudget));
+      breakdown.characters[card.id] = estimateTokens(
+        truncateToTokenBudget(buildCharacterPrompt(card), charBudget),
+      );
     }
     sections.push({
       position: cfg.characterCardPosition,
@@ -189,9 +218,16 @@ export function assembleContext(params: {
     });
   }
 
-  if (cfg.includeWorldInfo && params.worldInfoEntries && params.worldInfoEntries.length > 0) {
-    const scanText = params.messages.slice(-5).map(m => m.content).join('\n')
-      + (params.userMessage ? '\n' + params.userMessage : '');
+  if (
+    cfg.includeWorldInfo &&
+    params.worldInfoEntries &&
+    params.worldInfoEntries.length > 0
+  ) {
+    const scanText =
+      params.messages
+        .slice(-5)
+        .map((m) => m.content)
+        .join('\n') + (params.userMessage ? '\n' + params.userMessage : '');
     const { activated, tokensUsed } = scanWorldInfo(
       params.worldInfoEntries,
       scanText,
@@ -200,7 +236,7 @@ export function assembleContext(params: {
       cfg.worldInfoTokenBudget,
     );
     if (activated.length > 0) {
-      const wiText = activated.map(e => e.content).join('\n\n');
+      const wiText = activated.map((e) => e.content).join('\n\n');
       sections.push({
         position: cfg.worldInfoPosition,
         role: 'system',
@@ -208,10 +244,13 @@ export function assembleContext(params: {
         key: 'worldInfo',
       });
       breakdown.worldInfo = tokensUsed;
+      activatedWorldInfo.push(...activated);
     }
   }
 
-  const orderedSections = sections.sort((a, b) => positionOrder(a.position) - positionOrder(b.position));
+  const orderedSections = sections.sort(
+    (a, b) => positionOrder(a.position) - positionOrder(b.position),
+  );
 
   let systemPrompt = '';
   for (const section of orderedSections) {
@@ -221,28 +260,36 @@ export function assembleContext(params: {
     }
   }
 
-  breakdown.history = params.messages.reduce((sum, m) => sum + estimateTokens(m.content), 0);
+  breakdown.history = params.messages.reduce(
+    (sum, m) => sum + estimateTokens(m.content),
+    0,
+  );
   if (params.userMessage) {
     breakdown.input = estimateTokens(params.userMessage);
   }
 
   // Calculate total token count, excluding the characters sub-object
   const { characters: charBreakdown, ...numericBreakdown } = breakdown;
-  const charTotal = charBreakdown ? Object.values(charBreakdown).reduce((sum, v) => sum + v, 0) : 0;
-  const numericTotal = Object.values(numericBreakdown).reduce((sum, v) => sum + v, 0);
+  const charTotal = charBreakdown
+    ? Object.values(charBreakdown).reduce((sum, v) => sum + v, 0)
+    : 0;
+  const numericTotal = Object.values(numericBreakdown).reduce(
+    (sum, v) => sum + v,
+    0,
+  );
 
   return {
     systemPrompt: systemPrompt.trim(),
     messages: params.messages,
     tokenCount: numericTotal + charTotal,
     tokenBreakdown: breakdown,
-    activatedWorldInfoEntries: [],
+    activatedWorldInfoEntries: activatedWorldInfo,
   };
 }
 
 function positionOrder(pos: PromptPosition): number {
   const order: Record<PromptPosition, number> = {
-    'system': 0,
+    system: 0,
     'before-system': 1,
     'after-system': 2,
     'before-char': 3,
@@ -275,9 +322,9 @@ function buildCharacterPrompt(card: CharacterCard): string {
 function buildMultiCharacterPrompt(
   cards: CharacterCard[],
   tokenBudgetPerChar: number = 1024,
-  separator: string = '\n---\n'
+  separator: string = '\n---\n',
 ): string {
-  const rendered = cards.map(card => {
+  const rendered = cards.map((card) => {
     const fullPrompt = buildCharacterPrompt(card);
     return truncateToTokenBudget(fullPrompt, tokenBudgetPerChar);
   });
@@ -295,9 +342,9 @@ function buildPersonaPrompt(persona: PersonaProfile): string {
 
 function buildPresetPrompt(preset: PromptPreset): string {
   const enabled = preset.prompts
-    .filter(p => p.enabled)
+    .filter((p) => p.enabled)
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-  return enabled.map(p => p.content).join('\n\n');
+  return enabled.map((p) => p.content).join('\n\n');
 }
 
 export interface V2CharacterData {
@@ -371,7 +418,9 @@ export function exportV2CharacterCard(card: CharacterCard): V2CharacterData {
   };
 }
 
-export async function importPngCharacterCard(file: File): Promise<CharacterCard> {
+export async function importPngCharacterCard(
+  file: File,
+): Promise<CharacterCard> {
   const arrayBuffer = await file.arrayBuffer();
   const bytes = new Uint8Array(arrayBuffer);
 
@@ -380,9 +429,9 @@ export async function importPngCharacterCard(file: File): Promise<CharacterCard>
   for (let i = 8; i < bytes.length - 8; i++) {
     if (
       bytes[i] === tEXtMarker[0] &&
-      bytes[i+1] === tEXtMarker[1] &&
-      bytes[i+2] === tEXtMarker[2] &&
-      bytes[i+3] === tEXtMarker[3]
+      bytes[i + 1] === tEXtMarker[1] &&
+      bytes[i + 2] === tEXtMarker[2] &&
+      bytes[i + 3] === tEXtMarker[3]
     ) {
       const keyword = new TextDecoder().decode(bytes.slice(i + 4, i + 12));
       if (keyword.startsWith('chara\0')) {
@@ -393,7 +442,9 @@ export async function importPngCharacterCard(file: File): Promise<CharacterCard>
   }
 
   if (charaChunkStart === -1) {
-    throw new Error('No character card data found in PNG. The file may not contain an embedded character card.');
+    throw new Error(
+      'No character card data found in PNG. The file may not contain an embedded character card.',
+    );
   }
 
   let chunkEnd = charaChunkStart;
@@ -411,19 +462,32 @@ export async function importPngCharacterCard(file: File): Promise<CharacterCard>
     return importV2CharacterCard(json);
   }
 
-  const base64Str = new TextDecoder().decode(bytes.slice(charaChunkStart, chunkEnd));
+  const base64Str = new TextDecoder().decode(
+    bytes.slice(charaChunkStart, chunkEnd),
+  );
   const jsonStr = atob(base64Str);
   const json = JSON.parse(jsonStr);
   return importV2CharacterCard(json);
 }
 
-async function extractPngTextChunks(bytes: Uint8Array): Promise<Map<string, string>> {
+async function extractPngTextChunks(
+  bytes: Uint8Array,
+): Promise<Map<string, string>> {
   const result = new Map<string, string>();
   let offset = 8;
 
   while (offset < bytes.length) {
-    const length = (bytes[offset] << 24) | (bytes[offset+1] << 16) | (bytes[offset+2] << 8) | bytes[offset+3];
-    const type = String.fromCharCode(bytes[offset+4], bytes[offset+5], bytes[offset+6], bytes[offset+7]);
+    const length =
+      (bytes[offset] << 24) |
+      (bytes[offset + 1] << 16) |
+      (bytes[offset + 2] << 8) |
+      bytes[offset + 3];
+    const type = String.fromCharCode(
+      bytes[offset + 4],
+      bytes[offset + 5],
+      bytes[offset + 6],
+      bytes[offset + 7],
+    );
 
     if (type === 'tEXt') {
       const chunkData = bytes.slice(offset + 8, offset + 8 + length);
@@ -442,4 +506,9 @@ async function extractPngTextChunks(bytes: Uint8Array): Promise<Map<string, stri
   return result;
 }
 
-export { DEFAULT_ASSEMBLER_CONFIG, estimateTokens, truncateToTokenBudget, buildMultiCharacterPrompt };
+export {
+  DEFAULT_ASSEMBLER_CONFIG,
+  estimateTokens,
+  truncateToTokenBudget,
+  buildMultiCharacterPrompt,
+};

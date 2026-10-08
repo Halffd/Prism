@@ -1,21 +1,19 @@
 /* eslint-disable */
 const { readFileSync } = require('fs');
 
-// Reading the SWC compilation config for the spec files
 const swcJestConfig = JSON.parse(
-  readFileSync(`${__dirname}/.spec.swcrc`, 'utf-8')
+  readFileSync(`${__dirname}/.spec.swcrc`, 'utf-8'),
 );
-
-// Disable .swcrc look-up by SWC core because we're passing in swcJestConfig ourselves
 swcJestConfig.swcrc = false;
 
 module.exports = {
   displayName: '@prism/context-manager',
   preset: '../../jest.preset.js',
-  testEnvironment: 'node',
+  testEnvironment: 'jsdom',
   transform: {
     '^.+\\.[tj]s$': ['@swc/jest', swcJestConfig],
   },
   moduleFileExtensions: ['ts', 'js', 'html'],
+  testMatch: ['<rootDir>/src/**/__tests__/**/*.spec.ts'],
   coverageDirectory: 'test-output/jest/coverage',
 };
