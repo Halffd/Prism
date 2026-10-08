@@ -16,7 +16,13 @@ import {
 import Markdown from 'react-native-markdown-display';
 import { UnifiedAIClient } from '@prism/api-client';
 import type { Message, AIConfig } from '@prism/shared-types';
-import { colors, typography, spacing, elevation, borderRadius } from '../theme/nocturnal-editorial';
+import {
+  colors,
+  typography,
+  spacing,
+  elevation,
+  borderRadius,
+} from '../theme/nocturnal-editorial';
 
 export const storage = {
   getItem: async (key: string): Promise<string | null> => {
@@ -24,7 +30,10 @@ export const storage = {
       return window.localStorage.getItem(key);
     }
     try {
-      const AsyncStorage = await import('@react-native-async-storage/async-storage').then(m => m.default);
+      const AsyncStorage =
+        await import('@react-native-async-storage/async-storage').then(
+          (m) => m.default,
+        );
       return await AsyncStorage.getItem(key);
     } catch (error) {
       console.error('Storage get error:', error);
@@ -37,7 +46,10 @@ export const storage = {
       return;
     }
     try {
-      const AsyncStorage = await import('@react-native-async-storage/async-storage').then(m => m.default);
+      const AsyncStorage =
+        await import('@react-native-async-storage/async-storage').then(
+          (m) => m.default,
+        );
       await AsyncStorage.setItem(key, value);
     } catch (error) {
       console.error('Storage set error:', error);
@@ -56,7 +68,7 @@ const getAIConfig = async (): Promise<AIConfig> => {
   }
   return {
     provider: 'prism-api',
-    apiUrl: process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api'
+    apiUrl: process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api',
   };
 };
 
@@ -64,7 +76,7 @@ const createClient = async (): Promise<UnifiedAIClient> => {
   const aiConfig = await getAIConfig();
   return new UnifiedAIClient({
     aiConfig: aiConfig,
-    prismApiUrl: aiConfig.apiUrl
+    prismApiUrl: aiConfig.apiUrl,
   });
 };
 
@@ -96,7 +108,9 @@ export function ChatScreen({ navigateToSettings }: ChatScreenProps = {}) {
       if (typeof navigator !== 'undefined' && navigator.clipboard) {
         await navigator.clipboard.writeText(content);
       } else {
-        const Clipboard = await import('expo-clipboard').then(m => m.default || m);
+        const Clipboard = await import('expo-clipboard').then(
+          (m) => m.default || m,
+        );
         await Clipboard.setStringAsync(content);
       }
     } catch (err) {
@@ -109,7 +123,7 @@ export function ChatScreen({ navigateToSettings }: ChatScreenProps = {}) {
       setInput(message.content);
     } else if (message.role === 'assistant') {
       const userMessageIndex = messages.findIndex(
-        (msg, idx) => idx < messages.indexOf(message) && msg.role === 'user'
+        (msg, idx) => idx < messages.indexOf(message) && msg.role === 'user',
       );
       if (userMessageIndex !== -1) {
         setInput(messages[userMessageIndex].content);
@@ -122,16 +136,22 @@ export function ChatScreen({ navigateToSettings }: ChatScreenProps = {}) {
     const diffInSeconds = Math.floor((now - timestamp) / 1000);
     if (diffInSeconds < 60) return 'just now';
     if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m ago`;
-    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h ago`;
+    if (diffInSeconds < 86400)
+      return `${Math.floor(diffInSeconds / 3600)}h ago`;
     return `${Math.floor(diffInSeconds / 86400)}d ago`;
   };
 
   const getTimeSinceLastMessage = (currentIndex: number): string | null => {
     if (currentIndex === 0) return null;
-    const diffInSeconds = Math.floor((messages[currentIndex].timestamp - messages[currentIndex - 1].timestamp) / 1000);
+    const diffInSeconds = Math.floor(
+      (messages[currentIndex].timestamp -
+        messages[currentIndex - 1].timestamp) /
+        1000,
+    );
     if (diffInSeconds < 60) return `${diffInSeconds}s after`;
     if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m after`;
-    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h after`;
+    if (diffInSeconds < 86400)
+      return `${Math.floor(diffInSeconds / 3600)}h after`;
     return `${Math.floor(diffInSeconds / 86400)}d after`;
   };
 
@@ -154,7 +174,12 @@ export function ChatScreen({ navigateToSettings }: ChatScreenProps = {}) {
 
   const sendMessage = async () => {
     if (!input.trim()) return;
-    const userMessage: Message = { id: Date.now().toString(), role: 'user', content: input, timestamp: Date.now() };
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: input,
+      timestamp: Date.now(),
+    };
     setMessages((prev) => [...prev, userMessage]);
     setInput('');
     setLoading(true);
@@ -164,18 +189,29 @@ export function ChatScreen({ navigateToSettings }: ChatScreenProps = {}) {
       if (response.success && response.data) {
         setMessages((prev) => [...prev, response.data!]);
       } else {
-        setMessages((prev) => [...prev, {
-          id: `error-${Date.now()}`, role: 'assistant',
-          content: response.error || 'Failed to get response. Please try again later.',
-          timestamp: Date.now(),
-        }]);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `error-${Date.now()}`,
+            role: 'assistant',
+            content:
+              response.error ||
+              'Failed to get response. Please try again later.',
+            timestamp: Date.now(),
+          },
+        ]);
       }
     } catch (error: any) {
-      setMessages((prev) => [...prev, {
-        id: `error-${Date.now()}`, role: 'assistant',
-        content: error.message || 'Network error. Please check your connection.',
-        timestamp: Date.now(),
-      }]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `error-${Date.now()}`,
+          role: 'assistant',
+          content:
+            error.message || 'Network error. Please check your connection.',
+          timestamp: Date.now(),
+        },
+      ]);
     } finally {
       setLoading(false);
     }
@@ -183,9 +219,16 @@ export function ChatScreen({ navigateToSettings }: ChatScreenProps = {}) {
 
   const renderMessage = ({ item, index }: { item: Message; index: number }) => {
     const currentMsgDate = new Date(item.timestamp);
-    const previousMsgDate = index > 0 ? new Date(messages[index - 1].timestamp) : null;
-    const showDateSeparator = !previousMsgDate || currentMsgDate.toDateString() !== previousMsgDate.toDateString();
-    const timeString = currentMsgDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    const previousMsgDate =
+      index > 0 ? new Date(messages[index - 1].timestamp) : null;
+    const showDateSeparator =
+      !previousMsgDate ||
+      currentMsgDate.toDateString() !== previousMsgDate.toDateString();
+    const timeString = currentMsgDate.toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
     const relativeTime = getRelativeTime(item.timestamp);
     const isUser = item.role === 'user';
 
@@ -194,26 +237,47 @@ export function ChatScreen({ navigateToSettings }: ChatScreenProps = {}) {
         {showDateSeparator && (
           <View style={styles.dateSeparator}>
             <Text style={styles.dateSeparatorText}>
-              {currentMsgDate.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }).toUpperCase()}
+              {currentMsgDate
+                .toLocaleDateString([], {
+                  weekday: 'long',
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric',
+                })
+                .toUpperCase()}
             </Text>
           </View>
         )}
-        <View style={[styles.messageContainer, isUser ? styles.userMessage : styles.assistantMessage]}>
+        <View
+          style={[
+            styles.messageContainer,
+            isUser ? styles.userMessage : styles.assistantMessage,
+          ]}
+        >
           <View style={styles.messageHeader}>
             <View style={styles.timestampContainer}>
-              <Text style={[styles.timestamp, isUser ? styles.userTimestamp : styles.assistantTimestamp]}>
+              <Text
+                style={[
+                  styles.timestamp,
+                  isUser ? styles.userTimestamp : styles.assistantTimestamp,
+                ]}
+              >
                 {timeString}
               </Text>
-              <Text style={styles.relativeTime}>
-                {relativeTime}
-              </Text>
+              <Text style={styles.relativeTime}>{relativeTime}</Text>
             </View>
             <View style={styles.buttonContainer}>
-              <TouchableOpacity style={styles.iconButton} onPress={() => copyMessageToClipboard(item.content)}>
+              <TouchableOpacity
+                style={styles.iconButton}
+                onPress={() => copyMessageToClipboard(item.content)}
+              >
                 <Text style={styles.iconButtonText}>Copy</Text>
               </TouchableOpacity>
               {item.role === 'assistant' && (
-                <TouchableOpacity style={styles.iconButton} onPress={() => resendMessage(item)}>
+                <TouchableOpacity
+                  style={styles.iconButton}
+                  onPress={() => resendMessage(item)}
+                >
                   <Text style={styles.iconButtonText}>Retry</Text>
                 </TouchableOpacity>
               )}
@@ -227,20 +291,81 @@ export function ChatScreen({ navigateToSettings }: ChatScreenProps = {}) {
           <View style={styles.messageBody}>
             <Markdown
               style={{
-                body: { color: isUser ? colors.on_primary : colors.on_surface, fontSize: typography.body_lg.fontSize, lineHeight: typography.body_lg.lineHeight },
-                heading1: { color: isUser ? colors.on_primary : colors.on_surface, fontSize: typography.headline_lg.fontSize, fontWeight: '700' as const },
-                heading2: { color: isUser ? colors.on_primary : colors.on_surface, fontSize: typography.headline_md.fontSize, fontWeight: '700' as const },
-                heading3: { color: isUser ? colors.on_primary : colors.on_surface, fontSize: typography.title_lg.fontSize, fontWeight: '600' as const },
-                code_block: { backgroundColor: colors.surface_container_lowest, padding: spacing.md, borderRadius: borderRadius.md, color: colors.on_surface_variant },
-                code_inline: { backgroundColor: colors.surface_container, padding: 2, borderRadius: borderRadius.sm, color: colors.tertiary },
+                body: {
+                  color: isUser ? colors.on_primary : colors.on_surface,
+                  fontSize: typography.body_lg.fontSize,
+                  lineHeight: typography.body_lg.lineHeight,
+                },
+                heading1: {
+                  color: isUser ? colors.on_primary : colors.on_surface,
+                  fontSize: typography.headline_lg.fontSize,
+                  fontWeight: '700' as const,
+                },
+                heading2: {
+                  color: isUser ? colors.on_primary : colors.on_surface,
+                  fontSize: typography.headline_md.fontSize,
+                  fontWeight: '700' as const,
+                },
+                heading3: {
+                  color: isUser ? colors.on_primary : colors.on_surface,
+                  fontSize: typography.title_lg.fontSize,
+                  fontWeight: '600' as const,
+                },
+                code_block: {
+                  backgroundColor: colors.surface_container_lowest,
+                  padding: spacing.md,
+                  borderRadius: borderRadius.md,
+                  color: colors.on_surface_variant,
+                },
+                code_inline: {
+                  backgroundColor: colors.surface_container,
+                  padding: 2,
+                  borderRadius: borderRadius.sm,
+                  color: colors.tertiary,
+                },
                 table: { borderWidth: 0 },
-                th: { backgroundColor: colors.surface_container, padding: spacing.sm, fontWeight: '600' as const, color: colors.on_surface },
+                th: {
+                  backgroundColor: colors.surface_container,
+                  padding: spacing.sm,
+                  fontWeight: '600' as const,
+                  color: colors.on_surface,
+                },
                 td: { padding: spacing.sm, color: colors.on_surface_variant },
               }}
-              onLinkPress={(url) => { console.log('Link pressed:', url); return false; }}
+              onLinkPress={(url) => {
+                console.log('Link pressed:', url);
+                return false;
+              }}
             >
               {item.content}
             </Markdown>
+            {!isUser && item.metrics && (
+              <View style={styles.metricsRow}>
+                {item.metrics.model && (
+                  <Text style={styles.metricsText}>{item.metrics.model}</Text>
+                )}
+                {item.metrics.tokensPerSecond ? (
+                  <Text style={styles.metricsText}>
+                    {item.metrics.tokensPerSecond.toFixed(1)} tok/s
+                  </Text>
+                ) : null}
+                {item.metrics.latencyMs ? (
+                  <Text style={styles.metricsText}>
+                    {(item.metrics.latencyMs / 1000).toFixed(2)}s
+                  </Text>
+                ) : null}
+                {item.metrics.totalTokens ? (
+                  <Text style={styles.metricsText}>
+                    {item.metrics.totalTokens} tok
+                  </Text>
+                ) : null}
+                {item.metrics.contextSize ? (
+                  <Text style={styles.metricsText}>
+                    ctx {item.metrics.contextSize}
+                  </Text>
+                ) : null}
+              </View>
+            )}
           </View>
         </View>
       </React.Fragment>
@@ -253,7 +378,10 @@ export function ChatScreen({ navigateToSettings }: ChatScreenProps = {}) {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Prism</Text>
         {navigateToSettings && (
-          <TouchableOpacity style={styles.settingsButton} onPress={navigateToSettings}>
+          <TouchableOpacity
+            style={styles.settingsButton}
+            onPress={navigateToSettings}
+          >
             <Text style={styles.settingsButtonText}>Settings</Text>
           </TouchableOpacity>
         )}
@@ -287,12 +415,17 @@ export function ChatScreen({ navigateToSettings }: ChatScreenProps = {}) {
             editable={!loading}
           />
           <TouchableOpacity
-            style={[styles.sendButton, (loading || !input.trim()) && styles.disabledButton]}
+            style={[
+              styles.sendButton,
+              (loading || !input.trim()) && styles.disabledButton,
+            ]}
             onPress={sendMessage}
             disabled={loading || !input.trim()}
             activeOpacity={0.7}
           >
-            <Text style={styles.sendButtonText}>{loading ? '...' : 'Send'}</Text>
+            <Text style={styles.sendButtonText}>
+              {loading ? '...' : 'Send'}
+            </Text>
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -428,6 +561,21 @@ const styles = StyleSheet.create({
     paddingLeft: spacing.lg,
   },
   messageBody: {},
+  metricsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+    paddingTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.outline_variant ?? 'rgba(255,255,255,0.08)',
+  },
+  metricsText: {
+    fontSize: 10,
+    color: colors.on_surface_variant,
+    opacity: 0.85,
+    fontVariant: ['tabular-nums' as const],
+  },
   inputBar: {
     flexDirection: 'row',
     padding: spacing.lg,
