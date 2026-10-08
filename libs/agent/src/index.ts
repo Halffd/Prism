@@ -41,21 +41,89 @@ export interface ToolExecutor {
 }
 
 export class BuiltinToolExecutor implements ToolExecutor {
+  private webSearchService?: import('@prism/web-search').WebSearchService;
+
+  /** Inject a real search backend (Brave, Tavily, DuckDuckGo…). Falls back to DuckDuckGo which needs no API key. */
+  setWebSearchService(
+    service: import('@prism/web-search').WebSearchService,
+  ): void {
+    this.webSearchService = service;
+  }
+
   async execute(toolName: string, input: string): Promise<string> {
     switch (toolName as BuiltinToolName) {
       case 'web_search':
-        return `[web_search] Query: "${input}" — Connect a WebSearchService to get real results. Stub returns: no results found.`;
+        return this.webSearch(input);
       case 'calculator':
         return this.calc(input);
       case 'fetch_url':
-        return `[fetch_url] URL: "${input}" — Connect an HTTP client to fetch real content. Stub returns: page content not available.`;
+        return this.fetchUrl(input);
       case 'code_eval':
         return this.codeEval(input);
       case 'read_file':
-        return `[read_file] Path: "${input}" — File access not available in sandbox. Stub returns: file not accessible.`;
+        return this.readFile(input);
       default:
         return `Tool "${toolName}" is not a recognized built-in tool. Input: "${input}"`;
     }
+  }
+
+  private async webSearch(query: string): Promise<string> {
+    let service = this.webSearchService;
+    if (!service) {
+      const { DuckDuckGoSearchService } = await import('@prism/web-search');
+      service = new DuckDuckGoSearchService({
+        apiKey: '',
+        provider: 'duckduckgo',
+      });
+    }
+    const result = await service.search({ query, maxResults: 5 });
+    if (!result.ok) return `[web_search] Error: ${result.error}`;
+    if (result.value.results.length === 0)
+      return `[web_search] No results for "${query}"`;
+    return result.value.results
+      .map((r, i) => `[${i + 1}] ${r.title} (${r.url})\n${r.snippet}`)
+      .join('\n\n');
+  }
+
+  private async fetchUrl(url: string): Promise<string> {
+    let parsed: URL;
+    try {
+      parsed = new URL(url.startsWith('http') ? url : `https://${url}`);
+    } catch {
+      return `[fetch_url] Error: invalid URL "${url}"`;
+    }
+    try {
+      const response = await fetch(parsed.toString(), {
+        headers: { 'User-Agent': 'Prism/1.0' },
+      });
+      if (!response.ok) return `[fetch_url] Error: HTTP ${response.status}`;
+      const contentType = response.headers.get('content-type') ?? '';
+      if (!contentType.includes('text/') && !contentType.includes('json')) {
+        return `[fetch_url] Content-Type: ${contentType} — binary content not extracted`;
+      }
+      const text = await response.text();
+      const extracted = contentType.includes('html')
+        ? text
+            .replace(/<script[\s\S]*?<\/script>/gi, '')
+            .replace(/<style[\s\S]*?<\/style>/gi, '')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+        : text.trim();
+      return extracted.length > 4000
+        ? `${extracted.slice(0, 4000)}…[truncated]`
+        : extracted;
+    } catch (err) {
+      return `[fetch_url] Error: ${String(err)}`;
+    }
+  }
+
+  private readFile(path: string): string {
+    // Intentionally denied: the agent runs in a browser/service-worker sandbox
+    // with no filesystem access, and granting raw file reads to a prompt-driven
+    // tool would be a security hole. Route file content through context
+    // attachment instead.
+    return `[read_file] Denied: filesystem access is not available in this sandbox. Attach the file content to the conversation instead of reading "${path}".`;
   }
 
   private calc(input: string): string {
