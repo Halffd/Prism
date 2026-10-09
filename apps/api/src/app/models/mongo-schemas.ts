@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document } from 'mongoose';
-import { Message, ContextData, ChatSession } from '@prism/shared-types';
+import type { ContextData } from '@prism/shared-types';
 
 // User Schema
 export interface IUser extends Document {
@@ -11,14 +11,17 @@ export interface IUser extends Document {
   updatedAt: Date;
 }
 
-const UserSchema: Schema = new Schema({
-  externalId: { type: String, required: true, unique: true },
-  email: { type: String, required: true, unique: true },
-  name: { type: String, required: true },
-  password: { type: String, required: true }
-}, {
-  timestamps: true
-});
+const UserSchema: Schema = new Schema(
+  {
+    externalId: { type: String, required: true, unique: true },
+    email: { type: String, required: true, unique: true },
+    name: { type: String, required: true },
+    password: { type: String, required: true },
+  },
+  {
+    timestamps: true,
+  },
+);
 
 export const User = mongoose.model<IUser>('User', UserSchema);
 
@@ -32,35 +35,38 @@ export interface IMessage extends Document {
   sessionId: mongoose.Types.ObjectId;
 }
 
-const MessageSchema: Schema = new Schema({
-  role: { 
-    type: String, 
-    required: true, 
-    enum: ['user', 'assistant', 'system'] 
-  },
-  content: { type: String, required: true },
-  context: {
-    type: {
+const MessageSchema: Schema = new Schema(
+  {
+    role: {
       type: String,
-      enum: ['page', 'screen', 'selection']
+      required: true,
+      enum: ['user', 'assistant', 'system'],
     },
-    url: String,
-    title: String,
-    selectedText: String,
-    fullText: String,
-    appName: String,
-    metadata: Schema.Types.Mixed
+    content: { type: String, required: true },
+    context: {
+      type: {
+        type: String,
+        enum: ['page', 'screen', 'selection'],
+      },
+      url: String,
+      title: String,
+      selectedText: String,
+      fullText: String,
+      appName: String,
+      metadata: Schema.Types.Mixed,
+    },
+    timestamp: { type: Number, default: Date.now },
+    tokens: Number,
+    sessionId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Session',
+      required: true,
+    },
   },
-  timestamp: { type: Number, default: Date.now },
-  tokens: Number,
-  sessionId: { 
-    type: Schema.Types.ObjectId, 
-    ref: 'Session', 
-    required: true 
-  }
-}, {
-  timestamps: true
-});
+  {
+    timestamps: true,
+  },
+);
 
 MessageSchema.index({ sessionId: 1, timestamp: 1 });
 
@@ -74,19 +80,24 @@ export interface ISession extends Document {
   messages: mongoose.Types.ObjectId[];
 }
 
-const SessionSchema: Schema = new Schema({
-  userId: { 
-    type: Schema.Types.ObjectId, 
-    ref: 'User', 
-    required: true 
+const SessionSchema: Schema = new Schema(
+  {
+    userId: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+    },
+    messages: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: 'Message',
+      },
+    ],
   },
-  messages: [{ 
-    type: Schema.Types.ObjectId, 
-    ref: 'Message' 
-  }]
-}, {
-  timestamps: true
-});
+  {
+    timestamps: true,
+  },
+);
 
 SessionSchema.index({ userId: 1, createdAt: -1 });
 

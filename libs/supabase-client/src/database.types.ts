@@ -2,6 +2,11 @@
 // This file contains the TypeScript definitions for the Supabase database tables
 
 export interface Database {
+  // Required by supabase-js v2.5x+ typed clients; gates PostgREST feature
+  // detection (e.g. upsert defaultToNull) without runtime effect.
+  __InternalSupabase: {
+    PostgrestVersion: '12';
+  };
   public: {
     Tables: {
       users: {
@@ -32,6 +37,7 @@ export interface Database {
           updated_at?: string;
           email_verified?: boolean;
         };
+        Relationships: [];
       };
       sessions: {
         Row: {
@@ -55,6 +61,7 @@ export interface Database {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [];
       };
       messages: {
         Row: {
@@ -90,6 +97,7 @@ export interface Database {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [];
       };
       prompt_shortcuts: {
         Row: {
@@ -125,6 +133,7 @@ export interface Database {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [];
       };
     };
     Views: {
@@ -154,16 +163,19 @@ type Json =
 export type User = Database['public']['Tables']['users']['Row'];
 export type Session = Database['public']['Tables']['sessions']['Row'];
 export type Message = Database['public']['Tables']['messages']['Row'];
-export type PromptShortcut = Database['public']['Tables']['prompt_shortcuts']['Row'];
+export type PromptShortcut =
+  Database['public']['Tables']['prompt_shortcuts']['Row'];
 
 // Insert types
 export type NewUser = Database['public']['Tables']['users']['Insert'];
 export type NewSession = Database['public']['Tables']['sessions']['Insert'];
 export type NewMessage = Database['public']['Tables']['messages']['Insert'];
-export type NewPromptShortcut = Database['public']['Tables']['prompt_shortcuts']['Insert'];
+export type NewPromptShortcut =
+  Database['public']['Tables']['prompt_shortcuts']['Insert'];
 
 // Update types
 export type UpdateUser = Database['public']['Tables']['users']['Update'];
 export type UpdateSession = Database['public']['Tables']['sessions']['Update'];
 export type UpdateMessage = Database['public']['Tables']['messages']['Update'];
-export type UpdatePromptShortcut = Database['public']['Tables']['prompt_shortcuts']['Update'];
+export type UpdatePromptShortcut =
+  Database['public']['Tables']['prompt_shortcuts']['Update'];

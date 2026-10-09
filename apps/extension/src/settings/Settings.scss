@@ -381,3 +381,43 @@
     width: 100%;
   }
 }
+
+// Logging & Monitoring section
+.log-viewer {
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--outline-variant, #49454e);
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+  background: var(--surface-container-lowest, #0f0d13);
+  font-family: var(--font-family-mono, monospace);
+  font-size: 11px;
+
+  .log-entry {
+    display: flex;
+    gap: 8px;
+    padding: 2px 0;
+    color: var(--on-surface-variant, #cbc4cf);
+
+    &--error { color: var(--error, #f2b8b5); }
+    &--warn { color: #ffcc80; }
+    &--debug { opacity: 0.6; }
+
+    .log-entry-level {
+      width: 42px;
+      flex-shrink: 0;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    .log-entry-channel {
+      width: 56px;
+      flex-shrink: 0;
+      opacity: 0.7;
+    }
+    .log-entry-message {
+      flex: 1;
+      word-break: break-word;
+    }
+  }
+}

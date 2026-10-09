@@ -2,8 +2,8 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import admin from 'firebase-admin';
 import { createClient } from '@supabase/supabase-js';
-import { Database } from '../../../../libs/supabase-client/src/database.types';
-import { User as MongoUser } from '../models/mongo-schemas';
+import { Database } from '@prism/supabase-client';
+import { User } from '../models/mongo-schemas';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'prism-demo-secret';
 
@@ -14,7 +14,7 @@ if (!admin.apps.length) {
     if (process.env.FIREBASE_SERVICE_ACCOUNT) {
       const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
       admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount)
+        credential: admin.credential.cert(serviceAccount),
       });
     } else {
       // For development, just initialize without credentials (will restrict functionality)
@@ -31,14 +31,15 @@ if (!admin.apps.length) {
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const supabaseClient = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
-  ? createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-      auth: {
-        autoRefreshToken: false, // Server-side operations
-        persistSession: false,
-      }
-    })
-  : null;
+const supabaseClient =
+  SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
+    ? createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+        auth: {
+          autoRefreshToken: false, // Server-side operations
+          persistSession: false,
+        },
+      })
+    : null;
 
 interface JwtPayload {
   userId: string;
@@ -55,11 +56,17 @@ export interface AuthenticatedRequest extends Request {
   };
 }
 
-export const authenticate = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+export const authenticate = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+) => {
   try {
     // Extract token from header
     const authHeader = req.headers.authorization;
-    const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
+    const token = authHeader?.startsWith('Bearer ')
+      ? authHeader.substring(7)
+      : null;
 
     if (!token) {
       // For demo purposes, allow anonymous access but don't set a user
@@ -69,21 +76,30 @@ export const authenticate = async (req: AuthenticatedRequest, res: Response, nex
     // First, try to verify as a Supabase JWT token
     if (supabaseClient) {
       try {
-        const { data: { user }, error } = await supabaseClient.auth.getUser(token);
+        const {
+          data: { user },
+          error,
+        } = await supabaseClient.auth.getUser(token);
 
         if (!error && user) {
           // Supabase authentication succeeded
           req.user = {
             id: user.id,
             email: user.email || '',
-            name: user.user_metadata?.display_name || user.email?.split('@')[0] || 'Supabase User'
+            name:
+              user.user_metadata?.display_name ||
+              user.email?.split('@')[0] ||
+              'Supabase User',
           };
 
           return next();
         }
       } catch (supabaseError) {
         // If Supabase authentication fails, proceed to try other methods
-        console.debug('Supabase auth failed, trying other methods:', supabaseError);
+        console.debug(
+          'Supabase auth failed, trying other methods:',
+          supabaseError,
+        );
       }
     }
 
@@ -100,21 +116,27 @@ export const authenticate = async (req: AuthenticatedRequest, res: Response, nex
         user = new User({
           externalId: decodedFirebaseUser.uid,
           email: decodedFirebaseUser.email,
-          name: decodedFirebaseUser.name || decodedFirebaseUser.email?.split('@')[0] || 'Firebase User',
-          password: '' // No password for Firebase-authenticated users
+          name:
+            decodedFirebaseUser.name ||
+            decodedFirebaseUser.email?.split('@')[0] ||
+            'Firebase User',
+          password: '', // No password for Firebase-authenticated users
         });
         await user.save();
       } else {
         // Update user info if needed
-        user.email = decodedFirebaseUser.email;
-        user.name = decodedFirebaseUser.name || decodedFirebaseUser.email?.split('@')[0] || 'Firebase User';
+        user.email = decodedFirebaseUser.email ?? user.email;
+        user.name =
+          decodedFirebaseUser.name ||
+          decodedFirebaseUser.email?.split('@')[0] ||
+          'Firebase User';
         await user.save();
       }
 
       req.user = {
         id: user._id.toString(),
         email: user.email,
-        name: user.name
+        name: user.name,
       };
 
       return next();
@@ -128,22 +150,26 @@ export const authenticate = async (req: AuthenticatedRequest, res: Response, nex
         if (!user) {
           return res.status(401).json({
             success: false,
-            error: 'User not found'
+            error: 'User not found',
           });
         }
 
         req.user = {
           id: user._id.toString(),
           email: user.email,
-          name: user.name
+          name: user.name,
         };
 
         return next();
       } catch (jwtError) {
-        console.error('Authentication error - all methods failed:', firebaseError, jwtError);
+        console.error(
+          'Authentication error - all methods failed:',
+          firebaseError,
+          jwtError,
+        );
         return res.status(401).json({
           success: false,
-          error: 'Invalid or expired token'
+          error: 'Invalid or expired token',
         });
       }
     }
@@ -151,42 +177,57 @@ export const authenticate = async (req: AuthenticatedRequest, res: Response, nex
     console.error('Authentication error:', error);
     return res.status(401).json({
       success: false,
-      error: 'Invalid or expired token'
+      error: 'Invalid or expired token',
     });
   }
 };
 
-export const requireAuth = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+export const requireAuth = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+) => {
   try {
     // Extract token from header
     const authHeader = req.headers.authorization;
-    const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
+    const token = authHeader?.startsWith('Bearer ')
+      ? authHeader.substring(7)
+      : null;
 
     if (!token) {
       return res.status(401).json({
         success: false,
-        error: 'Authentication required'
+        error: 'Authentication required',
       });
     }
 
     // First, try to verify as a Supabase JWT token
     if (supabaseClient) {
       try {
-        const { data: { user }, error } = await supabaseClient.auth.getUser(token);
+        const {
+          data: { user },
+          error,
+        } = await supabaseClient.auth.getUser(token);
 
         if (!error && user) {
           // Supabase authentication succeeded
           req.user = {
             id: user.id,
             email: user.email || '',
-            name: user.user_metadata?.display_name || user.email?.split('@')[0] || 'Supabase User'
+            name:
+              user.user_metadata?.display_name ||
+              user.email?.split('@')[0] ||
+              'Supabase User',
           };
 
           return next();
         }
       } catch (supabaseError) {
         // If Supabase authentication fails, proceed to try other methods
-        console.debug('Supabase auth failed, trying other methods:', supabaseError);
+        console.debug(
+          'Supabase auth failed, trying other methods:',
+          supabaseError,
+        );
       }
     }
 
@@ -203,21 +244,27 @@ export const requireAuth = async (req: AuthenticatedRequest, res: Response, next
         user = new User({
           externalId: decodedFirebaseUser.uid,
           email: decodedFirebaseUser.email,
-          name: decodedFirebaseUser.name || decodedFirebaseUser.email?.split('@')[0] || 'Firebase User',
-          password: '' // No password for Firebase-authenticated users
+          name:
+            decodedFirebaseUser.name ||
+            decodedFirebaseUser.email?.split('@')[0] ||
+            'Firebase User',
+          password: '', // No password for Firebase-authenticated users
         });
         await user.save();
       } else {
         // Update user info if needed
-        user.email = decodedFirebaseUser.email;
-        user.name = decodedFirebaseUser.name || decodedFirebaseUser.email?.split('@')[0] || 'Firebase User';
+        user.email = decodedFirebaseUser.email ?? user.email;
+        user.name =
+          decodedFirebaseUser.name ||
+          decodedFirebaseUser.email?.split('@')[0] ||
+          'Firebase User';
         await user.save();
       }
 
       req.user = {
         id: user._id.toString(),
         email: user.email,
-        name: user.name
+        name: user.name,
       };
 
       return next();
@@ -231,22 +278,26 @@ export const requireAuth = async (req: AuthenticatedRequest, res: Response, next
         if (!user) {
           return res.status(401).json({
             success: false,
-            error: 'User not found'
+            error: 'User not found',
           });
         }
 
         req.user = {
           id: user._id.toString(),
           email: user.email,
-          name: user.name
+          name: user.name,
         };
 
         return next();
       } catch (jwtError) {
-        console.error('Authentication error - all methods failed:', firebaseError, jwtError);
+        console.error(
+          'Authentication error - all methods failed:',
+          firebaseError,
+          jwtError,
+        );
         return res.status(401).json({
           success: false,
-          error: 'Invalid or expired token'
+          error: 'Invalid or expired token',
         });
       }
     }
@@ -254,7 +305,7 @@ export const requireAuth = async (req: AuthenticatedRequest, res: Response, next
     console.error('Authentication error:', error);
     return res.status(401).json({
       success: false,
-      error: 'Invalid or expired token'
+      error: 'Invalid or expired token',
     });
   }
 };

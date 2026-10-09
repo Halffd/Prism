@@ -1,13 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
 import { Database } from '@prism/supabase-client';
-import { Message, ContextData } from '@prism/shared-types';
-import { PromptShortcut } from '@prism/shared-db';
+import { Message, ContextData, PromptShortcut } from '@prism/shared-types';
 import { nanoid } from 'nanoid';
 
 // Initialize Supabase client
 const supabaseClient = createClient<Database>(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
 // Define interfaces
@@ -30,27 +29,31 @@ export interface DBMessage {
 }
 
 // Chat history functions
-export async function saveChatHistory(sessionId: string, messages: Message[]): Promise<void> {
+export async function saveChatHistory(
+  sessionId: string,
+  messages: Message[],
+): Promise<void> {
   try {
     // First, get the session to update its title if it exists, or create a new one
     let session = await getSessionById(sessionId);
-    
+
     if (!session) {
       // Create new session with the first message as title (as before)
-      await supabaseClient
-        .from('sessions')
-        .insert([{
+      await supabaseClient.from('sessions').insert([
+        {
           id: sessionId,
           user_id: 'anonymous_user', // This would be replaced with actual user ID when auth is properly implemented
-          title: messages[0]?.content?.substring(0, 100) || `Chat ${Date.now()}`
-        }]);
+          title:
+            messages[0]?.content?.substring(0, 100) || `Chat ${Date.now()}`,
+        },
+      ]);
     } else {
       // Update session if needed
       await supabaseClient
         .from('sessions')
         .update({
           updated_at: new Date().toISOString(),
-          title: session.title // Keep existing title
+          title: session.title, // Keep existing title
         })
         .eq('id', sessionId);
     }
@@ -63,18 +66,22 @@ export async function saveChatHistory(sessionId: string, messages: Message[]): P
 
     if (deleteError) {
       console.error('Error deleting existing messages:', deleteError);
-      throw new Error(`Failed to delete existing messages: ${deleteError.message}`);
+      throw new Error(
+        `Failed to delete existing messages: ${deleteError.message}`,
+      );
     }
 
     // Prepare messages for insertion
-    const messagesToInsert = messages.map(msg => ({
+    type MessageInsert = Database['public']['Tables']['messages']['Insert'];
+    const messagesToInsert: MessageInsert[] = messages.map((msg) => ({
       id: msg.id || nanoid(10), // Use existing ID or generate new one
       session_id: sessionId,
       role: msg.role as 'user' | 'assistant' | 'system',
       content: msg.content,
-      context: msg.context || null,
-      tokens: msg.tokens || null,
-      timestamp: new Date(msg.timestamp).toISOString()
+      // ContextData is JSON-serializable; cast for the typed client
+      context: (msg.context ?? null) as MessageInsert['context'],
+      tokens: msg.tokens ?? null,
+      timestamp: new Date(msg.timestamp).toISOString(),
     }));
 
     // Insert new messages
@@ -82,7 +89,7 @@ export async function saveChatHistory(sessionId: string, messages: Message[]): P
       const { error: insertError } = await supabaseClient
         .from('messages')
         .insert(messagesToInsert);
-        
+
       if (insertError) {
         console.error('Error inserting messages:', insertError);
         throw new Error(`Failed to insert messages: ${insertError.message}`);
@@ -108,13 +115,13 @@ export async function loadChatHistory(sessionId: string): Promise<Message[]> {
     }
 
     // Transform Supabase messages to our Message format
-    const messages = data.map(dbMsg => ({
+    const messages = data.map((dbMsg) => ({
       id: dbMsg.id,
       role: dbMsg.role as 'user' | 'assistant' | 'system',
       content: dbMsg.content,
-      context: dbMsg.context as ContextData | undefined,
+      context: dbMsg.context as unknown as ContextData | undefined,
       timestamp: new Date(dbMsg.timestamp).getTime(),
-      tokens: dbMsg.tokens || undefined
+      tokens: dbMsg.tokens || undefined,
     }));
 
     return messages;
@@ -125,7 +132,9 @@ export async function loadChatHistory(sessionId: string): Promise<Message[]> {
 }
 
 // Session functions
-export async function getChatSessions(userId: string): Promise<DBChatSession[]> {
+export async function getChatSessions(
+  userId: string,
+): Promise<DBChatSession[]> {
   try {
     const { data, error } = await supabaseClient
       .from('sessions')
@@ -139,12 +148,12 @@ export async function getChatSessions(userId: string): Promise<DBChatSession[]> 
     }
 
     // Transform Supabase sessions to our format
-    return data.map(dbSession => ({
+    return data.map((dbSession) => ({
       id: dbSession.id,
       userId: dbSession.user_id,
       title: dbSession.title,
       createdAt: dbSession.created_at,
-      updatedAt: dbSession.updated_at
+      updatedAt: dbSession.updated_at,
     }));
   } catch (error) {
     console.error('Error loading chat sessions:', error);
@@ -152,7 +161,9 @@ export async function getChatSessions(userId: string): Promise<DBChatSession[]> 
   }
 }
 
-export async function getSessionById(id: string): Promise<DBChatSession | null> {
+export async function getSessionById(
+  id: string,
+): Promise<DBChatSession | null> {
   try {
     const { data, error } = await supabaseClient
       .from('sessions')
@@ -161,7 +172,8 @@ export async function getSessionById(id: string): Promise<DBChatSession | null> 
       .single();
 
     if (error) {
-      if (error.code === 'PGRST116') { // Record not found
+      if (error.code === 'PGRST116') {
+        // Record not found
         return null;
       }
       console.error('Error loading session:', error);
@@ -173,7 +185,7 @@ export async function getSessionById(id: string): Promise<DBChatSession | null> 
       userId: data.user_id,
       title: data.title,
       createdAt: data.created_at,
-      updatedAt: data.updated_at
+      updatedAt: data.updated_at,
     };
   } catch (error) {
     console.error('Error loading session:', error);
@@ -181,12 +193,14 @@ export async function getSessionById(id: string): Promise<DBChatSession | null> 
   }
 }
 
-export async function createSession(sessionData: Omit<DBChatSession, 'id' | 'createdAt' | 'updatedAt'>): Promise<DBChatSession> {
+export async function createSession(
+  sessionData: Omit<DBChatSession, 'id' | 'createdAt' | 'updatedAt'>,
+): Promise<DBChatSession> {
   try {
     const newSessionData = {
       id: nanoid(10), // Generate new session ID
       user_id: sessionData.userId,
-      title: sessionData.title
+      title: sessionData.title,
     };
 
     const { data, error } = await supabaseClient
@@ -205,7 +219,7 @@ export async function createSession(sessionData: Omit<DBChatSession, 'id' | 'cre
       userId: data.user_id,
       title: data.title,
       createdAt: data.created_at,
-      updatedAt: data.updated_at
+      updatedAt: data.updated_at,
     };
   } catch (error) {
     console.error('Error creating session:', error);
@@ -233,7 +247,9 @@ export async function deleteChatSession(sessionId: string): Promise<boolean> {
 }
 
 // Prompt shortcuts functions
-export async function savePromptShortcut(prompt: PromptShortcut): Promise<void> {
+export async function savePromptShortcut(
+  prompt: PromptShortcut,
+): Promise<void> {
   try {
     // If prompt doesn't have an ID, generate one
     if (!prompt.id) {
@@ -247,7 +263,7 @@ export async function savePromptShortcut(prompt: PromptShortcut): Promise<void> 
       content: prompt.content,
       category: prompt.category,
       shortcut_key: prompt.shortcutKey,
-      keyboard_shortcut: prompt.keyboardShortcut
+      keyboard_shortcut: prompt.keyboardShortcut,
     };
 
     // Use upsert to update if exists, insert if not
@@ -265,7 +281,10 @@ export async function savePromptShortcut(prompt: PromptShortcut): Promise<void> 
   }
 }
 
-export async function getPromptShortcuts(userId: string, category?: string): Promise<PromptShortcut[]> {
+export async function getPromptShortcuts(
+  userId: string,
+  category?: string,
+): Promise<PromptShortcut[]> {
   try {
     let query = supabaseClient
       .from('prompt_shortcuts')
@@ -283,13 +302,14 @@ export async function getPromptShortcuts(userId: string, category?: string): Pro
       return [];
     }
 
-    return data.map(dbPrompt => ({
+    return data.map((dbPrompt): PromptShortcut => ({
       id: dbPrompt.id,
       name: dbPrompt.name,
       content: dbPrompt.content,
       category: dbPrompt.category || undefined,
       shortcutKey: dbPrompt.shortcut_key || undefined,
-      keyboardShortcut: dbPrompt.keyboard_shortcut || undefined
+      keyboardShortcut: dbPrompt.keyboard_shortcut || undefined,
+      createdAt: new Date(dbPrompt.created_at).getTime(),
     }));
   } catch (error) {
     console.error('Error loading prompt shortcuts:', error);

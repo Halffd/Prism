@@ -38,6 +38,9 @@
       "path": "../../libs/image-gen/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/logging/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/context-manager/tsconfig.lib.json"
     },
     {

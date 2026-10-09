@@ -9,6 +9,7 @@ import {
   HardwareProfile,
 } from '@prism/shared-types';
 import { UnifiedAIClient } from '@prism/api-client';
+import { logger, type LogLevel } from '@prism/logging';
 import { ModelRecentsEditor } from './ModelRecentsEditor';
 import {
   getSetting,
@@ -79,6 +80,14 @@ export function Settings({ onClose }: SettingsProps) {
     useState<number>(10);
   const [saveTimeout, setSaveTimeout] = useState<NodeJS.Timeout | null>(null);
   const [apiClient, setApiClient] = useState<UnifiedAIClient | null>(null);
+
+  // Refresh the log viewer snapshot every 2s while Settings is open
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setLogEntries(logger.entries());
+    }, 2000);
+    return () => clearInterval(interval);
+  }, []);
   const [adapterMode, setAdapterMode] = useState<AIMode>(
     aiConfig.mode || 'api',
   );
@@ -96,6 +105,13 @@ export function Settings({ onClose }: SettingsProps) {
   const [theme, setTheme] = useState<
     'dark' | 'light' | 'high-contrast' | 'monokai' | 'material' | 'github'
   >('dark');
+  const [logConfig, setLogConfig] = useState<{
+    defaultLevel: LogLevel;
+    console: boolean;
+  }>({ defaultLevel: 'info', console: true });
+  const [logEntries, setLogEntries] = useState<
+    import('@prism/logging').LogEntry[]
+  >([]);
 
   useEffect(() => {
     // Initialize API client with current settings
@@ -208,6 +224,23 @@ export function Settings({ onClose }: SettingsProps) {
         await getSetting<ExtensionSettings>('displaySettings');
       if (savedDisplaySettings?.theme) {
         setTheme(savedDisplaySettings.theme);
+      }
+
+      // Load persisted logging config
+      const savedLogConfig = await getSetting<{
+        defaultLevel: LogLevel;
+        console: boolean;
+      }>('logConfig');
+      if (
+        savedLogConfig?.defaultLevel ||
+        savedLogConfig?.console !== undefined
+      ) {
+        const next = {
+          defaultLevel: savedLogConfig.defaultLevel ?? 'info',
+          console: savedLogConfig.console ?? true,
+        };
+        setLogConfig(next);
+        logger.configure(next);
       }
 
       // Load image generation config from local database
@@ -2069,6 +2102,99 @@ export function Settings({ onClose }: SettingsProps) {
               </option>
               <option value="black-forest-labs/FLUX.1-dev">FLUX Dev</option>
             </select>
+          </div>
+        </div>
+
+        <div className="settings-section">
+          <h3>Logging & Monitoring</h3>
+          <div className="form-group">
+            <label>Default Log Level</label>
+            <select
+              value={logConfig.defaultLevel}
+              onChange={(e) => {
+                const level = e.target.value as LogLevel;
+                const next = { ...logConfig, defaultLevel: level };
+                setLogConfig(next);
+                logger.configure({ defaultLevel: level });
+                saveSetting('logConfig', next).catch(() => undefined);
+              }}
+              className="form-control"
+            >
+              <option value="debug">Debug</option>
+              <option value="info">Info</option>
+              <option value="warn">Warn</option>
+              <option value="error">Error</option>
+            </select>
+            <small className="form-hint">
+              Minimum severity recorded across channels (chat, search, agent,
+              sync, system). Buffered in memory and exportable.
+            </small>
+          </div>
+
+          <div className="form-group">
+            <label>Console Output</label>
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={logConfig.console}
+                onChange={(e) => {
+                  const next = { ...logConfig, console: e.target.checked };
+                  setLogConfig(next);
+                  logger.configure({ console: e.target.checked });
+                  saveSetting('logConfig', next).catch(() => undefined);
+                }}
+              />
+              Mirror log entries to the devtools console
+            </label>
+          </div>
+
+          <div className="form-group">
+            <label>Recent Entries ({logEntries.length})</label>
+            <div className="log-viewer">
+              {logEntries
+                .slice(-20)
+                .reverse()
+                .map((entry, i) => (
+                  <div
+                    key={i}
+                    className={`log-entry log-entry--${entry.level}`}
+                  >
+                    <span className="log-entry-level">{entry.level}</span>
+                    <span className="log-entry-channel">{entry.channel}</span>
+                    <span className="log-entry-message">{entry.message}</span>
+                  </div>
+                ))}
+              {logEntries.length === 0 && (
+                <div className="log-entry">No entries yet this session.</div>
+              )}
+            </div>
+            <button
+              type="button"
+              className="fetch-models-btn"
+              onClick={() => {
+                const blob = new Blob([logger.exportJsonl()], {
+                  type: 'application/x-ndjson',
+                });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `prism-logs-${Date.now()}.jsonl`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+            >
+              Export logs (JSONL)
+            </button>
+            <button
+              type="button"
+              className="fetch-models-btn"
+              onClick={() => {
+                logger.clear();
+                setLogEntries([]);
+              }}
+            >
+              Clear
+            </button>
           </div>
         </div>
 

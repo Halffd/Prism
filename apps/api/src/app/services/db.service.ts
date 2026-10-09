@@ -1,4 +1,3 @@
-import mongoose from 'mongoose';
 import connectToDatabase from '../utils/db';
 
 // Define the database connection function

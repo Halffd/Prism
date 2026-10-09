@@ -1,10 +1,15 @@
 import { Response } from 'express';
-import { Message, ContextData, AIConfig } from '@prism/shared-types';
-import { saveChatHistory as saveMongoChatHistory, loadChatHistory as loadMongoChatHistory } from '@prism/shared-db';
-import { saveChatHistory as saveSupabaseChatHistory, loadChatHistory as loadSupabaseChatHistory } from '../services/supabase-data-service';
+import { Message, AIConfig } from '@prism/shared-types';
+import {
+  saveChatHistory as saveMongoChatHistory,
+  loadChatHistory as loadMongoChatHistory,
+} from '@prism/shared-db';
+import {
+  saveChatHistory as saveSupabaseChatHistory,
+  loadChatHistory as loadSupabaseChatHistory,
+} from '../services/supabase-data-service';
 import { UnifiedAIClient } from '@prism/api-client';
 import { AuthenticatedRequest } from '../middleware/auth';
-import { ChatSession } from '../models/mongo-schemas';
 
 export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -13,12 +18,13 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
     if (!content) {
       return res.status(400).json({
         success: false,
-        error: 'Content is required'
+        error: 'Content is required',
       });
     }
 
     // Use authenticated user ID or default to anonymous
     const userId = req.user?.id || 'anonymous';
+    void userId; // reserved for per-user routing when multi-user sync lands
     const currentSessionId = sessionId || `session_${Date.now()}`;
 
     // Create the user message
@@ -28,23 +34,28 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
       content,
       images,
       context,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     };
 
     // Create AI client and get response
     const aiConfig: AIConfig = {
       provider: req.body.provider || 'openai',
       apiKey: process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || '',
-      model: process.env.LLM_MODEL || 'gpt-3.5-turbo'
+      model: process.env.LLM_MODEL || 'gpt-3.5-turbo',
     };
 
     const client = new UnifiedAIClient({ aiConfig });
-    const response = await client.sendMessage(content, context, currentSessionId, images);
+    const response = await client.sendMessage(
+      content,
+      context,
+      currentSessionId,
+      images,
+    );
 
     if (!response.success || !response.data) {
       return res.status(500).json({
         success: false,
-        error: response.error || 'Failed to get AI response'
+        error: response.error || 'Failed to get AI response',
       });
     }
 
@@ -61,13 +72,13 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response) => {
 
     return res.json({
       success: true,
-      data: response.data
+      data: response.data,
     });
   } catch (error: any) {
     console.error('Error in sendMessage:', error);
     return res.status(500).json({
       success: false,
-      error: 'Failed to send message'
+      error: 'Failed to send message',
     });
   }
 };
@@ -79,7 +90,7 @@ export const getHistory = async (req: AuthenticatedRequest, res: Response) => {
     if (!sessionId) {
       return res.status(400).json({
         success: false,
-        error: 'Session ID is required'
+        error: 'Session ID is required',
       });
     }
 
@@ -94,19 +105,19 @@ export const getHistory = async (req: AuthenticatedRequest, res: Response) => {
     if (!messages || messages.length === 0) {
       return res.status(404).json({
         success: false,
-        error: 'No chat history found'
+        error: 'No chat history found',
       });
     }
 
     return res.json({
       success: true,
-      data: messages
+      data: messages,
     });
   } catch (error: unknown) {
     console.error('Error in getHistory:', error);
     return res.status(500).json({
       success: false,
-      error: 'Failed to retrieve history'
+      error: 'Failed to retrieve history',
     });
   }
 };
