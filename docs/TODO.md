@@ -9,8 +9,8 @@ Tracking queue state for all apps. Update after each landed feature.
 | Snippets / prompt shortcuts CRUD                          | done    | Popup + Settings, IndexedDB persistence, multiple keyboard bindings + combos                                         |
 | Prompt presets (ordered entries)                          | done    | PromptPresetManager, rehydrates from DB on mount                                                                     |
 | Status bar metrics (latency, tok/s, context)              | done    | api-client captures metrics; strips in ChatPage + Popup; TUI status bar shows tok/s · latency · ctx · session tokens |
-| Thinking mode toggle                                      | planned | See docs/plans/Prism-Roadmap.md Phase 3                                                                              |
-| Auto model selection                                      | planned | Roadmap Phase 3                                                                                                      |
+| Thinking mode toggle                                      | done    | Claude native budget_tokens; scratchpad fallback for other providers; toggle in ChatPage footer |
+| Auto model selection                                      | done    | selectAutoModel heuristic (modelCache -> known list, tier by input size/capability); Auto button in header |
 | Web/deep search, council, multi-send, debate toggles      | done    | ChatPage footer + panels                                                                                             |
 | Agent builder + runner                                    | done    | AgentBuilder + AgentRunnerPanel; web_search + fetch_url tools now real                                               |
 | Themes (dark/light/high-contrast/monokai/material/github) | planned | Roadmap Phase 5; dark-only today                                                                                     |
