@@ -8,6 +8,7 @@ import type {
   WorldInfoEntry,
   Message,
   CustomAgent,
+  AgentMemory,
 } from '@prism/shared-types';
 import type { DBChatSession } from './db';
 
@@ -47,6 +48,7 @@ class PrismDexie extends Dexie {
   worldInfo!: Table<WorldInfo>;
   worldInfoEntries!: Table<WorldInfoEntry>;
   customAgents!: Table<CustomAgent>;
+  agentMemories!: Table<AgentMemory>;
 
   constructor() {
     super('PrismDB');
@@ -99,6 +101,9 @@ class PrismDexie extends Dexie {
             // groupChatMode defaults to undefined (single character mode)
           });
       });
+    this.version(4).stores({
+      agentMemories: 'id, agentId, importance, createdAt, updatedAt',
+    });
   }
 }
 
@@ -315,6 +320,38 @@ export async function getAllCustomAgents(): Promise<CustomAgent[]> {
 
 export async function deleteCustomAgent(id: string): Promise<void> {
   await db.customAgents.delete(id);
+}
+
+// Agent memory functions (persistent per-agent memories)
+
+export async function saveAgentMemory(memory: AgentMemory): Promise<void> {
+  await db.agentMemories.put(memory);
+}
+
+export async function getAgentMemories(
+  agentId: string,
+): Promise<AgentMemory[]> {
+  const all = await db.agentMemories.where('agentId').equals(agentId).toArray();
+  // Rank: importance desc, then recency desc
+  return all.sort((a, b) => {
+    const imp = (b.importance ?? 0.5) - (a.importance ?? 0.5);
+    if (imp !== 0) return imp;
+    return b.updatedAt - a.updatedAt;
+  });
+}
+
+export async function getAllAgentMemories(): Promise<AgentMemory[]> {
+  return db.agentMemories.toArray();
+}
+
+export async function deleteAgentMemory(id: string): Promise<void> {
+  await db.agentMemories.delete(id);
+}
+
+export async function deleteAgentMemoriesForAgent(
+  agentId: string,
+): Promise<void> {
+  await db.agentMemories.where('agentId').equals(agentId).delete();
 }
 // Export all functions for use in the extension
 export * from './db';

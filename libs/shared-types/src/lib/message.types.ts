@@ -438,6 +438,10 @@ export interface AgentRequest {
   maxSteps?: number;
   tools?: AgentTool[];
   agentId?: string;
+  /** Tone/style descriptor composed into the system prompt. */
+  personality?: string;
+  /** Persistent memories ranked into the system prompt. */
+  memories?: AgentMemory[];
 }
 
 export interface AgentTool {
@@ -470,6 +474,21 @@ export interface CustomAgent {
   maxSteps: number;
   maxTokens: number;
   tools: AgentToolDef[];
+  /** Freeform tone/style descriptor shaping the agent's voice. */
+  personality?: string;
+  /** Persistent memories carried across sessions. */
+  coreMemories?: AgentMemory[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AgentMemory {
+  id: string;
+  agentId: string;
+  kind: 'fact' | 'preference' | 'note';
+  content: string;
+  /** 0–1; used for retrieval ranking. */
+  importance?: number;
   createdAt: number;
   updatedAt: number;
 }

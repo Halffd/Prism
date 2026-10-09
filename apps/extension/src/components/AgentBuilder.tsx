@@ -21,6 +21,7 @@ import type {
   AgentStrategy,
   AIProvider,
   BuiltinToolName,
+  AgentMemory,
 } from '@prism/shared-types';
 import { nanoid } from 'nanoid';
 
@@ -123,6 +124,8 @@ export function AgentBuilder({ onClose }: Props) {
       maxSteps: form.maxSteps ?? 10,
       maxTokens: form.maxTokens ?? 1024,
       tools: form.tools ?? [],
+      personality: form.personality,
+      coreMemories: form.coreMemories,
       createdAt: editingAgent?.createdAt ?? now,
       updatedAt: now,
     };
@@ -257,6 +260,91 @@ export function AgentBuilder({ onClose }: Props) {
             rows={4}
             placeholder="You are a research assistant..."
           />
+
+          <label className="st-agent-label">Personality</label>
+          <input
+            className="st-agent-input"
+            type="text"
+            value={form.personality ?? ''}
+            onChange={(e) => setForm({ ...form, personality: e.target.value })}
+            placeholder="e.g. Concise and technical, dry humor, formal..."
+          />
+
+          <label className="st-agent-label">
+            Core Memories ({(form.coreMemories ?? []).length})
+          </label>
+          <div className="st-agent-memories">
+            {(form.coreMemories ?? []).map((mem, idx) => (
+              <div key={mem.id} className="st-agent-memory-row">
+                <select
+                  className="st-agent-input-sm"
+                  value={mem.kind}
+                  onChange={(e) => {
+                    const mems = [...(form.coreMemories ?? [])];
+                    mems[idx] = {
+                      ...mem,
+                      kind: e.target.value as 'fact' | 'preference' | 'note',
+                    };
+                    setForm({ ...form, coreMemories: mems });
+                  }}
+                >
+                  <option value="fact">Fact</option>
+                  <option value="preference">Preference</option>
+                  <option value="note">Note</option>
+                </select>
+                <input
+                  className="st-agent-input"
+                  type="text"
+                  value={mem.content}
+                  onChange={(e) => {
+                    const mems = [...(form.coreMemories ?? [])];
+                    mems[idx] = {
+                      ...mem,
+                      content: e.target.value,
+                      updatedAt: Date.now(),
+                    };
+                    setForm({ ...form, coreMemories: mems });
+                  }}
+                  placeholder="The user prefers TypeScript..."
+                />
+                <button
+                  type="button"
+                  className="st-btn-ghost"
+                  onClick={() => {
+                    setForm({
+                      ...form,
+                      coreMemories: (form.coreMemories ?? []).filter(
+                        (m) => m.id !== mem.id,
+                      ),
+                    });
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              className="st-btn-ghost"
+              onClick={() => {
+                const mem: AgentMemory = {
+                  id: `mem_${nanoid()}`,
+                  agentId: editingAgent?.id ?? 'new',
+                  kind: 'note',
+                  content: '',
+                  importance: 0.5,
+                  createdAt: Date.now(),
+                  updatedAt: Date.now(),
+                };
+                setForm({
+                  ...form,
+                  coreMemories: [...(form.coreMemories ?? []), mem],
+                });
+              }}
+            >
+              + Add Memory
+            </button>
+          </div>
 
           <div className="st-agent-row">
             <div className="st-agent-field">

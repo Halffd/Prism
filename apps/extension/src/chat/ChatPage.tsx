@@ -124,6 +124,9 @@ export function ChatPage() {
   const [debateResult, setDebateResult] = useState<DebateResult | null>(null);
   const [agentEnabled, setAgentEnabled] = useState(false);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
+  const { agents: customAgents, activeAgentId } = useSelector(
+    (state: RootState) => state.agents,
+  );
   const [agentInProgress, setAgentInProgress] = useState(false);
   const [agentResult, setAgentResult] = useState<AgentResult | null>(null);
   const [agentStep, setAgentStep] = useState<number>(0);
@@ -431,9 +434,13 @@ export function ChatPage() {
     setAgentResult(null);
     setAgentStep(0);
     try {
+      // Carry the active custom agent's personality + core memories
+      const activeAgent = customAgents.find((a) => a.id === activeAgentId);
       const request: Parameters<typeof client.agent>[0] = {
         task,
         maxSteps: 10,
+        personality: activeAgent?.personality,
+        memories: activeAgent?.coreMemories,
       };
       const response = await client.agent(request);
       if (response.success && response.data) {

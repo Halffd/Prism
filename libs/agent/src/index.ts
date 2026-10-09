@@ -4,6 +4,7 @@ import type {
   AgentStep,
   AgentToolDef,
   AgentStrategy,
+  AgentMemory,
   BuiltinToolName,
   Result,
   ServiceConfig,
@@ -246,6 +247,27 @@ function getSystemPrompt(strategy: AgentStrategy, custom?: string): string {
   }
 }
 
+/** Compose personality + ranked memories onto a system prompt. */
+function composeAgentPersona(
+  base: string,
+  personality?: string,
+  memories?: AgentMemory[],
+): string {
+  let prompt = base;
+  if (personality) {
+    prompt += `\n\n## Personality\n${personality}`;
+  }
+  if (memories && memories.length > 0) {
+    const ranked = [...memories]
+      .sort((a, b) => (b.importance ?? 0.5) - (a.importance ?? 0.5))
+      .slice(0, 10);
+    prompt += `\n\n## Core Memories\n${ranked
+      .map((m) => `- [${m.kind}] ${m.content}`)
+      .join('\n')}`;
+  }
+  return prompt;
+}
+
 function toolDefsToDescriptions(tools: AgentToolDef[]): string {
   const enabled = tools.filter((t) => t.enabled);
   if (enabled.length === 0)
@@ -277,7 +299,11 @@ export class ReActAgentService implements AgentService {
   async run(request: AgentRequest): Promise<Result<AgentResult>> {
     try {
       const strategy = this.config.strategy ?? 'react';
-      const systemPrompt = getSystemPrompt(strategy, this.config.systemPrompt);
+      const systemPrompt = composeAgentPersona(
+        getSystemPrompt(strategy, this.config.systemPrompt),
+        request.personality,
+        request.memories,
+      );
       const tools =
         this.config.tools ??
         request.tools?.map((t) => ({ ...t, enabled: true })) ??
