@@ -42,7 +42,11 @@ import type {
   DebateTurn,
 } from '@prism/shared-types';
 import type { AIAdapter } from './index';
-import { DuckDuckGoSearchService, SearXNGSearchService } from '@prism/web-search';
+import { applyThinkingToMessages, stripThinkingFromContent } from './thinking';
+import {
+  DuckDuckGoSearchService,
+  SearXNGSearchService,
+} from '@prism/web-search';
 import type { WebSearchService } from '@prism/web-search';
 
 type LocalProvider = 'ollama' | 'llamacpp' | 'koboldcpp' | 'sglang';
@@ -62,7 +66,8 @@ function extractBase64(data: string): string {
 }
 
 function toOpenAIMessages(request: LLMRequest): Array<Record<string, unknown>> {
-  return request.messages.map(msg => {
+  const messages = applyThinkingToMessages(request.messages, request.thinking);
+  return messages.map((msg) => {
     if (msg.images && msg.images.length > 0) {
       const content: Array<Record<string, unknown>> = [];
       if (msg.content) {
@@ -82,7 +87,9 @@ export class LocalAdapter implements AIAdapter {
   private provider: LocalProvider;
   private baseUrl: string;
   private model?: string;
-  private providerOverrides: Partial<Record<AICapability, { provider: string; config?: Partial<ServiceConfig> }>> = {};
+  private providerOverrides: Partial<
+    Record<AICapability, { provider: string; config?: Partial<ServiceConfig> }>
+  > = {};
   private searchProvider: LocalSearchProvider;
   private searxngUrl: string;
   private searchService?: WebSearchService;
@@ -102,9 +109,10 @@ export class LocalAdapter implements AIAdapter {
         provider: this.searchProvider,
         apiUrl: this.searchProvider === 'searxng' ? this.searxngUrl : undefined,
       };
-      this.searchService = this.searchProvider === 'searxng'
-        ? new SearXNGSearchService(searchConfig)
-        : new DuckDuckGoSearchService(searchConfig);
+      this.searchService =
+        this.searchProvider === 'searxng'
+          ? new SearXNGSearchService(searchConfig)
+          : new DuckDuckGoSearchService(searchConfig);
     }
     return this.searchService;
   }
@@ -117,7 +125,11 @@ export class LocalAdapter implements AIAdapter {
     this.searchService = undefined;
   }
 
-  setProvider(capability: AICapability, provider: string, config?: Partial<ServiceConfig>): void {
+  setProvider(
+    capability: AICapability,
+    provider: string,
+    config?: Partial<ServiceConfig>,
+  ): void {
     this.providerOverrides[capability] = { provider, config };
   }
 
@@ -126,7 +138,10 @@ export class LocalAdapter implements AIAdapter {
   }
 
   private async ollamaLLM(request: LLMRequest): Promise<Result<LLMResult>> {
-    const ollamaMessages = request.messages.map(msg => {
+    const ollamaMessages = applyThinkingToMessages(
+      request.messages,
+      request.thinking,
+    ).map((msg) => {
       if (msg.images && msg.images.length > 0) {
         return {
           role: msg.role,
@@ -143,30 +158,44 @@ export class LocalAdapter implements AIAdapter {
       body: JSON.stringify({
         model: this.model || request.model || 'llama3',
         messages: ollamaMessages,
-        options: { temperature: request.temperature, num_predict: request.maxTokens },
+        options: {
+          temperature: request.temperature,
+          num_predict: request.maxTokens,
+        },
         stream: false,
       }),
     });
 
     if (!response.ok) {
       let errorMsg = `Ollama returned ${response.status}`;
-      try { const e = await response.json() as Record<string, unknown>; errorMsg = (e.error as string) || errorMsg; } catch { /* ignore */ }
+      try {
+        const e = (await response.json()) as Record<string, unknown>;
+        errorMsg = (e.error as string) || errorMsg;
+      } catch {
+        /* ignore */
+      }
       return { ok: false, error: errorMsg };
     }
 
-    const data = await response.json() as Record<string, unknown>;
+    const data = (await response.json()) as Record<string, unknown>;
     const message = data.message as Record<string, unknown>;
+    const stripped = stripThinkingFromContent(
+      (message.content as string) ?? '',
+    );
     return {
       ok: true,
       value: {
-        content: message.content as string,
+        content: stripped.content,
+        thinking: stripped.thinking,
         model: (data.model as string) || this.model || 'llama3',
         tokensUsed: (data.eval_count as number) || undefined,
       },
     };
   }
 
-  private async openAICompatLLM(request: LLMRequest): Promise<Result<LLMResult>> {
+  private async openAICompatLLM(
+    request: LLMRequest,
+  ): Promise<Result<LLMResult>> {
     const messages = toOpenAIMessages(request);
     const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
       method: 'POST',
@@ -182,14 +211,20 @@ export class LocalAdapter implements AIAdapter {
 
     if (!response.ok) {
       let errorMsg = `Local server returned ${response.status}`;
-      try { const e = await response.json() as Record<string, unknown>; errorMsg = (e.error as string) || errorMsg; } catch { /* ignore */ }
+      try {
+        const e = (await response.json()) as Record<string, unknown>;
+        errorMsg = (e.error as string) || errorMsg;
+      } catch {
+        /* ignore */
+      }
       return { ok: false, error: errorMsg };
     }
 
-    const data = await response.json() as Record<string, unknown>;
+    const data = (await response.json()) as Record<string, unknown>;
     const choices = data.choices as Array<Record<string, unknown>>;
     const choice = choices?.[0];
-    const choiceMessage = choice?.message as Record<string, unknown> | undefined;
+    const choiceMessage = choice?.message as
+      Record<string, unknown> | undefined;
     const usage = data.usage as Record<string, unknown> | undefined;
 
     return {
@@ -203,7 +238,9 @@ export class LocalAdapter implements AIAdapter {
   }
 
   private async koboldCppLLM(request: LLMRequest): Promise<Result<LLMResult>> {
-    const prompt = request.messages.map(m => `${m.role}: ${m.content}`).join('\n\n') + '\n\nassistant:';
+    const prompt =
+      request.messages.map((m) => `${m.role}: ${m.content}`).join('\n\n') +
+      '\n\nassistant:';
     const response = await fetch(`${this.baseUrl}/api/v1/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -216,11 +253,16 @@ export class LocalAdapter implements AIAdapter {
 
     if (!response.ok) {
       let errorMsg = `KoboldCpp returned ${response.status}`;
-      try { const e = await response.json() as Record<string, unknown>; errorMsg = (e.error as string) || errorMsg; } catch { /* ignore */ }
+      try {
+        const e = (await response.json()) as Record<string, unknown>;
+        errorMsg = (e.error as string) || errorMsg;
+      } catch {
+        /* ignore */
+      }
       return { ok: false, error: errorMsg };
     }
 
-    const data = await response.json() as Record<string, unknown>;
+    const data = (await response.json()) as Record<string, unknown>;
     const results = data.results as Array<Record<string, unknown>>;
 
     return {
@@ -242,11 +284,18 @@ export class LocalAdapter implements AIAdapter {
   async llm(request: LLMRequest): Promise<Result<LLMResult>> {
     try {
       switch (this.provider) {
-        case 'ollama': return await this.ollamaLLM(request);
-        case 'koboldcpp': return await this.koboldCppLLM(request);
+        case 'ollama':
+          return await this.ollamaLLM(request);
+        case 'koboldcpp':
+          return await this.koboldCppLLM(request);
         case 'llamacpp':
-        case 'sglang': return await this.openAICompatLLM(request);
-        default: return { ok: false, error: `Unsupported local provider: ${this.provider}` };
+        case 'sglang':
+          return await this.openAICompatLLM(request);
+        default:
+          return {
+            ok: false,
+            error: `Unsupported local provider: ${this.provider}`,
+          };
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -264,7 +313,9 @@ export class LocalAdapter implements AIAdapter {
     }
   }
 
-  async deepSearch(request: DeepSearchRequest): Promise<Result<DeepSearchResult>> {
+  async deepSearch(
+    request: DeepSearchRequest,
+  ): Promise<Result<DeepSearchResult>> {
     try {
       const searchService = this.getSearchService();
       const startTime = Date.now();
@@ -313,7 +364,10 @@ export class LocalAdapter implements AIAdapter {
         queryPhase.error = 'Search failed';
         queryPhase.completedAt = Date.now();
         request.onPhaseUpdate?.(queryPhase);
-        return { ok: false, error: `Deep search failed: ${searchResult.error}` };
+        return {
+          ok: false,
+          error: `Deep search failed: ${searchResult.error}`,
+        };
       }
 
       searchPhase.status = 'completed';
@@ -344,9 +398,12 @@ export class LocalAdapter implements AIAdapter {
         request.onPhaseUpdate?.(extractPhase);
 
         if (result.content) {
-          extractedParts.push(`--- ${result.title} (${result.url}) ---\n${result.content}`);
+          extractedParts.push(
+            `--- ${result.title} (${result.url}) ---\n${result.content}`,
+          );
           extractPhase.status = 'completed';
-          extractPhase.extractedContent = result.content.substring(0, 500) + '...';
+          extractPhase.extractedContent =
+            result.content.substring(0, 500) + '...';
         } else {
           try {
             const pageResponse = await fetch(result.url, {
@@ -357,10 +414,16 @@ export class LocalAdapter implements AIAdapter {
               const text = await pageResponse.text();
               const bodyMatch = text.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
               const rawText = bodyMatch ? bodyMatch[1] : text;
-              const cleanText = rawText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+              const cleanText = rawText
+                .replace(/<[^>]+>/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
               const truncated = cleanText.substring(0, 3000);
-              extractedParts.push(`--- ${result.title} (${result.url}) ---\n${truncated}`);
-              extractPhase.extractedContent = truncated.substring(0, 500) + '...';
+              extractedParts.push(
+                `--- ${result.title} (${result.url}) ---\n${truncated}`,
+              );
+              extractPhase.extractedContent =
+                truncated.substring(0, 500) + '...';
               extractPhase.status = 'completed';
             } else {
               extractPhase.status = 'failed';
@@ -391,8 +454,18 @@ ${searchContext}`;
       request.onPhaseUpdate?.(synthesizePhase);
 
       const llmMessages: Message[] = [
-        { id: `ds-sys-${Date.now()}`, role: 'system', content: systemPrompt, timestamp: Date.now() },
-        { id: `ds-user-${Date.now()}`, role: 'user', content: request.query, timestamp: Date.now() },
+        {
+          id: `ds-sys-${Date.now()}`,
+          role: 'system',
+          content: systemPrompt,
+          timestamp: Date.now(),
+        },
+        {
+          id: `ds-user-${Date.now()}`,
+          role: 'user',
+          content: request.query,
+          timestamp: Date.now(),
+        },
       ];
 
       const llmResult = await this.llm({
@@ -406,7 +479,10 @@ ${searchContext}`;
         synthesizePhase.error = llmResult.error;
         synthesizePhase.completedAt = Date.now();
         request.onPhaseUpdate?.(synthesizePhase);
-        return { ok: false, error: `Deep search synthesis failed: ${llmResult.error}` };
+        return {
+          ok: false,
+          error: `Deep search synthesis failed: ${llmResult.error}`,
+        };
       }
 
       synthesizePhase.status = 'completed';
@@ -442,7 +518,6 @@ ${searchContext}`;
     }
   }
 
-
   async council(request: CouncilRequest): Promise<Result<CouncilResponse>> {
     try {
       const startTime = Date.now();
@@ -452,9 +527,19 @@ ${searchContext}`;
         request.onMemberUpdate?.(member, 'thinking');
         const messages: Message[] = [];
         if (request.systemPrompt) {
-          messages.push({ id: `council-sys-${Date.now()}`, role: 'system', content: request.systemPrompt, timestamp: Date.now() });
+          messages.push({
+            id: `council-sys-${Date.now()}`,
+            role: 'system',
+            content: request.systemPrompt,
+            timestamp: Date.now(),
+          });
         }
-        messages.push({ id: `council-user-${Date.now()}`, role: 'user', content: request.prompt, timestamp: Date.now() });
+        messages.push({
+          id: `council-user-${Date.now()}`,
+          role: 'user',
+          content: request.prompt,
+          timestamp: Date.now(),
+        });
 
         const result = await this.llm({
           messages,
@@ -485,7 +570,7 @@ ${searchContext}`;
         }
       }
 
-      const validResponses = memberResponses.filter(r => !r.error);
+      const validResponses = memberResponses.filter((r) => !r.error);
       if (validResponses.length === 0) {
         return { ok: false, error: 'All council members failed to respond' };
       }
@@ -496,7 +581,8 @@ ${searchContext}`;
         winnerContent: validResponses[0].content,
         votes: [],
         strategy: request.votingStrategy || 'single-judge',
-        reasoning: 'Local council: fastest response selected (no judge LLM for voting)',
+        reasoning:
+          'Local council: fastest response selected (no judge LLM for voting)',
       };
 
       return {
@@ -504,7 +590,10 @@ ${searchContext}`;
         value: {
           responses: memberResponses,
           verdict,
-          totalTokensUsed: memberResponses.reduce((sum, r) => sum + (r.tokensUsed || 0), 0),
+          totalTokensUsed: memberResponses.reduce(
+            (sum, r) => sum + (r.tokensUsed || 0),
+            0,
+          ),
           latencyMs: Date.now() - startTime,
         },
       };
@@ -514,7 +603,9 @@ ${searchContext}`;
     }
   }
 
-  async multiSend(request: MultiSendRequest): Promise<Result<MultiSendResponse>> {
+  async multiSend(
+    request: MultiSendRequest,
+  ): Promise<Result<MultiSendResponse>> {
     try {
       const startTime = Date.now();
       const targetResponses: MultiSendTargetResponse[] = [];
@@ -523,12 +614,22 @@ ${searchContext}`;
         request.onTargetUpdate?.(target, 'thinking');
         const messages: Message[] = [];
         if (request.systemPrompt) {
-          messages.push({ id: `ms-sys-${Date.now()}`, role: 'system', content: request.systemPrompt, timestamp: Date.now() });
+          messages.push({
+            id: `ms-sys-${Date.now()}`,
+            role: 'system',
+            content: request.systemPrompt,
+            timestamp: Date.now(),
+          });
         }
         if (request.conversationHistory) {
           messages.push(...request.conversationHistory);
         }
-        messages.push({ id: `ms-user-${Date.now()}`, role: 'user', content: request.prompt, timestamp: Date.now() });
+        messages.push({
+          id: `ms-user-${Date.now()}`,
+          role: 'user',
+          content: request.prompt,
+          timestamp: Date.now(),
+        });
 
         const targetStart = Date.now();
         const result = await this.llm({
@@ -540,15 +641,29 @@ ${searchContext}`;
         const latencyMs = Date.now() - targetStart;
 
         if (result.ok) {
-          targetResponses.push({ provider: target.provider, model: target.model, label: target.label, content: result.value.content, tokensUsed: result.value.tokensUsed, latencyMs });
+          targetResponses.push({
+            provider: target.provider,
+            model: target.model,
+            label: target.label,
+            content: result.value.content,
+            tokensUsed: result.value.tokensUsed,
+            latencyMs,
+          });
           request.onTargetUpdate?.(target, 'done', result.value.content);
         } else {
-          targetResponses.push({ provider: target.provider, model: target.model, label: target.label, content: '', error: result.error, latencyMs });
+          targetResponses.push({
+            provider: target.provider,
+            model: target.model,
+            label: target.label,
+            content: '',
+            error: result.error,
+            latencyMs,
+          });
           request.onTargetUpdate?.(target, 'failed', result.error);
         }
       }
 
-      const validResponses = targetResponses.filter(r => !r.error);
+      const validResponses = targetResponses.filter((r) => !r.error);
       if (validResponses.length === 0) {
         return { ok: false, error: 'All multi-send targets failed to respond' };
       }
@@ -557,7 +672,10 @@ ${searchContext}`;
         ok: true,
         value: {
           responses: targetResponses,
-          totalTokensUsed: targetResponses.reduce((sum, r) => sum + (r.tokensUsed || 0), 0),
+          totalTokensUsed: targetResponses.reduce(
+            (sum, r) => sum + (r.tokensUsed || 0),
+            0,
+          ),
           latencyMs: Date.now() - startTime,
         },
       };
@@ -566,7 +684,6 @@ ${searchContext}`;
       return { ok: false, error: `Local multi-send error: ${msg}` };
     }
   }
-
 
   async debate(request: DebateRequest): Promise<Result<DebateResult>> {
     try {
@@ -577,7 +694,7 @@ ${searchContext}`;
       }
 
       const turns: DebateTurn[] = [];
-      const maxTurns = request.maxTurns ?? (participants.length * 2);
+      const maxTurns = request.maxTurns ?? participants.length * 2;
       const conversationLog: string[] = [];
 
       if (request.systemPrompt) {
@@ -610,7 +727,12 @@ It is your turn to speak.${stanceInstruction}
 Provide your argument concisely and persuasively.`;
 
         const messages: Message[] = [
-          { id: `debate-user-${turnIndex}-${Date.now()}`, role: 'user', content: turnPrompt, timestamp: Date.now() },
+          {
+            id: `debate-user-${turnIndex}-${Date.now()}`,
+            role: 'user',
+            content: turnPrompt,
+            timestamp: Date.now(),
+          },
         ];
 
         const turnStart = Date.now();
@@ -632,10 +754,14 @@ Provide your argument concisely and persuasively.`;
         if (result.ok) {
           turn.content = result.value.content;
           turn.tokensUsed = result.value.tokensUsed;
-          conversationLog.push(`[${participant.label || participant.provider}]: ${result.value.content}`);
+          conversationLog.push(
+            `[${participant.label || participant.provider}]: ${result.value.content}`,
+          );
         } else {
           turn.error = result.error;
-          conversationLog.push(`[${participant.label || participant.provider}]: [Error: ${result.error}]`);
+          conversationLog.push(
+            `[${participant.label || participant.provider}]: [Error: ${result.error}]`,
+          );
         }
 
         turns.push(turn);
@@ -644,8 +770,19 @@ Provide your argument concisely and persuasively.`;
 
       let summary: string | undefined;
       const summaryMessages: Message[] = [
-        { id: `debate-sys-${Date.now()}`, role: 'system', content: 'Summarize the key points from this debate in 3-5 bullet points.', timestamp: Date.now() },
-        { id: `debate-summary-${Date.now()}`, role: 'user', content: `Topic: ${request.topic}\n\nDebate transcript:\n${conversationLog.join('\n\n')}`, timestamp: Date.now() },
+        {
+          id: `debate-sys-${Date.now()}`,
+          role: 'system',
+          content:
+            'Summarize the key points from this debate in 3-5 bullet points.',
+          timestamp: Date.now(),
+        },
+        {
+          id: `debate-summary-${Date.now()}`,
+          role: 'user',
+          content: `Topic: ${request.topic}\n\nDebate transcript:\n${conversationLog.join('\n\n')}`,
+          timestamp: Date.now(),
+        },
       ];
       const summaryResult = await this.llm({
         messages: summaryMessages,
@@ -661,7 +798,10 @@ Provide your argument concisely and persuasively.`;
         value: {
           turns,
           summary,
-          totalTokensUsed: turns.reduce((sum, t) => sum + (t.tokensUsed || 0), 0),
+          totalTokensUsed: turns.reduce(
+            (sum, t) => sum + (t.tokensUsed || 0),
+            0,
+          ),
           latencyMs: Date.now() - startTime,
         },
       };
@@ -671,12 +811,28 @@ Provide your argument concisely and persuasively.`;
     }
   }
 
-  async ocr(_request: OCRRequest): Promise<Result<OCRResult>> { return this.unsupported('ocr'); }
-  async stt(_request: STTRequest): Promise<Result<STTResult>> { return this.unsupported('stt'); }
-  async tts(_request: TTSRequest): Promise<Result<TTSResult>> { return this.unsupported('tts'); }
-  async inpaint(_request: InpaintRequest): Promise<Result<InpaintResult>> { return this.unsupported('inpaint'); }
-  async modelGen(_request: ModelGenRequest): Promise<Result<ModelGenResult>> { return this.unsupported('model-gen'); }
-  async audioGen(_request: AudioGenRequest): Promise<Result<AudioGenResult>> { return this.unsupported('audio-gen'); }
-  async videoGen(_request: VideoGenRequest): Promise<Result<VideoGenResult>> { return this.unsupported('video-gen'); }
-  async agent(_request: AgentRequest): Promise<Result<AgentResult>> { return this.unsupported('agent'); }
+  async ocr(_request: OCRRequest): Promise<Result<OCRResult>> {
+    return this.unsupported('ocr');
+  }
+  async stt(_request: STTRequest): Promise<Result<STTResult>> {
+    return this.unsupported('stt');
+  }
+  async tts(_request: TTSRequest): Promise<Result<TTSResult>> {
+    return this.unsupported('tts');
+  }
+  async inpaint(_request: InpaintRequest): Promise<Result<InpaintResult>> {
+    return this.unsupported('inpaint');
+  }
+  async modelGen(_request: ModelGenRequest): Promise<Result<ModelGenResult>> {
+    return this.unsupported('model-gen');
+  }
+  async audioGen(_request: AudioGenRequest): Promise<Result<AudioGenResult>> {
+    return this.unsupported('audio-gen');
+  }
+  async videoGen(_request: VideoGenRequest): Promise<Result<VideoGenResult>> {
+    return this.unsupported('video-gen');
+  }
+  async agent(_request: AgentRequest): Promise<Result<AgentResult>> {
+    return this.unsupported('agent');
+  }
 }

@@ -494,6 +494,7 @@ export class UnifiedAIClient {
             messages: messagesToSend,
             context,
             sessionId,
+            thinkingMode: this.aiConfig?.thinkingMode,
           }),
         });
 

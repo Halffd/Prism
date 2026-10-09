@@ -186,6 +186,7 @@ export interface AIConfig {
   capabilityModes?: Partial<Record<AICapability, AIMode>>;
   systemPrompt?: string;
   modelCache?: Record<string, string[]>;
+  thinkingMode?: ThinkingConfig;
 }
 
 export type PopupDisplayMode = 'popup' | 'sidebar' | 'iframe' | 'floating';
@@ -412,6 +413,14 @@ export interface LLMRequest {
   frequencyPenalty?: number;
   presencePenalty?: number;
   stream?: boolean;
+  /** Extended thinking/reasoning. Provider-native when supported, otherwise a step-by-step prompt instruction. */
+  thinking?: ThinkingConfig;
+}
+
+export interface ThinkingConfig {
+  enabled: boolean;
+  /** Token budget for provider-native thinking (e.g. Anthropic budget_tokens). */
+  budgetTokens?: number;
 }
 
 export interface LLMResult {
@@ -419,6 +428,8 @@ export interface LLMResult {
   tokensUsed?: number;
   model?: string;
   finishReason?: string;
+  /** Reasoning/scratchpad text when the provider returns it separately. */
+  thinking?: string;
 }
 
 export interface AgentRequest {

@@ -31,7 +31,8 @@ export type IconName =
   | 'bolt'
   | 'memory'
   | 'terminal'
-  | 'menu';
+  | 'menu'
+  | 'psychology';
 
 /** Material Symbols (filled) path data, 24x24 viewport. */
 const PATHS: Record<IconName, string> = {
@@ -75,6 +76,10 @@ const PATHS: Record<IconName, string> = {
   terminal:
     'M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zm0 14H4V8h16v10zm-2-1v-2h-4v2h4zM7.5 15l1.41-1.41L7.33 12l1.58-1.59L7.5 9 4.5 12l3 3z',
   menu: 'M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z',
+  // Lightbulb (thinking/idea). Constructed from simple geometry:
+  // bulb dome (circle arc) + neck + base rectangle.
+  psychology:
+    'M12 2.5a6.5 6.5 0 0 0-3.9 11.7c.55.27.9.82.9 1.44V16h6v-.36c0-.62.35-1.17.9-1.44A6.5 6.5 0 0 0 12 2.5zM9 17v1.5a1.5 1.5 0 0 0 1.5 1.5h3A1.5 1.5 0 0 0 15 18.5V17H9z',
 };
 
 export interface IconProps {

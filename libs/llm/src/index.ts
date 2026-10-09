@@ -1,4 +1,10 @@
-import type { LLMRequest, LLMResult, Message, Result, ServiceConfig } from '@prism/shared-types';
+import type {
+  LLMRequest,
+  LLMResult,
+  Message,
+  Result,
+  ServiceConfig,
+} from '@prism/shared-types';
 
 export interface LLMService {
   readonly provider: string;
@@ -10,14 +16,19 @@ function toOpenAIMessages(messages: Message[]): Record<string, unknown>[] {
     if (msg.images && msg.images.length > 0) {
       const content: Array<Record<string, unknown>> = [];
       if (msg.content) content.push({ type: 'text', text: msg.content });
-      msg.images.forEach((img) => content.push({ type: 'image_url', image_url: { url: img } }));
+      msg.images.forEach((img) =>
+        content.push({ type: 'image_url', image_url: { url: img } }),
+      );
       return { role: msg.role, content };
     }
     return { role: msg.role, content: msg.content };
   });
 }
 
-function extractChoice(data: Record<string, unknown>): { content: string; finishReason: string | undefined } {
+function extractChoice(data: Record<string, unknown>): {
+  content: string;
+  finishReason: string | undefined;
+} {
   const choices = (data.choices as Record<string, unknown>[]) || [];
   const first = choices[0] as Record<string, unknown> | undefined;
   const msg = first?.message as Record<string, unknown> | undefined;
@@ -45,6 +56,20 @@ async function openaiCompatibleComplete(
       'Content-Type': 'application/json',
       ...extraHeaders,
     };
+    const messages = [...toOpenAIMessages(request.messages)];
+    const think = request.thinking;
+    const thinkEnabled = think?.enabled === true;
+    if (thinkEnabled) {
+      // Generic fallback: prepend a scratchpad instruction. Providers with
+      // native reasoning (OpenAI o-series, DeepSeek reasoner) also accept this
+      // harmlessly; the model surfaces its reasoning in the content.
+      const scratch =
+        'Before answering, reason through the problem step by step inside <thinking></thinking> tags, then give the final answer after the closing tag.';
+      const firstUser = messages.find((m) => m.role === 'user');
+      if (firstUser && typeof firstUser.content === 'string') {
+        firstUser.content = `${scratch}\n\n${firstUser.content}`;
+      }
+    }
     const response = await fetch(
       `${config.apiUrl || defaultBaseUrl}/chat/completions`,
       {
@@ -52,10 +77,10 @@ async function openaiCompatibleComplete(
         headers,
         body: JSON.stringify({
           model: request.model || config.model || defaultModel,
-          messages: toOpenAIMessages(request.messages),
-          temperature: request.temperature,
+          messages,
+          temperature: thinkEnabled ? undefined : request.temperature,
           max_tokens: request.maxTokens,
-          top_p: request.topP,
+          top_p: thinkEnabled ? undefined : request.topP,
           frequency_penalty: request.frequencyPenalty,
           presence_penalty: request.presencePenalty,
           stream: false,
@@ -66,38 +91,63 @@ async function openaiCompatibleComplete(
     if (!response.ok) {
       const data = (await response.json()) as Record<string, unknown>;
       const errData = data.error as Record<string, unknown> | undefined;
-      return { ok: false, error: (errData?.message as string) || `LLM request failed` };
+      return {
+        ok: false,
+        error: (errData?.message as string) || `LLM request failed`,
+      };
     }
 
     const data = (await response.json()) as Record<string, unknown>;
     const { content, finishReason } = extractChoice(data);
+    let thinking: string | undefined;
+    let finalContent = content;
+    if (thinkEnabled && content.includes('<thinking>')) {
+      const match = content.match(/<thinking>([\s\S]*?)<\/thinking>/);
+      thinking = match?.[1]?.trim();
+      finalContent = content
+        .replace(/<thinking>[\s\S]*?<\/thinking>\s*/, '')
+        .trim();
+    }
     return {
       ok: true,
       value: {
-        content,
+        content: finalContent,
         tokensUsed: extractUsage(data),
         model: data.model as string,
         finishReason,
+        thinking,
       },
     };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'Unknown LLM error' };
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Unknown LLM error',
+    };
   }
 }
 
 export class OpenAILLMService implements LLMService {
   readonly provider = 'openai';
   private config: ServiceConfig;
-  constructor(config: ServiceConfig) { this.config = config; }
+  constructor(config: ServiceConfig) {
+    this.config = config;
+  }
   async complete(request: LLMRequest): Promise<Result<LLMResult>> {
-    return openaiCompatibleComplete(this.config, request, 'https://api.openai.com/v1', 'gpt-4o');
+    return openaiCompatibleComplete(
+      this.config,
+      request,
+      'https://api.openai.com/v1',
+      'gpt-4o',
+    );
   }
 }
 
 export class ClaudeLLMService implements LLMService {
   readonly provider = 'claude';
   private config: ServiceConfig;
-  constructor(config: ServiceConfig) { this.config = config; }
+  constructor(config: ServiceConfig) {
+    this.config = config;
+  }
 
   async complete(request: LLMRequest): Promise<Result<LLMResult>> {
     try {
@@ -111,12 +161,25 @@ export class ClaudeLLMService implements LLMService {
           msg.images.forEach((img) => {
             const match = img.match(/^data:(image\/[^;]+);base64,(.+)$/);
             if (match) {
-              content.push({ type: 'image', source: { type: 'base64', media_type: match[1], data: match[2] } });
+              content.push({
+                type: 'image',
+                source: {
+                  type: 'base64',
+                  media_type: match[1],
+                  data: match[2],
+                },
+              });
             }
           });
-          return { role: msg.role === 'assistant' ? 'assistant' : 'user', content };
+          return {
+            role: msg.role === 'assistant' ? 'assistant' : 'user',
+            content,
+          };
         }
-        return { role: msg.role === 'assistant' ? 'assistant' : 'user', content: msg.content };
+        return {
+          role: msg.role === 'assistant' ? 'assistant' : 'user',
+          content: msg.content,
+        };
       });
 
       const body: Record<string, unknown> = {
@@ -127,6 +190,24 @@ export class ClaudeLLMService implements LLMService {
         top_p: request.topP,
       };
       if (systemMsg) body.system = systemMsg.content;
+
+      // Native extended thinking. Anthropic requires temperature/top_p to be
+      // unset when thinking is enabled.
+      if (request.thinking?.enabled) {
+        body.thinking = {
+          type: 'enabled',
+          budget_tokens: request.thinking.budgetTokens ?? 4096,
+        };
+        delete body.temperature;
+        delete body.top_p;
+        if (
+          (body.max_tokens as number) <=
+          (body.thinking as { budget_tokens: number }).budget_tokens
+        ) {
+          body.max_tokens =
+            (body.thinking as { budget_tokens: number }).budget_tokens + 2048;
+        }
+      }
 
       const response = await fetch(
         `${this.config.apiUrl || 'https://api.anthropic.com/v1'}/messages`,
@@ -144,23 +225,37 @@ export class ClaudeLLMService implements LLMService {
       if (!response.ok) {
         const data = (await response.json()) as Record<string, unknown>;
         const errData = data.error as Record<string, unknown> | undefined;
-        return { ok: false, error: (errData?.message as string) || 'Claude LLM request failed' };
+        return {
+          ok: false,
+          error: (errData?.message as string) || 'Claude LLM request failed',
+        };
       }
 
       const data = (await response.json()) as Record<string, unknown>;
       const content = data.content as Record<string, unknown>[];
       const usage = data.usage as Record<string, unknown> | undefined;
+      const thinkingBlock = content.find((c) => c.type === 'thinking');
+      const textBlock = content.find((c) => c.type === 'text');
       return {
         ok: true,
         value: {
-          content: content[0]?.text as string,
-          tokensUsed: usage ? ((usage.input_tokens as number) + (usage.output_tokens as number)) : undefined,
+          content:
+            (textBlock?.text as string) ?? (content[0]?.text as string) ?? '',
+          tokensUsed: usage
+            ? (usage.input_tokens as number) + (usage.output_tokens as number)
+            : undefined,
           model: data.model as string,
           finishReason: data.stop_reason as string | undefined,
+          thinking: thinkingBlock
+            ? (thinkingBlock.thinking as string)
+            : undefined,
         },
       };
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : 'Unknown LLM error' };
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Unknown LLM error',
+      };
     }
   }
 }
@@ -168,7 +263,9 @@ export class ClaudeLLMService implements LLMService {
 export class GeminiLLMService implements LLMService {
   readonly provider = 'gemini';
   private config: ServiceConfig;
-  constructor(config: ServiceConfig) { this.config = config; }
+  constructor(config: ServiceConfig) {
+    this.config = config;
+  }
 
   async complete(request: LLMRequest): Promise<Result<LLMResult>> {
     try {
@@ -189,13 +286,18 @@ export class GeminiLLMService implements LLMService {
               }
             });
           }
-          contents.push({ role: msg.role === 'assistant' ? 'model' : 'user', parts });
+          contents.push({
+            role: msg.role === 'assistant' ? 'model' : 'user',
+            parts,
+          });
         }
       }
 
       const genConfig: Record<string, unknown> = {};
-      if (request.temperature !== undefined) genConfig.temperature = request.temperature;
-      if (request.maxTokens !== undefined) genConfig.maxOutputTokens = request.maxTokens;
+      if (request.temperature !== undefined)
+        genConfig.temperature = request.temperature;
+      if (request.maxTokens !== undefined)
+        genConfig.maxOutputTokens = request.maxTokens;
       if (request.topP !== undefined) genConfig.topP = request.topP;
 
       const response = await fetch(
@@ -209,12 +311,18 @@ export class GeminiLLMService implements LLMService {
 
       if (!response.ok) {
         const data = (await response.json()) as Record<string, unknown>;
-        return { ok: false, error: (data.error as Record<string, unknown>)?.message as string || 'Gemini LLM request failed' };
+        return {
+          ok: false,
+          error:
+            ((data.error as Record<string, unknown>)?.message as string) ||
+            'Gemini LLM request failed',
+        };
       }
 
       const data = (await response.json()) as Record<string, unknown>;
       const candidates = data.candidates as Record<string, unknown>[];
-      const content = candidates?.[0]?.content as Record<string, unknown> | undefined;
+      const content = candidates?.[0]?.content as
+        Record<string, unknown> | undefined;
       const parts = content?.parts as Record<string, unknown>[] | undefined;
       return {
         ok: true,
@@ -225,7 +333,10 @@ export class GeminiLLMService implements LLMService {
         },
       };
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : 'Unknown LLM error' };
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Unknown LLM error',
+      };
     }
   }
 }
@@ -233,34 +344,57 @@ export class GeminiLLMService implements LLMService {
 export class GroqLLMService implements LLMService {
   readonly provider = 'groq';
   private config: ServiceConfig;
-  constructor(config: ServiceConfig) { this.config = config; }
+  constructor(config: ServiceConfig) {
+    this.config = config;
+  }
   async complete(request: LLMRequest): Promise<Result<LLMResult>> {
-    return openaiCompatibleComplete(this.config, request, 'https://api.groq.com/openai/v1', 'llama-3.3-70b-versatile');
+    return openaiCompatibleComplete(
+      this.config,
+      request,
+      'https://api.groq.com/openai/v1',
+      'llama-3.3-70b-versatile',
+    );
   }
 }
 
 export class DeepSeekLLMService implements LLMService {
   readonly provider = 'deepseek';
   private config: ServiceConfig;
-  constructor(config: ServiceConfig) { this.config = config; }
+  constructor(config: ServiceConfig) {
+    this.config = config;
+  }
   async complete(request: LLMRequest): Promise<Result<LLMResult>> {
-    return openaiCompatibleComplete(this.config, request, 'https://api.deepseek.com', 'deepseek-chat');
+    return openaiCompatibleComplete(
+      this.config,
+      request,
+      'https://api.deepseek.com',
+      'deepseek-chat',
+    );
   }
 }
 
 export class GrokLLMService implements LLMService {
   readonly provider = 'grok';
   private config: ServiceConfig;
-  constructor(config: ServiceConfig) { this.config = config; }
+  constructor(config: ServiceConfig) {
+    this.config = config;
+  }
   async complete(request: LLMRequest): Promise<Result<LLMResult>> {
-    return openaiCompatibleComplete(this.config, request, 'https://api.x.ai/v1', 'grok-3');
+    return openaiCompatibleComplete(
+      this.config,
+      request,
+      'https://api.x.ai/v1',
+      'grok-3',
+    );
   }
 }
 
 export class OpenRouterLLMService implements LLMService {
   readonly provider = 'openrouter';
   private config: ServiceConfig;
-  constructor(config: ServiceConfig) { this.config = config; }
+  constructor(config: ServiceConfig) {
+    this.config = config;
+  }
   async complete(request: LLMRequest): Promise<Result<LLMResult>> {
     return openaiCompatibleComplete(
       this.config,
@@ -275,7 +409,9 @@ export class OpenRouterLLMService implements LLMService {
 export class PoeLLMService implements LLMService {
   readonly provider = 'poe';
   private config: ServiceConfig;
-  constructor(config: ServiceConfig) { this.config = config; }
+  constructor(config: ServiceConfig) {
+    this.config = config;
+  }
 
   async complete(request: LLMRequest): Promise<Result<LLMResult>> {
     try {
@@ -288,7 +424,10 @@ export class PoeLLMService implements LLMService {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            query: request.messages.map((m) => ({ role: m.role, content: m.content })),
+            query: request.messages.map((m) => ({
+              role: m.role,
+              content: m.content,
+            })),
             temperature: request.temperature,
             max_tokens: request.maxTokens,
           }),
@@ -297,7 +436,10 @@ export class PoeLLMService implements LLMService {
 
       if (!response.ok) {
         const data = (await response.json()) as Record<string, unknown>;
-        return { ok: false, error: (data.error as string) || 'Poe LLM request failed' };
+        return {
+          ok: false,
+          error: (data.error as string) || 'Poe LLM request failed',
+        };
       }
 
       const data = (await response.json()) as Record<string, unknown>;
@@ -310,7 +452,10 @@ export class PoeLLMService implements LLMService {
         },
       };
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : 'Unknown LLM error' };
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Unknown LLM error',
+      };
     }
   }
 }
@@ -318,30 +463,49 @@ export class PoeLLMService implements LLMService {
 export class NvidiaNimLLMService implements LLMService {
   readonly provider = 'nvidia-nim';
   private config: ServiceConfig;
-  constructor(config: ServiceConfig) { this.config = config; }
+  constructor(config: ServiceConfig) {
+    this.config = config;
+  }
   async complete(request: LLMRequest): Promise<Result<LLMResult>> {
-    return openaiCompatibleComplete(this.config, request, 'https://integrate.api.nvidia.com/v1', 'meta/llama-3.1-8b-instruct');
+    return openaiCompatibleComplete(
+      this.config,
+      request,
+      'https://integrate.api.nvidia.com/v1',
+      'meta/llama-3.1-8b-instruct',
+    );
   }
 }
 
 export class CerebrasLLMService implements LLMService {
   readonly provider = 'cerebras';
   private config: ServiceConfig;
-  constructor(config: ServiceConfig) { this.config = config; }
+  constructor(config: ServiceConfig) {
+    this.config = config;
+  }
   async complete(request: LLMRequest): Promise<Result<LLMResult>> {
-    return openaiCompatibleComplete(this.config, request, 'https://api.cerebras.ai/v1', 'llama-3.3-70b');
+    return openaiCompatibleComplete(
+      this.config,
+      request,
+      'https://api.cerebras.ai/v1',
+      'llama-3.3-70b',
+    );
   }
 }
 
 export class CloudflareWorkersLLMService implements LLMService {
   readonly provider = 'cloudflare-workers';
   private config: ServiceConfig;
-  constructor(config: ServiceConfig) { this.config = config; }
+  constructor(config: ServiceConfig) {
+    this.config = config;
+  }
 
   async complete(request: LLMRequest): Promise<Result<LLMResult>> {
     try {
-      const model = request.model || this.config.model || '@cf/meta/llama-3.1-8b-instruct';
-      const apiUrl = this.config.apiUrl || `https://api.cloudflare.com/client/v4/accounts/${this.config.apiKey?.split(':')[0] || '{account_id}'}/ai/run/${model}`;
+      const model =
+        request.model || this.config.model || '@cf/meta/llama-3.1-8b-instruct';
+      const apiUrl =
+        this.config.apiUrl ||
+        `https://api.cloudflare.com/client/v4/accounts/${this.config.apiKey?.split(':')[0] || '{account_id}'}/ai/run/${model}`;
 
       const response = await fetch(apiUrl, {
         method: 'POST',
@@ -350,7 +514,10 @@ export class CloudflareWorkersLLMService implements LLMService {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          messages: request.messages.map((m) => ({ role: m.role, content: m.content })),
+          messages: request.messages.map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
           temperature: request.temperature,
           max_tokens: request.maxTokens,
         }),
@@ -358,8 +525,14 @@ export class CloudflareWorkersLLMService implements LLMService {
 
       if (!response.ok) {
         const data = (await response.json()) as Record<string, unknown>;
-        const errors = data.errors as Array<Record<string, unknown>> | undefined;
-        return { ok: false, error: errors?.[0]?.message as string || 'Cloudflare Workers LLM request failed' };
+        const errors = data.errors as
+          Array<Record<string, unknown>> | undefined;
+        return {
+          ok: false,
+          error:
+            (errors?.[0]?.message as string) ||
+            'Cloudflare Workers LLM request failed',
+        };
       }
 
       const data = (await response.json()) as Record<string, unknown>;
@@ -372,7 +545,10 @@ export class CloudflareWorkersLLMService implements LLMService {
         },
       };
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : 'Unknown LLM error' };
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Unknown LLM error',
+      };
     }
   }
 }
@@ -380,39 +556,65 @@ export class CloudflareWorkersLLMService implements LLMService {
 export class FireworksLLMService implements LLMService {
   readonly provider = 'fireworks';
   private config: ServiceConfig;
-  constructor(config: ServiceConfig) { this.config = config; }
+  constructor(config: ServiceConfig) {
+    this.config = config;
+  }
   async complete(request: LLMRequest): Promise<Result<LLMResult>> {
-    return openaiCompatibleComplete(this.config, request, 'https://api.fireworks.ai/inference/v1', 'accounts/fireworks/models/llama-v3p1-8b-instruct');
+    return openaiCompatibleComplete(
+      this.config,
+      request,
+      'https://api.fireworks.ai/inference/v1',
+      'accounts/fireworks/models/llama-v3p1-8b-instruct',
+    );
   }
 }
 
 export class ZaiLLMService implements LLMService {
   readonly provider = 'zai';
   private config: ServiceConfig;
-  constructor(config: ServiceConfig) { this.config = config; }
+  constructor(config: ServiceConfig) {
+    this.config = config;
+  }
   async complete(request: LLMRequest): Promise<Result<LLMResult>> {
-    return openaiCompatibleComplete(this.config, request, 'https://api.z.ai/v1', 'glm-4-flash');
+    return openaiCompatibleComplete(
+      this.config,
+      request,
+      'https://api.z.ai/v1',
+      'glm-4-flash',
+    );
   }
 }
 
 export class QwenLLMService implements LLMService {
   readonly provider = 'qwen';
   private config: ServiceConfig;
-  constructor(config: ServiceConfig) { this.config = config; }
+  constructor(config: ServiceConfig) {
+    this.config = config;
+  }
   async complete(request: LLMRequest): Promise<Result<LLMResult>> {
-    return openaiCompatibleComplete(this.config, request, 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen-plus');
+    return openaiCompatibleComplete(
+      this.config,
+      request,
+      'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      'qwen-plus',
+    );
   }
 }
 
 export class TransformersLLMService implements LLMService {
   readonly provider = 'transformers';
   private config: ServiceConfig;
-  constructor(config: ServiceConfig) { this.config = config; }
+  constructor(config: ServiceConfig) {
+    this.config = config;
+  }
 
   async complete(request: LLMRequest): Promise<Result<LLMResult>> {
     try {
-      const model = request.model || this.config.model || 'microsoft/DialoGPT-medium';
-      const apiUrl = this.config.apiUrl || `https://api-inference.huggingface.co/models/${model}`;
+      const model =
+        request.model || this.config.model || 'microsoft/DialoGPT-medium';
+      const apiUrl =
+        this.config.apiUrl ||
+        `https://api-inference.huggingface.co/models/${model}`;
 
       const response = await fetch(`${apiUrl}/chat/completions`, {
         method: 'POST',
@@ -431,17 +633,28 @@ export class TransformersLLMService implements LLMService {
 
       if (!response.ok) {
         const data = (await response.json()) as Record<string, unknown>;
-        return { ok: false, error: (data.error as string) || 'Transformers LLM request failed' };
+        return {
+          ok: false,
+          error: (data.error as string) || 'Transformers LLM request failed',
+        };
       }
 
       const data = (await response.json()) as Record<string, unknown>;
       const { content, finishReason } = extractChoice(data);
       return {
         ok: true,
-        value: { content, tokensUsed: extractUsage(data), model: data.model as string || model, finishReason },
+        value: {
+          content,
+          tokensUsed: extractUsage(data),
+          model: (data.model as string) || model,
+          finishReason,
+        },
       };
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : 'Unknown LLM error' };
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Unknown LLM error',
+      };
     }
   }
 }
@@ -449,23 +662,40 @@ export class TransformersLLMService implements LLMService {
 export class MistralLLMService implements LLMService {
   readonly provider = 'mistral';
   private config: ServiceConfig;
-  constructor(config: ServiceConfig) { this.config = config; }
+  constructor(config: ServiceConfig) {
+    this.config = config;
+  }
   async complete(request: LLMRequest): Promise<Result<LLMResult>> {
-    return openaiCompatibleComplete(this.config, request, 'https://api.mistral.ai/v1', 'mistral-large-latest');
+    return openaiCompatibleComplete(
+      this.config,
+      request,
+      'https://api.mistral.ai/v1',
+      'mistral-large-latest',
+    );
   }
 }
 
 export class CohereLLMService implements LLMService {
   readonly provider = 'cohere';
   private config: ServiceConfig;
-  constructor(config: ServiceConfig) { this.config = config; }
+  constructor(config: ServiceConfig) {
+    this.config = config;
+  }
 
   async complete(request: LLMRequest): Promise<Result<LLMResult>> {
     try {
       const chatHistory = request.messages
         .filter((m) => m.role !== 'system')
         .slice(0, -1)
-        .map((m) => ({ role: m.role === 'assistant' ? 'CHATBOT' : m.role === 'user' ? 'USER' : 'SYSTEM', message: m.content }));
+        .map((m) => ({
+          role:
+            m.role === 'assistant'
+              ? 'CHATBOT'
+              : m.role === 'user'
+                ? 'USER'
+                : 'SYSTEM',
+          message: m.content,
+        }));
 
       const lastMsg = request.messages[request.messages.length - 1];
       const systemMsg = request.messages.find((m) => m.role === 'system');
@@ -494,23 +724,33 @@ export class CohereLLMService implements LLMService {
 
       if (!response.ok) {
         const data = (await response.json()) as Record<string, unknown>;
-        return { ok: false, error: (data.message as string) || 'Cohere LLM request failed' };
+        return {
+          ok: false,
+          error: (data.message as string) || 'Cohere LLM request failed',
+        };
       }
 
       const data = (await response.json()) as Record<string, unknown>;
       const content = data.text as string | undefined;
       const meta = data.meta as Record<string, unknown> | undefined;
-      const billedUnits = meta?.billed_units as Record<string, number> | undefined;
+      const billedUnits = meta?.billed_units as
+        Record<string, number> | undefined;
       return {
         ok: true,
         value: {
           content: content || '',
-          tokensUsed: billedUnits ? (billedUnits.input_tokens || 0) + (billedUnits.output_tokens || 0) : undefined,
-          model: data.model as string || this.config.model || 'command-r-plus',
+          tokensUsed: billedUnits
+            ? (billedUnits.input_tokens || 0) + (billedUnits.output_tokens || 0)
+            : undefined,
+          model:
+            (data.model as string) || this.config.model || 'command-r-plus',
         },
       };
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : 'Unknown LLM error' };
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Unknown LLM error',
+      };
     }
   }
 }
@@ -518,17 +758,31 @@ export class CohereLLMService implements LLMService {
 export class TogetherLLMService implements LLMService {
   readonly provider = 'together';
   private config: ServiceConfig;
-  constructor(config: ServiceConfig) { this.config = config; }
+  constructor(config: ServiceConfig) {
+    this.config = config;
+  }
   async complete(request: LLMRequest): Promise<Result<LLMResult>> {
-    return openaiCompatibleComplete(this.config, request, 'https://api.together.xyz/v1', 'meta-llama/Llama-3-70b-chat-hf');
+    return openaiCompatibleComplete(
+      this.config,
+      request,
+      'https://api.together.xyz/v1',
+      'meta-llama/Llama-3-70b-chat-hf',
+    );
   }
 }
 
 export class PerplexityLLMService implements LLMService {
   readonly provider = 'perplexity';
   private config: ServiceConfig;
-  constructor(config: ServiceConfig) { this.config = config; }
+  constructor(config: ServiceConfig) {
+    this.config = config;
+  }
   async complete(request: LLMRequest): Promise<Result<LLMResult>> {
-    return openaiCompatibleComplete(this.config, request, 'https://api.perplexity.ai', 'sonar-pro');
+    return openaiCompatibleComplete(
+      this.config,
+      request,
+      'https://api.perplexity.ai',
+      'sonar-pro',
+    );
   }
 }

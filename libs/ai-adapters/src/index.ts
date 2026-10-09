@@ -33,7 +33,11 @@ import type {
   DebateResult,
 } from '@prism/shared-types';
 
-export type { AIMode, AdapterConfig, LocalSearchProvider } from '@prism/shared-types';
+export type {
+  AIMode,
+  AdapterConfig,
+  LocalSearchProvider,
+} from '@prism/shared-types';
 
 export interface AIAdapter {
   readonly mode: AIMode;
@@ -51,10 +55,20 @@ export interface AIAdapter {
   council(request: CouncilRequest): Promise<Result<CouncilResponse>>;
   multiSend(request: MultiSendRequest): Promise<Result<MultiSendResponse>>;
   debate(request: DebateRequest): Promise<Result<DebateResult>>;
-  setProvider(capability: AICapability, provider: string, config?: Partial<ServiceConfig>): void;
+  setProvider(
+    capability: AICapability,
+    provider: string,
+    config?: Partial<ServiceConfig>,
+  ): void;
 }
 
 export { DirectAPIAdapter } from './direct-api-adapter';
 export { ServerAdapter } from './server-adapter';
 export { LocalAdapter } from './local-adapter';
 export { AdapterRouter } from './adapter-router';
+export {
+  applyThinkingToMessages,
+  stripThinkingFromContent,
+  isThinkingEnabled,
+} from './thinking';
+export { selectAutoModel, type AutoModelCriteria } from './auto-model';

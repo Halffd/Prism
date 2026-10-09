@@ -6,6 +6,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { MermaidRenderer, Icon } from '@prism/ui-components';
 import { UnifiedAIClient } from '@prism/api-client';
+import { selectAutoModel } from '@prism/ai-adapters';
 import {
   saveChatHistory,
   loadChatHistory,
@@ -20,6 +21,7 @@ import {
   setCurrentSessionId,
   setSessions,
   setChatSelectedProvider as setSelectedProvider,
+  updateAIConfig as updateAIConfigAction,
   setAIConfig,
   setGroupChatActive,
   setSpeakingCharacter,
@@ -121,6 +123,7 @@ export function ChatPage() {
   const [debateInProgress, setDebateInProgress] = useState(false);
   const [debateResult, setDebateResult] = useState<DebateResult | null>(null);
   const [agentEnabled, setAgentEnabled] = useState(false);
+  const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [agentInProgress, setAgentInProgress] = useState(false);
   const [agentResult, setAgentResult] = useState<AgentResult | null>(null);
   const [agentStep, setAgentStep] = useState<number>(0);
@@ -525,7 +528,11 @@ export function ChatPage() {
     dispatch(setLoading(true));
 
     try {
-      const tempConfig = { ...reduxAIConfig, provider: selectedProvider };
+      const tempConfig = {
+        ...reduxAIConfig,
+        provider: selectedProvider,
+        thinkingMode: { enabled: thinkingEnabled },
+      };
       client.updateAIConfig(tempConfig);
 
       if (isGroupChat) {
@@ -843,6 +850,42 @@ export function ChatPage() {
       <div className="chat-header">
         <h1>💎 Prism Chat</h1>
         <div className="header-actions">
+          <button
+            onClick={() => {
+              // Automatic model selection: pick a model from the provider's
+              // cache (or the built-in known list) based on the current input.
+              const auto = selectAutoModel(
+                {
+                  provider: selectedProvider,
+                  inputTokens: estimateTokenCount(input),
+                  hasImages: false,
+                  capability: webSearchEnabled
+                    ? 'web-search'
+                    : deepSearchEnabled
+                      ? 'deepsearch'
+                      : councilEnabled
+                        ? 'council'
+                        : agentEnabled
+                          ? 'agent'
+                          : 'chat',
+                },
+                reduxAIConfig.modelCache,
+              );
+              if (auto) {
+                dispatch(
+                  updateAIConfigAction({
+                    ...reduxAIConfig,
+                    provider: selectedProvider,
+                    model: auto,
+                  }),
+                );
+              }
+            }}
+            className="provider-selector"
+            title="Auto-select model for the current task"
+          >
+            <Icon name="bolt" title="Auto model" /> Auto
+          </button>
           <select
             value={selectedProvider}
             onChange={(e) =>
@@ -1254,6 +1297,13 @@ export function ChatPage() {
             title="AI Council (multi-model voting)"
           >
             <Icon name="balance" title="AI Council" />
+          </button>
+          <button
+            onClick={() => setThinkingEnabled(!thinkingEnabled)}
+            className={`mode-toggle-btn ${thinkingEnabled ? 'active' : ''}`}
+            title="Thinking mode (step-by-step reasoning; provider-native where supported)"
+          >
+            <Icon name="psychology" title="Thinking mode" />
           </button>
           <button
             onClick={sendMessage}
