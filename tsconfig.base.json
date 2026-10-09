@@ -43,6 +43,7 @@
     "@prism/ui-components": ["libs/ui-components/src/index.ts"],
     "@prism/web-search": ["libs/web-search/src/index.ts"],
     "@prism/logging": ["libs/logging/src/index.ts"],
+    "@prism/rag": ["libs/rag/src/index.ts"],
     "@prism/deepsearch": ["libs/deepsearch/src/index.ts"],
 "@prism/council": ["libs/council/src/index.ts"]
   }

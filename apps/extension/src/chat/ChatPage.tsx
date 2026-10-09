@@ -125,6 +125,39 @@ export function ChatPage() {
   const [debateResult, setDebateResult] = useState<DebateResult | null>(null);
   const [agentEnabled, setAgentEnabled] = useState(false);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
+  const [ragDocuments, setRagDocuments] = useState<
+    import('@prism/rag').RagDocument[]
+  >([]);
+  const ragSessionRef = useRef<import('../rag/RagSession').RagSession | null>(
+    null,
+  );
+  const ragFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleRagFileSelected = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+    const { RagSession } = await import('../rag/RagSession');
+    const session =
+      ragSessionRef.current ??
+      new RagSession({
+        openaiApiKey: reduxAIConfig.providerKeys?.['openai'],
+        ollamaUrl: reduxAIConfig.providerKeys?.['ollama'],
+      });
+    ragSessionRef.current = session;
+
+    for (const file of Array.from(files)) {
+      try {
+        const text = await file.text();
+        const doc = await session.ingest(file.name, text);
+        setRagDocuments((prev) => [...prev, doc]);
+      } catch (err) {
+        console.error(`Failed to ingest ${file.name}:`, err);
+      }
+    }
+    event.target.value = '';
+  };
   const { agents: customAgents, activeAgentId } = useSelector(
     (state: RootState) => state.agents,
   );
@@ -702,7 +735,23 @@ export function ChatPage() {
           }
         }
 
-        const enhancedInput = searchContext ? input + searchContext : input;
+        // RAG retrieval: when documents are attached, inject the top-k chunks
+        let ragContext = '';
+        if (ragDocuments.length > 0 && ragSessionRef.current) {
+          try {
+            ragContext = await ragSessionRef.current.retrieve(input);
+          } catch (err) {
+            console.warn('RAG retrieval failed:', err);
+          }
+        }
+
+        const ragSuffix = ragContext
+          ? `\n\n${ragContext}\n\nUsing the retrieved context above when relevant, respond to the user's query:`
+          : '';
+        const enhancedInput =
+          searchContext || ragSuffix
+            ? input + searchContext + ragSuffix
+            : input;
 
         // Single character send flow (original behavior)
         const response = await client.sendMessage(
@@ -1345,6 +1394,21 @@ export function ChatPage() {
           >
             <Icon name="psychology" title="Thinking mode" />
           </button>
+          <button
+            onClick={() => ragFileInputRef.current?.click()}
+            className={`mode-toggle-btn ${ragDocuments.length > 0 ? 'active' : ''}`}
+            title={`Attach documents for RAG (${ragDocuments.length} attached)`}
+          >
+            <Icon name="attach_file" title="Attach documents (RAG)" />
+          </button>
+          <input
+            ref={ragFileInputRef}
+            type="file"
+            accept=".txt,.md,.json,.csv,text/*"
+            multiple
+            style={{ display: 'none' }}
+            onChange={handleRagFileSelected}
+          />
           <button
             onClick={sendMessage}
             disabled={loading || !input.trim()}

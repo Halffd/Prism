@@ -41,6 +41,9 @@
       "path": "../../libs/logging/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/rag/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/context-manager/tsconfig.lib.json"
     },
     {
