@@ -128,6 +128,31 @@ export function ChatPage() {
   const { agents: customAgents, activeAgentId } = useSelector(
     (state: RootState) => state.agents,
   );
+  const [theme, setTheme] = useState<
+    'dark' | 'light' | 'high-contrast' | 'monokai' | 'material' | 'github'
+  >('dark');
+
+  // Load persisted theme from display settings
+  useEffect(() => {
+    const loadTheme = async () => {
+      try {
+        const { getSetting } = await import('@prism/shared-db');
+        const settings = await getSetting<{
+          theme?:
+            | 'dark'
+            | 'light'
+            | 'high-contrast'
+            | 'monokai'
+            | 'material'
+            | 'github';
+        }>('displaySettings');
+        if (settings?.theme) setTheme(settings.theme);
+      } catch {
+        /* keep default dark theme */
+      }
+    };
+    loadTheme();
+  }, []);
   const [agentInProgress, setAgentInProgress] = useState(false);
   const [agentResult, setAgentResult] = useState<AgentResult | null>(null);
   const [agentStep, setAgentStep] = useState<number>(0);
@@ -860,6 +885,7 @@ export function ChatPage() {
       className={
         lowSpecMode ? 'chat-page-container low-spec' : 'chat-page-container'
       }
+      data-theme={theme}
     >
       <div className="chat-header">
         <h1>💎 Prism Chat</h1>

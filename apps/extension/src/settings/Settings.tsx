@@ -93,6 +93,9 @@ export function Settings({ onClose }: SettingsProps) {
     preferredCompute: 'auto',
   });
   const [lowSpecMode, setLowSpecMode] = useState<boolean>(false);
+  const [theme, setTheme] = useState<
+    'dark' | 'light' | 'high-contrast' | 'monokai' | 'material' | 'github'
+  >('dark');
 
   useEffect(() => {
     // Initialize API client with current settings
@@ -198,6 +201,13 @@ export function Settings({ onClose }: SettingsProps) {
         }
       } else {
         setAiConfig(defaultAIConfig);
+      }
+
+      // Load persisted theme
+      const savedDisplaySettings =
+        await getSetting<ExtensionSettings>('displaySettings');
+      if (savedDisplaySettings?.theme) {
+        setTheme(savedDisplaySettings.theme);
       }
 
       // Load image generation config from local database
@@ -492,6 +502,7 @@ export function Settings({ onClose }: SettingsProps) {
         capabilityModes: capabilityModes,
         prismApiUrl: prismApiUrl,
         prismApiKey: prismApiKey,
+        theme: theme,
       };
 
       await saveSetting('displaySettings', displaySettingsObj);
@@ -625,6 +636,7 @@ export function Settings({ onClose }: SettingsProps) {
         capabilityModes: capabilityModes,
         prismApiUrl: prismApiUrl,
         prismApiKey: prismApiKey,
+        theme: theme,
       };
 
       await saveSetting('displaySettings', displaySettingsObj);
@@ -1717,6 +1729,24 @@ export function Settings({ onClose }: SettingsProps) {
 
         <div className="settings-section">
           <h3>Display Options</h3>
+          <div className="form-group">
+            <label>Theme</label>
+            <select
+              value={theme}
+              onChange={(e) => setTheme(e.target.value as typeof theme)}
+              className="form-control"
+            >
+              <option value="dark">Dark</option>
+              <option value="light">White (Light)</option>
+              <option value="high-contrast">High Contrast</option>
+              <option value="monokai">Monokai</option>
+              <option value="material">Material</option>
+              <option value="github">GitHub</option>
+            </select>
+            <small className="form-hint">
+              Applies to the extension popup, chat page, and floating window.
+            </small>
+          </div>
           <div className="form-group">
             <label>Popup Display Mode</label>
             <select

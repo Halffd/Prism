@@ -225,6 +225,9 @@ export interface ExtensionSettings {
   clipboardKey?: string;
   pageInfoKey?: string;
   iframeToggleKey?: string;
+  /** UI theme: dark | light | high-contrast | monokai | material | github */
+  theme?:
+    'dark' | 'light' | 'high-contrast' | 'monokai' | 'material' | 'github';
   systemPrompt?: string;
   activeCharacterId?: string;
   activePersonaId?: string;

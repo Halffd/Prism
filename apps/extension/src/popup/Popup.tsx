@@ -85,6 +85,31 @@ export function Popup() {
   const [autoSyncIntervalId, setAutoSyncIntervalId] =
     useState<NodeJS.Timeout | null>(null);
   const [isOnline, setIsOnline] = useState(true); // Track network status
+  const [theme, setTheme] = useState<
+    'dark' | 'light' | 'high-contrast' | 'monokai' | 'material' | 'github'
+  >('dark');
+
+  // Load persisted theme from display settings
+  useEffect(() => {
+    const loadTheme = async () => {
+      try {
+        const { getSetting } = await import('@prism/shared-db');
+        const settings = await getSetting<{
+          theme?:
+            | 'dark'
+            | 'light'
+            | 'high-contrast'
+            | 'monokai'
+            | 'material'
+            | 'github';
+        }>('displaySettings');
+        if (settings?.theme) setTheme(settings.theme);
+      } catch {
+        /* keep default dark theme */
+      }
+    };
+    loadTheme();
+  }, []);
 
   // Monitor network status
   useEffect(() => {
@@ -1854,6 +1879,7 @@ export function Popup() {
   return (
     <div
       className={lowSpecMode ? 'popup-container low-spec' : 'popup-container'}
+      data-theme={theme}
     >
       <HeaderSection
         context={reduxContext}

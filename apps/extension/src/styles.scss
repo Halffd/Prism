@@ -1,37 +1,37 @@
 :root {
   --surface: #141218;
-  --surface-container-lowest: #0F0D13;
-  --surface-container-low: #1D1A21;
-  --surface-container: #211F26;
-  --surface-container-high: #2B292F;
-  --surface-container-highest: #36333A;
-  --surface-variant: #36333A;
+  --surface-container-lowest: #0f0d13;
+  --surface-container-low: #1d1a21;
+  --surface-container: #211f26;
+  --surface-container-high: #2b292f;
+  --surface-container-highest: #36333a;
+  --surface-variant: #36333a;
 
-  --primary: #CDC1E5;
-  --on-primary: #342C49;
-  --primary-container: #29213D;
-  --primary-fixed-dim: #CDC1E5;
+  --primary: #cdc1e5;
+  --on-primary: #342c49;
+  --primary-container: #29213d;
+  --primary-fixed-dim: #cdc1e5;
 
-  --secondary-container: #3F4560;
-  --on-secondary-container: #AEB4D3;
+  --secondary-container: #3f4560;
+  --on-secondary-container: #aeb4d3;
 
-  --tertiary: #D4BBFF;
-  --on-tertiary-container: #9F78E5;
+  --tertiary: #d4bbff;
+  --on-tertiary-container: #9f78e5;
 
-  --on-surface: #E7E0E9;
-  --on-surface-variant: #CBC4CF;
+  --on-surface: #e7e0e9;
+  --on-surface-variant: #cbc4cf;
 
-  --outline-variant: #49454E;
+  --outline-variant: #49454e;
   --ghost-border: rgba(73, 69, 78, 0.2);
   --ghost-border-primary: rgba(205, 193, 229, 0.4);
   --glass-opacity: 0.6;
 
-  --error: #F2B8B5;
+  --error: #f2b8b5;
   --on-error: #601410;
 
   --shadow-tinted: rgba(15, 13, 19, 0.4);
 
-  --gradient-cta: radial-gradient(circle at top left, #CDC1E5 0%, #D4BBFF 100%);
+  --gradient-cta: radial-gradient(circle at top left, #cdc1e5 0%, #d4bbff 100%);
 
   --spacing-xs: 4px;
   --spacing-sm: 8px;
@@ -56,7 +56,9 @@
   --font-2xl: 24px;
   --font-display: 56px;
 
-  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  --font-family:
+    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
+    Ubuntu, Cantarell, sans-serif;
   --font-family-mono: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
 
   --elevation-ambient: 0 0 30px rgba(15, 13, 19, 0.4);
@@ -65,6 +67,176 @@
   --label-sm: 0.6875rem;
   --label-sm-letter-spacing: 0.1em;
   --display-lg-letter-spacing: -0.02em;
+
+  color-scheme: dark;
+}
+
+// Theme system: set data-theme on the document root (or a container) to switch.
+// Themes inherit every variable; only the palette changes.
+
+// Material (default dark above) is the baseline; 'material' is an explicit alias.
+[data-theme='material'] {
+  --surface: #141218;
+  --surface-container-lowest: #0f0d13;
+  --surface-container-low: #1d1a21;
+  --surface-container: #211f26;
+  --surface-container-high: #2b292f;
+  --surface-container-highest: #36333a;
+  --primary: #cdc1e5;
+  --on-primary: #342c49;
+  --tertiary: #d4bbff;
+  --on-surface: #e7e0e9;
+  color-scheme: dark;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+[data-theme='light'] {
+  --surface: #ffffff;
+  --surface-container-lowest: #fafafa;
+  --surface-container-low: #f5f5f5;
+  --surface-container: #eeeef0;
+  --surface-container-high: #e6e6e9;
+  --surface-container-highest: #dcdce0;
+  --surface-variant: #dcdce0;
+
+  --primary: #6750a4;
+  --on-primary: #ffffff;
+  --primary-container: #eaddff;
+  --primary-fixed-dim: #6750a4;
+
+  --secondary-container: #e2e8f0;
+  --on-secondary-container: #1e293b;
+
+  --tertiary: #7d5260;
+  --on-tertiary-container: #ffffff;
+
+  --on-surface: #1c1b1f;
+  --on-surface-variant: #49454f;
+
+  --outline-variant: #cac4d0;
+  --ghost-border: rgba(28, 27, 31, 0.12);
+  --ghost-border-primary: rgba(103, 80, 164, 0.4);
+  --glass-opacity: 0.9;
+
+  --error: #b3261e;
+  --on-error: #ffffff;
+
+  --shadow-tinted: rgba(28, 27, 31, 0.15);
+  --gradient-cta: radial-gradient(circle at top left, #6750a4 0%, #7d5260 100%);
+
+  color-scheme: light;
+}
+
+[data-theme='high-contrast'] {
+  --surface: #000000;
+  --surface-container-lowest: #000000;
+  --surface-container-low: #0a0a0a;
+  --surface-container: #121212;
+  --surface-container-high: #1a1a1a;
+  --surface-container-highest: #242424;
+  --surface-variant: #242424;
+
+  --primary: #ffffff;
+  --on-primary: #000000;
+  --primary-container: #ffffff;
+  --primary-fixed-dim: #ffffff;
+
+  --secondary-container: #ffffff;
+  --on-secondary-container: #000000;
+
+  --tertiary: #ffff00;
+  --on-tertiary-container: #000000;
+
+  --on-surface: #ffffff;
+  --on-surface-variant: #e0e0e0;
+
+  --outline-variant: #ffffff;
+  --ghost-border: rgba(255, 255, 255, 0.5);
+  --ghost-border-primary: rgba(255, 255, 255, 0.9);
+  --glass-opacity: 1;
+
+  --error: #ff5449;
+  --on-error: #000000;
+
+  --shadow-tinted: rgba(0, 0, 0, 0.8);
+  --gradient-cta: linear-gradient(0deg, #ffffff 0%, #ffffff 100%);
+
+  color-scheme: dark;
+}
+
+[data-theme='monokai'] {
+  --surface: #272822;
+  --surface-container-lowest: #1e1f1c;
+  --surface-container-low: #2d2e28;
+  --surface-container: #32332c;
+  --surface-container-high: #3b3c34;
+  --surface-container-highest: #45463d;
+  --surface-variant: #45463d;
+
+  --primary: #a6e22e;
+  --on-primary: #1e1f1c;
+  --primary-container: #3e4a20;
+  --primary-fixed-dim: #a6e22e;
+
+  --secondary-container: #3e3d32;
+  --on-secondary-container: #e6db74;
+
+  --tertiary: #fd971f;
+  --on-tertiary-container: #1e1f1c;
+
+  --on-surface: #f8f8f2;
+  --on-surface-variant: #c8c8bd;
+
+  --outline-variant: #57584d;
+  --ghost-border: rgba(87, 88, 77, 0.25);
+  --ghost-border-primary: rgba(166, 226, 46, 0.4);
+  --glass-opacity: 0.6;
+
+  --error: #f92672;
+  --on-error: #f8f8f2;
+
+  --shadow-tinted: rgba(30, 31, 28, 0.5);
+  --gradient-cta: radial-gradient(circle at top left, #a6e22e 0%, #fd971f 100%);
+
+  color-scheme: dark;
+}
+
+[data-theme='github'] {
+  --surface: #0d1117;
+  --surface-container-lowest: #010409;
+  --surface-container-low: #161b22;
+  --surface-container: #1c2128;
+  --surface-container-high: #262c36;
+  --surface-container-highest: #2f353d;
+  --surface-variant: #2f353d;
+
+  --primary: #58a6ff;
+  --on-primary: #0d1117;
+  --primary-container: #1f3a5f;
+  --primary-fixed-dim: #58a6ff;
+
+  --secondary-container: #21262d;
+  --on-secondary-container: #c9d1d9;
+
+  --tertiary: #bc8cff;
+  --on-tertiary-container: #0d1117;
+
+  --on-surface: #e6edf3;
+  --on-surface-variant: #8b949e;
+
+  --outline-variant: #30363d;
+  --ghost-border: rgba(48, 54, 61, 0.4);
+  --ghost-border-primary: rgba(88, 166, 255, 0.4);
+  --glass-opacity: 0.7;
+
+  --error: #f85149;
+  --on-error: #0d1117;
+
+  --shadow-tinted: rgba(1, 4, 9, 0.6);
+  --gradient-cta: radial-gradient(circle at top left, #58a6ff 0%, #bc8cff 100%);
 
   color-scheme: dark;
 }
