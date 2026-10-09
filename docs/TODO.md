@@ -19,8 +19,8 @@ Tracking queue state for all apps. Update after each landed feature.
 | Max font scale 8.0                                        | done    | Popup + content script                                                                                               |
 | Per-provider model cache                                  | done    | ModelRecentsEditor, free-form model input                                                                            |
 | Permissions & tools                                       | partial | agentSlice.tools[].enabled; read_file denied with guidance; allow/deny/ask model planned                             |
-| Logging & monitoring                                      | planned | Roadmap Phase 8                                                                                                      |
-| RAG                                                       | planned | Roadmap Phase 9                                                                                                      |
+| Logging & monitoring | done | libs/logging (levels, channels, ring buffer, JSONL export); Settings viewer; api /metrics (p50/p95/p99) |
+| RAG | done | libs/rag (chunking, ollama/openai embeddings, vector stores); attach-document toggle in ChatPage; IndexedDB persistence |
 
 ## TUI (apps/tui)
 
