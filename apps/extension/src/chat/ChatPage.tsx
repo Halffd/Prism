@@ -76,6 +76,7 @@ export function ChatPage() {
   const { config: reduxAIConfig } = useSelector(
     (state: RootState) => state.aiConfig,
   );
+  const lowSpecMode = reduxAIConfig.lowSpecMode === true;
   const { context: reduxContext } = useSelector(
     (state: RootState) => state.context,
   );
@@ -711,7 +712,9 @@ export function ChatPage() {
   };
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({
+      behavior: lowSpecMode ? 'auto' : 'smooth',
+    });
   };
 
   const copyMessageToClipboard = async (content: string) => {
@@ -853,7 +856,11 @@ export function ChatPage() {
   );
 
   return (
-    <div className="chat-page-container">
+    <div
+      className={
+        lowSpecMode ? 'chat-page-container low-spec' : 'chat-page-container'
+      }
+    >
       <div className="chat-header">
         <h1>💎 Prism Chat</h1>
         <div className="header-actions">

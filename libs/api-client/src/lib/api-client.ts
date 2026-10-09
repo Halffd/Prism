@@ -199,6 +199,7 @@ export class UnifiedAIClient {
       prismApiKey: this.prismApiKey,
       localApiUrl: config.localApiUrl,
       providerKeys: config.providerKeys,
+      hardware: config.hardware,
     };
     this.adapterRouter = new AdapterRouter(sc, adapterConfig);
   }

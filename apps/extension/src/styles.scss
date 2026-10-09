@@ -159,3 +159,14 @@ p {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--surface-container-highest);
 }
+
+// Low-spec hardware optimizations: kill animations and transitions when the
+// user enables lowSpecMode (applied via the low-spec class on the container).
+.low-spec *,
+.low-spec *::before,
+.low-spec *::after {
+  animation: none !important;
+  transition: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}

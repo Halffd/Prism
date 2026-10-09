@@ -93,6 +93,7 @@ export class LocalAdapter implements AIAdapter {
   private searchProvider: LocalSearchProvider;
   private searxngUrl: string;
   private searchService?: WebSearchService;
+  private hardware?: import('@prism/shared-types').HardwareProfile;
 
   constructor(config: AdapterConfig & { localProvider?: LocalProvider }) {
     this.provider = config.localProvider || 'ollama';
@@ -100,6 +101,12 @@ export class LocalAdapter implements AIAdapter {
     this.model = undefined;
     this.searchProvider = config.localSearchProvider || 'duckduckgo';
     this.searxngUrl = config.searxngUrl || 'http://localhost:8080';
+    this.hardware = config.hardware;
+  }
+
+  /** Hardware profile for GPU offload / context sizing on local servers. */
+  setHardware(hardware: import('@prism/shared-types').HardwareProfile): void {
+    this.hardware = hardware;
   }
 
   private getSearchService(): WebSearchService {
@@ -161,6 +168,15 @@ export class LocalAdapter implements AIAdapter {
         options: {
           temperature: request.temperature,
           num_predict: request.maxTokens,
+          ...(this.hardware?.contextTokens
+            ? { num_ctx: this.hardware.contextTokens }
+            : {}),
+          // Ollama accepts num_gpu in options (0 = CPU only).
+          ...(this.hardware?.preferredCompute === 'cpu-only'
+            ? { num_gpu: 0 }
+            : this.hardware?.gpuLayersOverride !== undefined
+              ? { num_gpu: this.hardware.gpuLayersOverride }
+              : {}),
         },
         stream: false,
       }),

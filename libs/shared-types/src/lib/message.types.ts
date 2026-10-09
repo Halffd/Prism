@@ -187,6 +187,19 @@ export interface AIConfig {
   systemPrompt?: string;
   modelCache?: Record<string, string[]>;
   thinkingMode?: ThinkingConfig;
+  /** Hardware/low-spec profile for local inference servers. */
+  hardware?: HardwareProfile;
+  /** Reduced memory/animation/token budgets for low-spec machines. */
+  lowSpecMode?: boolean;
+}
+
+export interface HardwareProfile {
+  preferredCompute:
+    'auto' | 'cpu-only' | 'gpu-auto' | 'gpu-nvidia' | 'gpu-amd' | 'gpu-intel';
+  /** GPU offload layer override for llama.cpp-style servers. */
+  gpuLayersOverride?: number;
+  /** Context size hint (tokens) for local servers. */
+  contextTokens?: number;
 }
 
 export type PopupDisplayMode = 'popup' | 'sidebar' | 'iframe' | 'floating';
@@ -288,6 +301,8 @@ export interface AdapterConfig {
   localSearchProvider?: LocalSearchProvider;
   searxngUrl?: string;
   providerKeys?: AIConfig['providerKeys'];
+  /** Hardware/low-spec profile forwarded to the local adapter. */
+  hardware?: HardwareProfile;
 }
 
 export interface OCRRequest {

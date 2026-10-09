@@ -67,6 +67,7 @@ export function Popup() {
     availableModels,
     fetchingModels,
   } = useSelector((state: RootState) => state.aiConfig);
+  const lowSpecMode = reduxAIConfig.lowSpecMode === true;
   const { context: reduxContext } = useSelector(
     (state: RootState) => state.context,
   );
@@ -1602,7 +1603,9 @@ export function Popup() {
   };
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({
+      behavior: lowSpecMode ? 'auto' : 'smooth',
+    });
   };
 
   const renderMenu = () => (
@@ -1849,7 +1852,9 @@ export function Popup() {
   );
 
   return (
-    <div className="popup-container">
+    <div
+      className={lowSpecMode ? 'popup-container low-spec' : 'popup-container'}
+    >
       <HeaderSection
         context={reduxContext}
         aiConfig={reduxAIConfig}

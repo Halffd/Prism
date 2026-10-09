@@ -6,6 +6,7 @@ import {
   PromptShortcut,
   AIMode,
   AICapability,
+  HardwareProfile,
 } from '@prism/shared-types';
 import { UnifiedAIClient } from '@prism/api-client';
 import { ModelRecentsEditor } from './ModelRecentsEditor';
@@ -88,6 +89,10 @@ export function Settings({ onClose }: SettingsProps) {
     aiConfig.providerKeys?.['prism-api'] || 'http://localhost:3000/api',
   );
   const [prismApiKey, setPrismApiKey] = useState<string>('');
+  const [hardware, setHardware] = useState<HardwareProfile>({
+    preferredCompute: 'auto',
+  });
+  const [lowSpecMode, setLowSpecMode] = useState<boolean>(false);
 
   useEffect(() => {
     // Initialize API client with current settings
@@ -182,6 +187,15 @@ export function Settings({ onClose }: SettingsProps) {
         }
 
         setAiConfig(config);
+        if (config.hardware) {
+          setHardware({
+            ...config.hardware,
+            preferredCompute: config.hardware.preferredCompute ?? 'auto',
+          });
+        }
+        if (config.lowSpecMode !== undefined) {
+          setLowSpecMode(config.lowSpecMode);
+        }
       } else {
         setAiConfig(defaultAIConfig);
       }
@@ -387,7 +401,13 @@ export function Settings({ onClose }: SettingsProps) {
   const updateSettings = async () => {
     try {
       // Update the current provider's API key in the providerKeys object
-      const updatedConfig = { ...aiConfig, mode: adapterMode, capabilityModes };
+      const updatedConfig = {
+        ...aiConfig,
+        mode: adapterMode,
+        capabilityModes,
+        hardware,
+        lowSpecMode,
+      };
 
       if (updatedConfig.providerKeys) {
         // Set the apiKey field to the current provider's key for backward compatibility
@@ -514,7 +534,13 @@ export function Settings({ onClose }: SettingsProps) {
   const updateSettingsAuto = async () => {
     try {
       // Update the current provider's API key in the providerKeys object
-      const updatedConfig = { ...aiConfig, mode: adapterMode, capabilityModes };
+      const updatedConfig = {
+        ...aiConfig,
+        mode: adapterMode,
+        capabilityModes,
+        hardware,
+        lowSpecMode,
+      };
 
       if (updatedConfig.providerKeys) {
         // Set the apiKey field to the current provider's key for backward compatibility
@@ -1882,6 +1908,99 @@ export function Settings({ onClose }: SettingsProps) {
             />
             <small className="form-hint">
               Maximum total tokens for message + context (default: 20000)
+            </small>
+          </div>
+        </div>
+
+        <div className="settings-section">
+          <h3>Hardware & Performance</h3>
+          <div className="form-group">
+            <label>Preferred Compute</label>
+            <select
+              value={hardware.preferredCompute}
+              onChange={(e) =>
+                setHardware({
+                  ...hardware,
+                  preferredCompute: e.target
+                    .value as typeof hardware.preferredCompute,
+                })
+              }
+              className="form-control"
+            >
+              <option value="auto">Auto-detect</option>
+              <option value="cpu-only">CPU only</option>
+              <option value="gpu-auto">GPU + CPU (auto layers)</option>
+              <option value="gpu-nvidia">GPU — NVIDIA (CUDA)</option>
+              <option value="gpu-amd">GPU — AMD (ROCm/Vulkan)</option>
+              <option value="gpu-intel">GPU — Intel (Vulkan/SYCL)</option>
+            </select>
+            <small className="form-hint">
+              Applies to local inference servers (Ollama, llama.cpp, KoboldCPP).
+              CPU only forces num_gpu=0; GPU+CPU auto-offloads.
+            </small>
+          </div>
+
+          <div className="form-group">
+            <label>GPU Layers Override (optional)</label>
+            <input
+              type="number"
+              min={0}
+              value={hardware.gpuLayersOverride ?? ''}
+              onChange={(e) =>
+                setHardware({
+                  ...hardware,
+                  gpuLayersOverride:
+                    e.target.value === ''
+                      ? undefined
+                      : parseInt(e.target.value, 10),
+                })
+              }
+              placeholder="e.g. 33"
+              className="form-control"
+            />
+            <small className="form-hint">
+              Number of layers to offload to GPU (llama.cpp n-gpu-layers /
+              Ollama num_gpu). Leave empty for auto.
+            </small>
+          </div>
+
+          <div className="form-group">
+            <label>Context Size (tokens, optional)</label>
+            <input
+              type="number"
+              min={512}
+              step={512}
+              value={hardware.contextTokens ?? ''}
+              onChange={(e) =>
+                setHardware({
+                  ...hardware,
+                  contextTokens:
+                    e.target.value === ''
+                      ? undefined
+                      : parseInt(e.target.value, 10),
+                })
+              }
+              placeholder="e.g. 8192"
+              className="form-control"
+            />
+            <small className="form-hint">
+              num_ctx for Ollama-compatible servers. Lower values reduce RAM use
+              on low-spec machines.
+            </small>
+          </div>
+
+          <div className="form-group">
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={lowSpecMode}
+                onChange={(e) => setLowSpecMode(e.target.checked)}
+              />
+              Low-spec hardware optimizations
+            </label>
+            <small className="form-hint">
+              Reduces font rendering effects, disables smooth animations, caps
+              token budgets and message history to conserve RAM.
             </small>
           </div>
         </div>
