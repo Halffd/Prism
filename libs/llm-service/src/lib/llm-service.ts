@@ -498,13 +498,15 @@ export class AIService {
     // For KoboldCPP, return commonly used models or fetch from the API if available
     // Since KoboldCPP doesn't have a standard models endpoint, we'll return some common model names
     return [
-      'llama-2-7b',
-      'llama-2-13b',
-      'llama-2-70b',
+      'llama-3.2-3b',
+      'llama-3.2-1b',
+      'llama-3.1-8b',
+      'llama-3.3-70b',
       'mistral-7b',
       'mixtral-8x7b',
-      'vicuna-7b',
-      'vicuna-13b',
+      'phi-3.5-mini',
+      'gemma-2-9b',
+      'gemma-2-27b',
     ];
   }
 
@@ -513,14 +515,15 @@ export class AIService {
     // LlamaCPP doesn't typically have a models endpoint, but we'll try to get a list
     if (!this.config.localApiUrl && !this.config.apiUrl) {
       return [
-        'llama-2-7b',
-        'llama-2-13b',
-        'llama-3-8b',
+        'llama-3.2-3b',
+        'llama-3.2-1b',
+        'llama-3.1-8b',
+        'llama-3.3-70b',
         'mistral-7b',
         'mixtral-8x7b',
-        'phi-2',
-        'gemma-2b',
-        'gemma-7b',
+        'phi-3.5-mini',
+        'gemma-2-9b',
+        'gemma-2-27b',
       ];
     }
 
@@ -558,7 +561,20 @@ export class AIService {
   private async getOllamaModels(): Promise<string[]> {
     // Fetch models from Ollama
     if (!this.config.localApiUrl && !this.config.apiUrl) {
-      return ['llama2', 'llama3', 'mistral', 'mixtral', 'gemma', 'phi'];
+      return [
+        'llama3.2',
+        'llama3.1',
+        'llama3.2:3b',
+        'llama3.2:1b',
+        'qwen2.5',
+        'qwen2.5:7b',
+        'qwen2.5:3b',
+        'mistral',
+        'mixtral',
+        'gemma2',
+        'phi3.5',
+        'phi3.5:mini',
+      ];
     }
 
     try {
@@ -576,18 +592,35 @@ export class AIService {
     }
 
     // Return defaults if API call fails
-    return ['llama2', 'llama3', 'mistral', 'mixtral', 'gemma', 'phi'];
+    return [
+      'llama3.2',
+      'llama3.1',
+      'llama3.2:3b',
+      'llama3.2:1b',
+      'qwen2.5',
+      'qwen2.5:7b',
+      'qwen2.5:3b',
+      'mistral',
+      'mixtral',
+      'gemma2',
+      'phi3.5',
+      'phi3.5:mini',
+    ];
   }
 
   private async getSglangModels(): Promise<string[]> {
     // For SGLang, try to fetch available models if possible
     if (!this.config.localApiUrl && !this.config.apiUrl) {
       return [
-        'llama-2-7b',
-        'llama-2-13b',
-        'llama-3-8b',
+        'llama-3.2-3b',
+        'llama-3.2-1b',
+        'llama-3.1-8b',
+        'llama-3.3-70b',
         'mistral-7b',
         'mixtral-8x7b',
+        'phi-3.5-mini',
+        'gemma-2-9b',
+        'gemma-2-27b',
       ];
     }
 
@@ -611,45 +644,60 @@ export class AIService {
 
     // Return defaults if API call fails
     return [
-      'llama-2-7b',
-      'llama-2-13b',
-      'llama-3-8b',
+      'llama-3.2-3b',
+      'llama-3.2-1b',
+      'llama-3.1-8b',
+      'llama-3.3-70b',
       'mistral-7b',
       'mixtral-8x7b',
+      'phi-3.5-mini',
+      'gemma-2-9b',
+      'gemma-2-27b',
     ];
   }
 
   private async getTransformersModels(): Promise<string[]> {
     // For Transformers, return common models available through Hugging Face
     return [
-      'microsoft/DialoGPT-medium',
-      'microsoft/DialoGPT-large',
-      'facebook/blenderbot-400M-distill',
-      'facebook/blenderbot_small-90M',
-      'gpt2',
-      'EleutherAI/gpt-j-6B',
-      'EleutherAI/gpt-neo-2.7B',
+      'microsoft/Phi-3.5-mini-instruct',
+      'microsoft/Phi-3-mini-4k-instruct',
+      'microsoft/Phi-3-medium-4k-instruct',
+      'Qwen/Qwen2.5-1.5B-Instruct',
+      'Qwen/Qwen2.5-7B-Instruct',
+      'Qwen/Qwen2.5-32B-Instruct',
+      'google/gemma-2-2b-it',
+      'google/gemma-2-9b-it',
+      'microsoft/Phi-3.5-mini-instruct',
     ];
   }
 
   private async getClaudeModels(): Promise<string[]> {
-    // Return Claude model options
+    // Return current Claude model options (as of Oct 2026)
     return [
-      'claude-3-5-sonnet-20241022',
-      'claude-3-sonnet-20240229',
-      'claude-3-opus-20240229',
-      'claude-3-haiku-20240307',
+      'claude-opus-5-5',
+      'claude-sonnet-5-5',
+      'claude-haiku-5-5',
+      'claude-fable-5-1',
+      'claude-fable-5',
+      'claude-opus-5',
+      'claude-opus-4-8',
+      'claude-opus-4-7',
+      'claude-opus-4-6',
+      'claude-opus-4-5',
+      'claude-sonnet-5',
+      'claude-sonnet-4-6',
+      'claude-haiku-4-5',
     ];
   }
 
   private async getDeepseekModels(): Promise<string[]> {
-    // Return DeepSeek model options
-    return ['deepseek-chat', 'deepseek-coder'];
+    // Return current DeepSeek model options (V4 generation, Oct 2026)
+    return ['deepseek-v3', 'deepseek-reasoner'];
   }
 
   private async getGrokModels(): Promise<string[]> {
-    // Return Grok model options (these are hypothetical as Grok API details may vary)
-    return ['grok-beta', 'grok-1', 'grok-1.5'];
+    // Return current Grok model options (as of Oct 2026)
+    return ['grok-3', 'grok-2'];
   }
 
   public async getOpenrouterModels(): Promise<string[]> {

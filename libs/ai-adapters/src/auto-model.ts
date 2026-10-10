@@ -30,9 +30,17 @@ const KNOWN: Record<
     quality: ['o3', 'gpt-4.5-preview', 'gpt-4-turbo'],
   },
   claude: {
-    fast: ['claude-3-5-haiku-20241022', 'claude-3-haiku-20240307'],
-    balanced: ['claude-sonnet-4-20250514', 'claude-3-5-sonnet-20241022'],
-    quality: ['claude-opus-4-20250514', 'claude-3-opus-20240229'],
+    fast: ['claude-haiku-5-5', 'claude-3-5-haiku-20241022'],
+    balanced: [
+      'claude-sonnet-5-5',
+      'claude-sonnet-4-20250514',
+      'claude-3-5-sonnet-20241022',
+    ],
+    quality: [
+      'claude-opus-5-5',
+      'claude-opus-4-20250514',
+      'claude-3-opus-20240229',
+    ],
   },
   gemini: {
     fast: ['gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-1.5-flash'],
@@ -40,8 +48,8 @@ const KNOWN: Record<
     quality: ['gemini-2.5-pro', 'gemini-1.5-pro'],
   },
   deepseek: {
-    fast: ['deepseek-chat'],
-    balanced: ['deepseek-chat'],
+    fast: ['deepseek-v3'],
+    balanced: ['deepseek-v3'],
     quality: ['deepseek-reasoner'],
   },
   groq: {
