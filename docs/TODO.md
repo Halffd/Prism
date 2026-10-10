@@ -37,10 +37,10 @@ hardware modes, agent memories. See TUI.
 | Web/deep/council/multi-send/debate/agent | done        | Ctrl+W/D/V/M/B keybindings                                                                         |
 | SillyTavern characters                   | done        | group chat + character select                                                                      |
 | Themes                                   | partial     | nocturnal-editorial only; 6-theme port planned                                                     |
-| Tools + permissions (allow/deny/ask)     | in progress | libs/agent PermissionAwareToolExecutor done + tested; TUI wiring (settings + ask prompt) next      |
-| RAG (attach documents)                   | in progress | libs/rag done + tested (chunking, ollama/openai embeddings, stores); TUI ingest/retrieve flow next |
-| Personalities & agent memories           | in progress | 20 defaults + memory store done; TUI agent picker next                                             |
-| Hardware modes (cpu/gpu/amd/intel)       | in progress | libs plumbing done (num_gpu/num_ctx); TUI settings screen next                                     |
+| Tools + permissions (allow/deny/ask) | done | TUI agent runtime: Node executor (shell/read_file) + PermissionAwareToolExecutor; y/n ask prompt; settings section (allow/ask/deny) |
+| RAG (attach documents) | done | /rag <path> ingests local files (chunk + embed, in-memory store); top-k chunks auto-injected on send |
+| Personalities & agent memories | partial | 20 defaults + memory store + system-prompt composition done; TUI agent picker UI next |
+| Hardware modes (cpu/gpu/amd/intel) | partial | libs plumbing done (num_gpu/num_ctx via LocalAdapter); TUI hardware settings section next |
 
 ## Desktop (apps/desktop)
 
