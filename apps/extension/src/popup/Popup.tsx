@@ -42,6 +42,7 @@ import { InputSection } from './InputSection';
 import { HeaderSection } from './HeaderSection';
 import { ImageGenerationSection } from './ImageGenerationSection';
 import { IframeInjectionSection } from './IframeInjectionSection';
+import { ErrorModalHost } from '../components/ErrorModal';
 
 // Initialize with default settings - will be overridden by stored settings
 const defaultAIConfig: AIConfig = {
@@ -191,6 +192,8 @@ export function Popup() {
   );
   const [imageGenerationApiKey, setImageGenerationApiKey] =
     useState<string>('');
+
+  const [historyMissing, setHistoryMissing] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -533,6 +536,9 @@ export function Popup() {
       const result = await chrome.storage.local.get('history');
       if (result.history) {
         dispatch(setMessages(result.history));
+      } else {
+        dispatch(setMessages([]));
+        setHistoryMissing(true);
       }
     }
   };
@@ -576,6 +582,7 @@ export function Popup() {
     } catch (error) {
       console.error('Failed to load session:', error);
       dispatch(setMessages([]));
+      setHistoryMissing(true);
     }
   };
 
@@ -2088,6 +2095,9 @@ export function Popup() {
 
       {showMenu && renderMenu()}
       {showPrompts && renderPromptShortcuts()}
+      {historyMissing && (
+        <ErrorModalHost onClose={() => setHistoryMissing(false)} />
+      )}
     </div>
   );
 }
