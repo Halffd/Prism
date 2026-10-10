@@ -3,6 +3,7 @@ import { chatRouter } from './chat.routes';
 import { sessionRouter } from './session.routes';
 import { authRouter } from './auth.routes';
 import { syncRouter } from './sync.routes';
+import { toolsRouter } from './tools.routes';
 import { renderMetrics } from '../middleware/logger';
 
 const router = Router();
@@ -12,6 +13,7 @@ router.use('/auth', authRouter);
 router.use('/chat', chatRouter);
 router.use('/sessions', sessionRouter);
 router.use('/sync', syncRouter);
+router.use('/tools', toolsRouter);
 
 // API info and health check
 router.get('/', (req, res) => {

@@ -2,67 +2,89 @@
 
 Tracking queue state for all apps. Update after each landed feature.
 
+Scope rule: the **extension** is a page-context assistant — it gets chat, page
+context, snippets/presets, providers, themes, and metrics display. Agent
+runtime features (**tools, permissions, RAG, personalities, hardware modes**)
+live in the **TUI** (and are shared with desktop via the same libs) — an
+extension has no business ingesting documents or running tool loops.
+
 ## Extension (apps/extension)
 
-| Feature                                                   | Status  | Notes                                                                                                                |
-| --------------------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
-| Snippets / prompt shortcuts CRUD                          | done    | Popup + Settings, IndexedDB persistence, multiple keyboard bindings + combos                                         |
-| Prompt presets (ordered entries)                          | done    | PromptPresetManager, rehydrates from DB on mount                                                                     |
-| Status bar metrics (latency, tok/s, context)              | done    | api-client captures metrics; strips in ChatPage + Popup; TUI status bar shows tok/s · latency · ctx · session tokens |
-| Thinking mode toggle                                      | done    | Claude native budget_tokens; scratchpad fallback for other providers; toggle in ChatPage footer |
-| Auto model selection                                      | done    | selectAutoModel heuristic (modelCache -> known list, tier by input size/capability); Auto button in header |
-| Web/deep search, council, multi-send, debate toggles      | done    | ChatPage footer + panels                                                                                             |
-| Agent builder + runner                                    | done    | AgentBuilder + AgentRunnerPanel; web_search + fetch_url tools now real                                               |
-| Themes (dark/light/high-contrast/monokai/material/github) | planned | Roadmap Phase 5; dark-only today                                                                                     |
-| Material style icons                                      | done    | Shared Icon component applied to ChatPage, Popup, HeaderSection, StandaloneChatPage                                  |
-| Auth non-mandatory                                        | done    | Sign-in optional; API key fallback chain (supabase → firebase → prismApiKey)                                         |
-| Max font scale 8.0                                        | done    | Popup + content script                                                                                               |
-| Per-provider model cache                                  | done    | ModelRecentsEditor, free-form model input                                                                            |
-| Permissions & tools                                       | partial | agentSlice.tools[].enabled; read_file denied with guidance; allow/deny/ask model planned                             |
-| Logging & monitoring | done | libs/logging (levels, channels, ring buffer, JSONL export); Settings viewer; api /metrics (p50/p95/p99) |
-| RAG | done | libs/rag (chunking, ollama/openai embeddings, vector stores); attach-document toggle in ChatPage; IndexedDB persistence |
+| Feature                                      | Status  | Notes                                                                        |
+| -------------------------------------------- | ------- | ---------------------------------------------------------------------------- |
+| Snippets / prompt shortcuts CRUD             | done    | Popup + Settings, IndexedDB persistence, multiple keyboard bindings + combos |
+| Prompt presets (ordered entries)             | done    | PromptPresetManager, rehydrates from DB on mount                             |
+| Status bar metrics (latency, tok/s, context) | done    | Metrics strips in ChatPage + Popup                                           |
+| Web/deep search toggles                      | done    | ChatPage footer + WebSearchPanel                                             |
+| Council / multi-send / debate                | done    | Panels; multi-model chat features fit the extension                          |
+| Thinking mode toggle                         | done    | Scratchpad fallback; Claude native handled in shared libs/llm                |
+| Material style icons                         | done    | Shared Icon component (libs/ui-components)                                   |
+| Auth non-mandatory                           | done    | Sign-in optional; API key fallback chain                                     |
+| Max font scale 8.0                           | done    | Popup + content script                                                       |
+| Per-provider model cache                     | done    | ModelRecentsEditor, free-form model input                                    |
+| Themes (6)                                   | done    | data-theme system + picker in Settings                                       |
+| Auto model selection                         | partial | Auto button exists; refined per-task routing lives in TUI/desktop            |
+
+**Not in the extension** (by design): tools/permissions, RAG, personalities,
+hardware modes, agent memories. See TUI.
 
 ## TUI (apps/tui)
 
-| Feature                                  | Status  | Notes                                                                      |
-| ---------------------------------------- | ------- | -------------------------------------------------------------------------- |
-| Chat + streaming                         | done    | Ink, shares ai-adapters                                                    |
-| Status bar                               | done    | provider/model/adapterMode/online + tok/s · latency · ctx · session tokens |
-| Web/deep/council/multi-send/debate/agent | done    | Ctrl+W/D/V/M/B keybindings                                                 |
-| SillyTavern characters                   | done    | group chat + character select                                              |
-| Themes                                   | partial | nocturnal-editorial only                                                   |
+| Feature                                  | Status      | Notes                                                                                              |
+| ---------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------- |
+| Chat + streaming                         | done        | Ink, shares ai-adapters                                                                            |
+| Status bar                               | done        | provider/model/adapterMode/online + tok/s · latency · ctx · session tokens                         |
+| Web/deep/council/multi-send/debate/agent | done        | Ctrl+W/D/V/M/B keybindings                                                                         |
+| SillyTavern characters                   | done        | group chat + character select                                                                      |
+| Themes                                   | partial     | nocturnal-editorial only; 6-theme port planned                                                     |
+| Tools + permissions (allow/deny/ask)     | in progress | libs/agent PermissionAwareToolExecutor done + tested; TUI wiring (settings + ask prompt) next      |
+| RAG (attach documents)                   | in progress | libs/rag done + tested (chunking, ollama/openai embeddings, stores); TUI ingest/retrieve flow next |
+| Personalities & agent memories           | in progress | 20 defaults + memory store done; TUI agent picker next                                             |
+| Hardware modes (cpu/gpu/amd/intel)       | in progress | libs plumbing done (num_gpu/num_ctx); TUI settings screen next                                     |
 
 ## Desktop (apps/desktop)
 
-| Feature                            | Status  | Notes                                         |
-| ---------------------------------- | ------- | --------------------------------------------- |
-| Shell (Chat/Settings nav)          | done    | Vite + React, reuses extension Popup/Settings |
-| Auth                               | done    | Optional, Supabase                            |
-| Local LLM adapters                 | done    | Inherited from extension settings             |
-| Hardware modes (cpu/gpu/amd/intel) | planned | Roadmap Phase 4                               |
-| Metrics/ping probe                 | planned | Roadmap Phase 2                               |
+| Feature                                | Status  | Notes                                                       |
+| -------------------------------------- | ------- | ----------------------------------------------------------- |
+| Shell (Chat/Settings nav)              | done    | Vite + React, reuses extension UI                           |
+| Auth                                   | done    | Optional, Supabase                                          |
+| Local LLM adapters                     | done    | Inherited via shared settings                               |
+| Agent features (tools/permissions/RAG) | planned | Shares TUI's libs; desktop wrapper around TUI agent runtime |
 
 ## Mobile (apps/Prism, Expo)
 
-| Feature                     | Status  | Notes                                                                          |
-| --------------------------- | ------- | ------------------------------------------------------------------------------ |
-| Chat screen                 | partial | Basic; metrics strip added; persona/agent/preset integration pending           |
-| Settings screen             | partial | Provider URLs only                                                             |
-| Themes                      | partial | nocturnal-editorial.ts exists                                                  |
-| Apply extension feature set | partial | metrics via shared api-client + UI strip done; rest planned (Roadmap Phase 10) |
+| Feature           | Status  | Notes                         |
+| ----------------- | ------- | ----------------------------- |
+| Chat screen       | partial | Metrics strip done            |
+| Settings screen   | partial | Provider URLs only            |
+| Themes            | partial | nocturnal-editorial.ts exists |
+| Apply feature set | planned | Roadmap Phase 10              |
+
+## Shared libs (used by TUI/desktop; not extension UI)
+
+| Lib                         | Status | Notes                                                                                              |
+| --------------------------- | ------ | -------------------------------------------------------------------------------------------------- |
+| libs/agent — tools          | done   | web_search (DuckDuckGo fallback), fetch_url real; read_file denied; calculator/code_eval           |
+| libs/agent — permissions    | done   | PermissionAwareToolExecutor (allow/deny/ask, ask handler); 7 unit tests                            |
+| libs/rag                    | done   | chunkDocument, embedTexts (ollama/openai), InMemory/Dexie stores, retrieveRagContext; 7 unit tests |
+| libs/logging                | done   | levels×channels, ring buffer, JSONL export; api /metrics (p50/p95/p99)                             |
+| libs/ai-adapters — hardware | done   | HardwareProfile → num_gpu/num_ctx plumbing                                                         |
+| libs/ai-adapters — thinking | done   | Claude native + scratchpad fallback helpers                                                        |
 
 ## Tests
 
-| Suite                                                         | Status         |
-| ------------------------------------------------------------- | -------------- |
-| libs/redux-store (chatSlice, presetSlice)                     | done — 9 tests |
-| libs/context-manager (assemble, tokens, world-info, v2 cards) | done — 8 tests |
-| libs/shared-db                                                | planned        |
-| libs/llm-service                                              | planned        |
+| Suite                                     | Status         |
+| ----------------------------------------- | -------------- |
+| libs/agent (permission executor)          | done — 7 tests |
+| libs/rag (chunking, stores, formatting)   | done — 7 tests |
+| libs/redux-store (chatSlice, presetSlice) | done — 9 tests |
+| libs/context-manager                      | done — 8 tests |
+| libs/shared-db, libs/llm-service          | planned        |
 
 ## Known debt
 
 - `libs/llm-service` is a 1165-line single file — split per provider
 - Old Electron leftover at `apps/apps/desktop/desktop` — delete after confirming new desktop app is canonical
-- Agent tool-calling is prompt-parsing based (ReAct), not native function calling — native `tools` param on LLMRequest is roadmap Phase 7 follow-up
-- TUI/mobile do not yet surface prompt presets / skills / personalities UI — shared libs ready, screens pending
+- Agent tool-calling is prompt-parsing based (ReAct), not native function calling
+- Extension ChatPage previously grew RAG/agent-runtime UI that belonged in the
+  TUI — being moved per scope rule above

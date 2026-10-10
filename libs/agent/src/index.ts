@@ -186,7 +186,63 @@ export class CompositeToolExecutor implements ToolExecutor {
         continue;
       }
     }
-    return `No executor found for tool "${toolName}". Input: "${input}"`;
+    return `[${toolName}] No executor handled this tool.`;
+  }
+}
+
+/**
+ * Wraps a ToolExecutor with an allow/deny/ask permission policy.
+ *
+ * Resolution order for a tool:
+ *   1. per-tool entry in `permissions`
+ *   2. `defaultPermission` (the global default)
+ *   3. 'ask' when an ask handler exists, otherwise 'allow'
+ *
+ * - allow: delegate to the wrapped executor
+ * - deny:  refuse with a denial message the agent can read
+ * - ask:   call the ask handler; a true answer delegates, false denies
+ */
+export class PermissionAwareToolExecutor implements ToolExecutor {
+  private inner: ToolExecutor;
+  private permissions: Record<
+    string,
+    import('@prism/shared-types').ToolPermission
+  >;
+  private defaultPermission: import('@prism/shared-types').ToolPermission;
+  private askHandler?: (toolName: string, input: string) => Promise<boolean>;
+
+  constructor(options: {
+    inner: ToolExecutor;
+    permissions?: Record<string, import('@prism/shared-types').ToolPermission>;
+    defaultPermission?: import('@prism/shared-types').ToolPermission;
+    onAsk?: (toolName: string, input: string) => Promise<boolean>;
+  }) {
+    this.inner = options.inner;
+    this.permissions = options.permissions ?? {};
+    this.defaultPermission = options.defaultPermission ?? 'ask';
+    this.askHandler = options.onAsk;
+  }
+
+  async execute(toolName: string, input: string): Promise<string> {
+    const level = this.permissions[toolName] ?? this.defaultPermission;
+
+    if (level === 'deny') {
+      return `[${toolName}] Permission denied: this tool is blocked. Continue without it.`;
+    }
+
+    if (level === 'ask') {
+      if (this.askHandler) {
+        const granted = await this.askHandler(toolName, input);
+        if (!granted) {
+          return `[${toolName}] Permission denied by user. Continue without it.`;
+        }
+      } else {
+        // No handler available (non-interactive runs): deny by default.
+        return `[${toolName}] Permission required (no prompt available). Continue without it.`;
+      }
+    }
+
+    return this.inner.execute(toolName, input);
   }
 }
 
@@ -282,6 +338,12 @@ export interface AgentRunConfig {
   maxTokens?: number;
   tools?: AgentToolDef[];
   toolExecutor?: ToolExecutor;
+  /** Per-tool permission overrides applied for every run of this service. */
+  permissions?: Record<string, import('@prism/shared-types').ToolPermission>;
+  /** Global default when a tool has no explicit entry. Default 'ask'. */
+  defaultPermission?: import('@prism/shared-types').ToolPermission;
+  /** Ask handler for 'ask'-level tools in non-interactive services. */
+  onToolPermissionAsk?: (toolName: string, input: string) => Promise<boolean>;
 }
 
 export class ReActAgentService implements AgentService {
@@ -312,7 +374,26 @@ export class ReActAgentService implements AgentService {
         tools.length > 0
           ? toolDefsToDescriptions(tools)
           : '- Final Answer: Provide the final answer to the task';
-      const executor = this.config.toolExecutor ?? new BuiltinToolExecutor();
+      const baseExecutor =
+        this.config.toolExecutor ?? new BuiltinToolExecutor();
+      // Wrap with the permission policy: request overrides beat service-level
+      // config; default falls back through ask-handler availability.
+      const permissions = {
+        ...(this.config.permissions ?? {}),
+        ...(request.toolPermissions ?? {}),
+      };
+      const executor =
+        Object.keys(permissions).length > 0 ||
+        this.config.defaultPermission !== undefined ||
+        request.toolPermissions !== undefined
+          ? new PermissionAwareToolExecutor({
+              inner: baseExecutor,
+              permissions,
+              defaultPermission: this.config.defaultPermission,
+              onAsk:
+                request.onToolPermissionAsk ?? this.config.onToolPermissionAsk,
+            })
+          : baseExecutor;
       const steps: AgentStep[] = [];
       const history: string[] = [];
       const maxSteps = request.maxSteps || this.maxSteps;

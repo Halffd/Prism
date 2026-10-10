@@ -11,13 +11,14 @@ import { useChat } from '../hooks/use-chat';
 import { useSettings } from '../hooks/use-settings';
 import { useSillyTavern } from '../hooks/use-silly-tavern';
 import { TUIClient } from '../lib/tui-client';
+import { runTUIAgent } from '../lib/tui-agent';
+import { TUIRagSession } from '../lib/tui-rag';
 import { nanoid } from 'nanoid';
 import type {
   Message,
   CouncilMember,
   MultiSendTarget,
   DebateParticipant,
-  AgentRequest,
 } from '@prism/shared-types';
 
 type Screen = 'chat' | 'settings' | 'characters';
@@ -30,6 +31,10 @@ export function ChatScreen() {
   const [screen, setScreen] = useState<Screen>('chat');
 
   const clientRef = useRef<TUIClient | null>(null);
+  // Session-scoped RAG store (ingest via /rag <path>, retrieval on send)
+  const ragSessionRef = useRef<TUIRagSession>(
+    new TUIRagSession(settings.aiConfig),
+  );
   if (!clientRef.current) {
     clientRef.current = new TUIClient({
       aiConfig: settings.aiConfig,
@@ -211,8 +216,29 @@ export function ChatScreen() {
       chat.setAgentInProgress(true);
       chat.setAgentResult(null);
       try {
-        const request: AgentRequest = { task, maxSteps: 10 };
-        const result = await clientRef.current!.agent(request);
+        // TUI-owned agent runtime: Node tools (shell/read_file) gated by the
+        // permission policy with a y/n ask prompt on the terminal.
+        const result = await runTUIAgent(
+          { task, maxSteps: 10 },
+          {
+            aiConfig: settings.aiConfig,
+            defaultToolPermission: settings.defaultToolPermission ?? 'ask',
+            onAsk: async (toolName, input) => {
+              const rl = (await import('readline')).createInterface({
+                input: process.stdin,
+                output: process.stdout,
+              });
+              const answer = await new Promise<string>((resolve) => {
+                rl.question(
+                  `\n[permission] Allow ${toolName} with input "${input}"? (y/n) `,
+                  resolve,
+                );
+              });
+              rl.close();
+              return answer.trim().toLowerCase().startsWith('y');
+            },
+          },
+        );
         if (result.ok) {
           chat.setAgentResult(result.value);
           const parts: string[] = [result.value.answer];
@@ -226,17 +252,46 @@ export function ChatScreen() {
           }
           return parts.join('\n\n');
         }
+        chat.addMessage({
+          id: `msg_${nanoid()}`,
+          role: 'assistant',
+          content: `[Agent error: ${result.error}]`,
+          timestamp: Date.now(),
+        });
         return null;
       } finally {
         chat.setAgentInProgress(false);
       }
     },
-    [chat],
+    [chat, settings],
   );
 
   const handleSend = useCallback(async () => {
     const content = chat.input.trim();
     if (content.length === 0) return;
+
+    // /rag <path> — ingest a local file into the session's RAG store
+    if (content.startsWith('/rag ')) {
+      const path = content.slice(5).trim();
+      chat.setInput('');
+      try {
+        const doc = await ragSessionRef.current.ingestPath(path);
+        chat.addMessage({
+          id: `msg_${nanoid()}`,
+          role: 'assistant',
+          content: `Ingested ${doc.title}: ${doc.chunkCount} chunks indexed. Ask about it and the relevant chunks will be retrieved.`,
+          timestamp: Date.now(),
+        });
+      } catch (err) {
+        chat.addMessage({
+          id: `msg_${nanoid()}`,
+          role: 'assistant',
+          content: `[RAG ingest failed: ${(err as Error).message}]`,
+          timestamp: Date.now(),
+        });
+      }
+      return;
+    }
 
     const userMessage: Message = {
       id: `msg_${nanoid()}`,
@@ -422,6 +477,7 @@ export function ChatScreen() {
         localApiUrl={settings.localApiUrl}
         localSearchProvider={settings.localSearchProvider}
         searxngUrl={settings.searxngUrl}
+        defaultToolPermission={settings.defaultToolPermission}
         onSetProvider={settings.setProvider}
         onSetAdapterMode={settings.setAdapterMode}
         onSetCapabilityMode={settings.setCapabilityMode}
@@ -429,6 +485,7 @@ export function ChatScreen() {
         onSetLocalSearchProvider={settings.setLocalSearchProvider}
         onSetSearxngUrl={settings.setSearxngUrl}
         onSetModel={settings.setModel}
+        onSetDefaultToolPermission={settings.setDefaultToolPermission}
         onClose={() => {
           settings.setShowSettings(false);
           setScreen('chat');

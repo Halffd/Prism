@@ -28,7 +28,9 @@
       "@prism/ai-factory": ["libs/ai-factory/src/index.ts"],
       "@prism/ai-builder": ["libs/ai-builder/src/index.ts"],
       "@prism/ai-adapters": ["libs/ai-adapters/src/index.ts"],
-      "@prism/context-manager": ["libs/context-manager/src/index.ts"]
+      "@prism/context-manager": ["libs/context-manager/src/index.ts"],
+      "@prism/logging": ["libs/logging/src/index.ts"],
+      "@prism/rag": ["libs/rag/src/index.ts"]
     }
   },
   "exclude": [
@@ -46,6 +48,12 @@
     },
     {
       "path": "../../libs/shared-types/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/rag/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/logging/tsconfig.lib.json"
     }
   ]
 }

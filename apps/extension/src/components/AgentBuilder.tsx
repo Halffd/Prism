@@ -126,6 +126,7 @@ export function AgentBuilder({ onClose }: Props) {
       tools: form.tools ?? [],
       personality: form.personality,
       coreMemories: form.coreMemories,
+      permissions: form.permissions,
       createdAt: editingAgent?.createdAt ?? now,
       updatedAt: now,
     };
@@ -144,13 +145,6 @@ export function AgentBuilder({ onClose }: Props) {
   async function handleDelete(id: string) {
     await deleteCustomAgent(id);
     dispatch(removeAgent(id));
-  }
-
-  function toggleTool(index: number, enabled: boolean) {
-    if (!form.tools) return;
-    const updated = [...form.tools];
-    updated[index] = { ...updated[index], enabled };
-    setForm({ ...form, tools: updated });
   }
 
   function addCustomTool() {
@@ -396,7 +390,22 @@ export function AgentBuilder({ onClose }: Props) {
                 <input
                   type="checkbox"
                   checked={tool.enabled}
-                  onChange={(e) => toggleTool(i, e.target.checked)}
+                  onChange={(e) => {
+                    // Keep the permission map in sync with the checkbox
+                    const level: 'allow' | 'deny' = e.target.checked
+                      ? 'allow'
+                      : 'deny';
+                    setForm({
+                      ...form,
+                      permissions: {
+                        ...(form.permissions ?? {}),
+                        [tool.name]: level,
+                      },
+                      tools: (form.tools ?? []).map((t, ti) =>
+                        ti === i ? { ...t, enabled: e.target.checked } : t,
+                      ),
+                    });
+                  }}
                 />
                 <input
                   className="st-agent-tool-name"

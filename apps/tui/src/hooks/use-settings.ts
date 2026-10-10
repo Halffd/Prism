@@ -1,10 +1,18 @@
 import { useState, useCallback } from 'react';
-import type { AIConfig, AIProvider, AIMode, AICapability, LocalSearchProvider } from '@prism/shared-types';
+import type {
+  AIConfig,
+  AIProvider,
+  AIMode,
+  AICapability,
+  LocalSearchProvider,
+} from '@prism/shared-types';
 
 interface SettingsState {
   aiConfig: AIConfig;
   adapterMode: AIMode;
   capabilityModes: Partial<Record<AICapability, AIMode>>;
+  /** Default tool permission for the TUI agent runtime. */
+  defaultToolPermission?: 'allow' | 'deny' | 'ask';
   availableProviders: AIProvider[];
   localApiUrl: string;
   localSearchProvider: LocalSearchProvider;
@@ -21,9 +29,7 @@ export function useSettings() {
     },
     adapterMode: 'api',
     capabilityModes: {},
-    availableProviders: [
-      'openai', 'gemini', 'qwen', 'prism-api',
-    ],
+    availableProviders: ['openai', 'gemini', 'qwen', 'prism-api'],
     localApiUrl: 'http://localhost:8080',
     localSearchProvider: 'duckduckgo',
     searxngUrl: 'http://localhost:8888',
@@ -31,14 +37,14 @@ export function useSettings() {
   });
 
   const setProvider = useCallback((provider: AIProvider) => {
-    setState(prev => ({
+    setState((prev) => ({
       ...prev,
       aiConfig: { ...prev.aiConfig, provider },
     }));
   }, []);
 
   const setApiKey = useCallback((provider: string, key: string) => {
-    setState(prev => ({
+    setState((prev) => ({
       ...prev,
       aiConfig: {
         ...prev.aiConfig,
@@ -48,38 +54,51 @@ export function useSettings() {
   }, []);
 
   const setAdapterMode = useCallback((mode: AIMode) => {
-    setState(prev => ({ ...prev, adapterMode: mode }));
+    setState((prev) => ({ ...prev, adapterMode: mode }));
   }, []);
 
-  const setCapabilityMode = useCallback((capability: AICapability, mode: AIMode) => {
-    setState(prev => ({
-      ...prev,
-      capabilityModes: { ...prev.capabilityModes, [capability]: mode },
-    }));
-  }, []);
+  const setCapabilityMode = useCallback(
+    (capability: AICapability, mode: AIMode) => {
+      setState((prev) => ({
+        ...prev,
+        capabilityModes: { ...prev.capabilityModes, [capability]: mode },
+      }));
+    },
+    [],
+  );
 
   const setLocalApiUrl = useCallback((url: string) => {
-    setState(prev => ({ ...prev, localApiUrl: url }));
+    setState((prev) => ({ ...prev, localApiUrl: url }));
   }, []);
 
-  const setLocalSearchProvider = useCallback((provider: LocalSearchProvider) => {
-    setState(prev => ({ ...prev, localSearchProvider: provider }));
-  }, []);
+  const setDefaultToolPermission = useCallback(
+    (level: 'allow' | 'deny' | 'ask') => {
+      setState((prev) => ({ ...prev, defaultToolPermission: level }));
+    },
+    [],
+  );
+
+  const setLocalSearchProvider = useCallback(
+    (provider: LocalSearchProvider) => {
+      setState((prev) => ({ ...prev, localSearchProvider: provider }));
+    },
+    [],
+  );
 
   const setSearxngUrl = useCallback((url: string) => {
-    setState(prev => ({ ...prev, searxngUrl: url }));
+    setState((prev) => ({ ...prev, searxngUrl: url }));
   }, []);
 
   const toggleSettings = useCallback(() => {
-    setState(prev => ({ ...prev, showSettings: !prev.showSettings }));
+    setState((prev) => ({ ...prev, showSettings: !prev.showSettings }));
   }, []);
 
   const setShowSettings = useCallback((show: boolean) => {
-    setState(prev => ({ ...prev, showSettings: show }));
+    setState((prev) => ({ ...prev, showSettings: show }));
   }, []);
 
   const setModel = useCallback((model: string) => {
-    setState(prev => ({
+    setState((prev) => ({
       ...prev,
       aiConfig: { ...prev.aiConfig, model },
     }));
@@ -97,5 +116,6 @@ export function useSettings() {
     toggleSettings,
     setShowSettings,
     setModel,
+    setDefaultToolPermission,
   };
 }

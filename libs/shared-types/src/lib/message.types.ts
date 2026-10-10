@@ -228,6 +228,8 @@ export interface ExtensionSettings {
   /** UI theme: dark | light | high-contrast | monokai | material | github */
   theme?:
     'dark' | 'light' | 'high-contrast' | 'monokai' | 'material' | 'github';
+  /** Global default tool permission for agents that don't override. */
+  defaultToolPermission?: ToolPermission;
   systemPrompt?: string;
   activeCharacterId?: string;
   activePersonaId?: string;
@@ -460,6 +462,10 @@ export interface AgentRequest {
   personality?: string;
   /** Persistent memories ranked into the system prompt. */
   memories?: AgentMemory[];
+  /** Resolved tool permissions (per-tool overrides + global default). */
+  toolPermissions?: Record<string, ToolPermission>;
+  /** Called when a tool with 'ask' permission is about to run. */
+  onToolPermissionAsk?: (toolName: string, input: string) => Promise<boolean>;
 }
 
 export interface AgentTool {
@@ -477,6 +483,14 @@ export interface AgentToolDef {
   parameters: Record<string, unknown>;
   enabled: boolean;
 }
+
+/**
+ * Tool permission levels.
+ * - allow: run without prompting
+ * - deny:  refuse execution; the agent sees a denial message
+ * - ask:   pause and surface a UI prompt before running
+ */
+export type ToolPermission = 'allow' | 'deny' | 'ask';
 
 export type AgentStrategy = 'react' | 'plan-and-execute' | 'reflexion';
 
@@ -496,6 +510,8 @@ export interface CustomAgent {
   personality?: string;
   /** Persistent memories carried across sessions. */
   coreMemories?: AgentMemory[];
+  /** Per-tool permission overrides; tools without an entry use the global default. */
+  permissions?: Record<string, ToolPermission>;
   createdAt: number;
   updatedAt: number;
 }
