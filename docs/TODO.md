@@ -60,6 +60,15 @@ hardware modes, agent memories. See TUI.
 | Themes            | partial | nocturnal-editorial.ts exists |
 | Apply feature set | planned | Roadmap Phase 10              |
 
+## API server (apps/api) — self-hosted Node/Express
+
+| Feature | Status | Notes |
+|---|---|---|
+| Structured logs | done | JSON lines to stdout (level/channel/method/status/duration) |
+| /metrics | done | Prometheus text format: counters per route/status, p50/p95/p99, uptime |
+| /tools/execute | done | Permission-checked tool execution: PRISM_ENABLE_TOOL_EXECUTION=1 opt-in, command allowlist (read-only default), path-traversal guard, output cap |
+| /health | done | uptime + timestamp |
+
 ## Shared libs (used by TUI/desktop; not extension UI)
 
 | Lib                         | Status | Notes                                                                                              |
