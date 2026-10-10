@@ -1,4 +1,12 @@
-import { saveChatHistory, loadChatHistory, getChatSessions, deleteChatSession, savePromptShortcut, getPromptShortcuts, deletePromptShortcut } from '@prism/shared-db';
+import {
+  saveChatHistory,
+  loadChatHistory,
+  getChatSessions,
+  deleteChatSession,
+  savePromptShortcut,
+  getPromptShortcuts,
+  deletePromptShortcut,
+} from '@prism/shared-db';
 import { Message, ChatSession, PromptShortcut } from '@prism/shared-types';
 
 describe('Local IndexedDB as Primary Storage', () => {
@@ -11,6 +19,13 @@ describe('Local IndexedDB as Primary Storage', () => {
     } catch (e) {
       // Session might not exist, which is fine
     }
+
+    // Prompt shortcut tests assert on exact counts, so each test needs to
+    // start from an empty store.
+    const existingPrompts = await getPromptShortcuts();
+    await Promise.all(
+      existingPrompts.map((prompt) => deletePromptShortcut(prompt.id)),
+    );
   });
 
   test('should save and load chat history using IndexedDB', async () => {
@@ -19,14 +34,14 @@ describe('Local IndexedDB as Primary Storage', () => {
         id: 'msg-1',
         role: 'user',
         content: 'Hello',
-        timestamp: Date.now()
+        timestamp: Date.now(),
       },
       {
         id: 'msg-2',
         role: 'assistant',
         content: 'Hi there!',
-        timestamp: Date.now() + 1000
-      }
+        timestamp: Date.now() + 1000,
+      },
     ];
 
     // Save to IndexedDB
@@ -46,8 +61,8 @@ describe('Local IndexedDB as Primary Storage', () => {
         id: 'msg-1',
         role: 'user',
         content: 'Test message',
-        timestamp: Date.now()
-      }
+        timestamp: Date.now(),
+      },
     ];
 
     // Save to IndexedDB
@@ -57,7 +72,9 @@ describe('Local IndexedDB as Primary Storage', () => {
     const sessions = await getChatSessions();
 
     // Check if our session exists
-    const testSession = sessions.find(session => session.id === testSessionId);
+    const testSession = sessions.find(
+      (session) => session.id === testSessionId,
+    );
     expect(testSession).toBeDefined();
     expect(testSession?.id).toBe(testSessionId);
   });
@@ -68,7 +85,7 @@ describe('Local IndexedDB as Primary Storage', () => {
       name: 'Test Prompt',
       content: 'This is a test prompt',
       category: 'Testing',
-      createdAt: Date.now()
+      createdAt: Date.now(),
     };
 
     // Save to IndexedDB
@@ -88,8 +105,8 @@ describe('Local IndexedDB as Primary Storage', () => {
         id: 'msg-1',
         role: 'user',
         content: 'To be deleted',
-        timestamp: Date.now()
-      }
+        timestamp: Date.now(),
+      },
     ];
 
     // Save to IndexedDB
@@ -113,7 +130,7 @@ describe('Local IndexedDB as Primary Storage', () => {
       name: 'Delete Test',
       content: 'This will be deleted',
       category: 'Testing',
-      createdAt: Date.now()
+      createdAt: Date.now(),
     };
 
     // Save to IndexedDB
@@ -139,33 +156,33 @@ describe('Local IndexedDB as Primary Storage', () => {
         name: 'Concurrent 1',
         content: 'Content 1',
         category: 'Concurrent',
-        createdAt: Date.now()
+        createdAt: Date.now(),
       },
       {
         id: 'concurrent-prompt-2-' + Date.now(),
         name: 'Concurrent 2',
         content: 'Content 2',
         category: 'Concurrent',
-        createdAt: Date.now() + 1000
+        createdAt: Date.now() + 1000,
       },
       {
         id: 'concurrent-prompt-3-' + Date.now(),
         name: 'Concurrent 3',
         content: 'Content 3',
         category: 'Concurrent',
-        createdAt: Date.now() + 2000
-      }
+        createdAt: Date.now() + 2000,
+      },
     ];
 
     // Save all prompts concurrently
-    await Promise.all(prompts.map(prompt => savePromptShortcut(prompt)));
+    await Promise.all(prompts.map((prompt) => savePromptShortcut(prompt)));
 
     // Load all prompts
     const loadedPrompts = await getPromptShortcuts();
     expect(loadedPrompts).toHaveLength(3);
 
     // Verify all prompts exist
-    const promptNames = loadedPrompts.map(p => p.name);
+    const promptNames = loadedPrompts.map((p) => p.name);
     expect(promptNames).toContain('Concurrent 1');
     expect(promptNames).toContain('Concurrent 2');
     expect(promptNames).toContain('Concurrent 3');

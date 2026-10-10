@@ -1,188 +1,152 @@
-import { PromptShortcut } from '@prism/shared-types';
+import type { PromptShortcut } from '@prism/shared-types';
 
-// Mock chrome API for testing
-const mockChrome = {
-  storage: {
-    local: {
-      get: jest.fn(),
-      set: jest.fn()
-    }
-  },
-  runtime: {
-    sendMessage: jest.fn()
-  }
-};
-
-// Mock showToast function
-const mockShowToast = jest.fn();
-
-// Mock document and window for testing
-Object.defineProperty(window, 'document', {
-  value: {
-    addEventListener: jest.fn(),
-    body: {
-      appendChild: jest.fn(),
-      removeChild: jest.fn()
-    },
-    getElementById: jest.fn(() => null),
-    head: {
-      appendChild: jest.fn()
-    }
-  },
-  writable: true
-});
-
-Object.defineProperty(window, 'HTMLElement', {
-  value: class HTMLElement {},
-  writable: true
-});
-
-// Mock the showToast function
-global.document.createElement = jest.fn((tag) => {
-  if (tag === 'div') {
-    return {
-      id: '',
-      textContent: '',
-      style: {},
-      remove: jest.fn()
-    };
-  }
-  if (tag === 'style') {
-    return {
-      textContent: '',
-      appendChild: jest.fn()
-    };
-  }
-});
+const mockSendMessage = jest.fn();
+const mockStorageGet = jest.fn();
 
 describe('Content Script Keyboard Shortcuts', () => {
-  let originalChrome: any;
+  beforeAll(async () => {
+    (global as any).chrome.runtime.sendMessage = mockSendMessage;
+    (global as any).chrome.storage.local.get = mockStorageGet;
+    mockStorageGet.mockResolvedValue({});
 
-  beforeAll(() => {
-    originalChrome = (global as any).chrome;
-    (global as any).chrome = mockChrome;
+    // Suppress the floating button and its MutationObserver; they are
+    // unrelated to the keydown handling under test and outlive the test
+    // environment.
+    localStorage.setItem('prismButtonRemoved', 'true');
+
+    // Importing the content script registers the capture-phase keydown
+    // listener under test. Settings are read from chrome.storage.local on
+    // every keydown, so tests only need to change the storage mock.
+    await import('../content/content');
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 
-  afterAll(() => {
-    (global as any).chrome = originalChrome;
+  afterEach(() => {
+    mockSendMessage.mockClear();
+    mockStorageGet.mockReset();
+    mockStorageGet.mockResolvedValue({});
+    document.getElementById('prism-toast')?.remove();
   });
 
-  beforeEach(() => {
-    jest.clearAllMocks();
+  const pressKey = (
+    init: KeyboardEventInit,
+    target: HTMLElement = document.body,
+  ) => {
+    target.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        bubbles: true,
+        cancelable: true,
+        ...init,
+      }),
+    );
+  };
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
+
+  test('toggles text selection mode on Shift+1', async () => {
+    pressKey({ key: '1', shiftKey: true });
+    await settle();
+
+    expect(mockSendMessage).toHaveBeenCalledWith({
+      type: 'TOGGLE_MODE',
+      mode: 'textSelection',
+      value: true,
+    });
+    expect(document.getElementById('prism-toast')?.textContent).toBe(
+      'Text selection mode enabled',
+    );
   });
 
-  test('should detect keyboard shortcuts for prompt shortcuts', async () => {
-    // Mock prompt shortcuts in storage
-    const mockPromptShortcuts: PromptShortcut[] = [
+  test('toggles page context mode on Shift+2', async () => {
+    pressKey({ key: '2', shiftKey: true });
+    await settle();
+
+    expect(mockSendMessage).toHaveBeenCalledWith({
+      type: 'TOGGLE_MODE',
+      mode: 'pageContext',
+      value: true,
+    });
+    expect(document.getElementById('prism-toast')?.textContent).toBe(
+      'Page context mode enabled',
+    );
+  });
+
+  test('respects custom mode toggle keys from settings', async () => {
+    mockStorageGet.mockResolvedValue({
+      displaySettings: {
+        textSelectionKey: 'Q',
+        pageContextKey: '2',
+        pageScreenshotKey: '3',
+        clipboardKey: '4',
+        pageInfoKey: '5',
+      },
+    });
+
+    pressKey({ key: 'Q', shiftKey: true });
+    await settle();
+
+    expect(mockSendMessage).toHaveBeenCalledWith({
+      type: 'TOGGLE_MODE',
+      mode: 'textSelection',
+      value: true,
+    });
+  });
+
+  test('inserts a registered prompt shortcut on its key combination', async () => {
+    const promptShortcuts: PromptShortcut[] = [
       {
         id: 'prompt-1',
         name: 'Test Prompt',
         content: 'This is a test prompt',
         category: 'Testing',
         keyboardShortcut: 'Ctrl+Shift+T',
-        createdAt: Date.now()
-      }
+        createdAt: Date.now(),
+      },
     ];
+    mockStorageGet.mockImplementation((keys: string[]) =>
+      Promise.resolve(
+        keys.includes('promptShortcuts') ? { promptShortcuts } : {},
+      ),
+    );
 
-    (mockChrome.storage.local.get as jest.Mock).mockResolvedValue({
-      promptShortcuts: mockPromptShortcuts
+    pressKey({ key: 't', ctrlKey: true, shiftKey: true });
+    await settle();
+
+    expect(mockSendMessage).toHaveBeenCalledWith({
+      type: 'INSERT_PROMPT_SHORTCUT',
+      content: 'This is a test prompt',
     });
-
-    // Import the content script functions
-    const { setupHotkeyListener } = require('../content/content'); // This would be the actual path
-
-    // Create a mock event
-    const mockEvent = {
-      key: 't',
-      ctrlKey: true,
-      shiftKey: true,
-      altKey: false,
-      metaKey: false,
-      preventDefault: jest.fn(),
-      target: document.createElement('div')
-    };
-
-    // Call the hotkey listener with the mock event
-    const eventListener = jest.fn();
-    document.addEventListener = eventListener;
-
-    // Simulate the event being triggered
-    // This is a simplified test - in a real scenario, we'd need to properly mock the setupHotkeyListener function
-    expect(mockEvent.ctrlKey && mockEvent.shiftKey && mockEvent.key.toLowerCase() === 't').toBe(true);
   });
 
-  test('should show toast when mode toggle keys are pressed', async () => {
-    // Mock settings in storage
-    (mockChrome.storage.local.get as jest.Mock).mockResolvedValue({
-      displaySettings: {
-        textSelectionKey: '1',
-        pageContextKey: '2',
-        pageScreenshotKey: '3',
-        clipboardKey: '4',
-        pageInfoKey: '5'
-      }
-    });
+  test('does not fire shortcuts when focus is in an input field', async () => {
+    const input = document.createElement('input');
+    document.body.appendChild(input);
 
-    // Create a mock event for text selection key
-    const mockEvent = {
-      key: '1',
-      shiftKey: true,
-      ctrlKey: false,
-      altKey: false,
-      metaKey: false,
-      preventDefault: jest.fn(),
-      target: document.createElement('div')
-    };
+    pressKey({ key: '1', shiftKey: true }, input);
+    await settle();
 
-    // Check if the event matches the text selection key
-    const settings = {
-      textSelectionKey: '1',
-      pageContextKey: '2',
-      pageScreenshotKey: '3',
-      clipboardKey: '4',
-      pageInfoKey: '5'
-    };
+    expect(mockSendMessage).not.toHaveBeenCalled();
+    expect(document.getElementById('prism-toast')).toBeNull();
 
-    if (mockEvent.shiftKey && mockEvent.key === settings.textSelectionKey) {
-      expect(mockEvent.preventDefault).toHaveBeenCalled();
-      expect(mockShowToast).toHaveBeenCalledWith('Text selection mode enabled');
-    }
+    input.remove();
   });
 
-  test('should not trigger shortcuts when in input fields', () => {
-    // Create a mock event with target as input
-    const mockInput = document.createElement('input');
-    const mockEvent = {
-      key: '1',
-      shiftKey: true,
-      preventDefault: jest.fn(),
-      target: mockInput
-    };
-
-    // Check if target is an input field
-    const isInputElement = mockEvent.target.tagName === 'INPUT' || mockEvent.target.tagName === 'TEXTAREA';
-    const isContentEditable = mockEvent.target.isContentEditable;
-
-    // The shortcuts should not be processed if in an input field
-    expect(isInputElement).toBe(true);
-    // In this case, the mode toggle logic should not execute
-  });
-
-  test('should handle different keyboard shortcut formats', () => {
-    // Test different shortcut formats
-    const shortcuts = [
-      'Ctrl+Shift+F',
-      'Alt+R',
-      'Cmd+Shift+G', // For Mac
-      'Ctrl+Alt+T'
-    ];
-
-    shortcuts.forEach(shortcut => {
-      const keys = shortcut.split('+');
-      expect(keys.length).toBeGreaterThanOrEqual(2); // Should have at least modifier + key
-      
-      const actualKey = keys[keys.length - 1].toLowerCase();
-      expect(actualKey).toMatch(/^[a-z0-9]$/i); // Should be a single alphanumeric character
+  test('does not fire shortcuts in contenteditable elements', async () => {
+    const editable = document.createElement('div');
+    editable.setAttribute('contenteditable', 'true');
+    // jsdom does not implement isContentEditable, which the content script
+    // checks, so mirror what a browser reports for contenteditable elements.
+    Object.defineProperty(editable, 'isContentEditable', {
+      value: true,
+      configurable: true,
     });
+    document.body.appendChild(editable);
+
+    pressKey({ key: '1', shiftKey: true }, editable);
+    await settle();
+
+    expect(mockSendMessage).not.toHaveBeenCalled();
+
+    editable.remove();
   });
 });

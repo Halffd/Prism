@@ -1,267 +1,173 @@
-describe('Iframe and Font Size Functionality', () => {
-  let dom: any;
-  let window: any;
-  let document: Document;
+const mockSendMessage = jest.fn();
+const mockStorageGet = jest.fn();
+const mockStorageSet = jest.fn();
 
-  beforeEach(() => {
-    // Mock the chrome API
+// The iframe popup mounts the real Popup component, which needs a redux store
+// and auth context that are irrelevant to the keyboard handling under test.
+jest.mock('../popup/Popup', () => ({
+  Popup: () => null,
+}));
+
+describe('Iframe and Font Size Functionality', () => {
+  beforeAll(async () => {
     (global as any).chrome = {
       runtime: {
+        onMessage: {
+          addListener: jest.fn(),
+          removeListener: jest.fn(),
+        },
         getURL: (path: string) => `chrome-extension://test-extension/${path}`,
-        sendMessage: jest.fn()
+        sendMessage: mockSendMessage,
       },
       storage: {
         local: {
-          get: jest.fn().mockResolvedValue({}),
-          set: jest.fn().mockResolvedValue({})
-        }
+          get: mockStorageGet,
+          set: mockStorageSet,
+        },
       },
       tabs: {
         query: jest.fn().mockResolvedValue([{ id: 1 }]),
-        sendMessage: jest.fn().mockResolvedValue({})
-      }
+        sendMessage: jest.fn().mockResolvedValue({}),
+      },
     };
+    mockStorageGet.mockResolvedValue({});
 
-    // Create a new JSDOM instance for each test
-    dom = new (require('jsdom').JSDOM)('<!DOCTYPE html><html><body></body></html>', {
-      url: 'https://example.com',
-      pretendToBeVisual: true,
-      resources: 'usable'
-    });
-    window = dom.window;
-    document = window.document;
+    // Suppress the floating button and its MutationObserver; they are
+    // unrelated to the keydown handling under test and outlive the test
+    // environment.
+    localStorage.setItem('prismButtonRemoved', 'true');
 
-    // Mock the shadow DOM functionality
-    document.body.attachShadow = jest.fn().mockReturnValue({
-      appendChild: jest.fn()
-    });
+    await import('../content/content');
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 
   afterEach(() => {
-    delete (global as any).chrome;
+    mockSendMessage.mockClear();
+    mockStorageSet.mockClear();
+    mockStorageGet.mockReset();
+    mockStorageGet.mockResolvedValue({});
   });
 
-  test('should inject iframe with correct dimensions', () => {
-    // Create the container
-    const container = document.createElement('div');
-    container.id = 'prism-chat-popup-container';
-    document.body.appendChild(container);
+  const pressKey = (
+    init: KeyboardEventInit,
+    target: HTMLElement = document.body,
+  ) => {
+    target.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        bubbles: true,
+        cancelable: true,
+        ...init,
+      }),
+    );
+  };
 
-    // Create Shadow DOM to isolate styles
-    const shadow = container.attachShadow({ mode: 'open' });
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 
-    // Create the iframe
-    const iframe = document.createElement('iframe');
-    iframe.src = 'chrome-extension://test-extension/chat.html';
-    iframe.id = 'prism-chat-iframe';
-    iframe.style.cssText = `
-      position: fixed;
-      top: 0;
-      left: 5%;
-      width: 90%;
-      height: 100%;
-      z-index: 2147483647;
-      border: none;
-      background: white;
-    `;
+  // The iframe popup is loaded through a dynamic import inside the keydown
+  // handler, so wait for the container to actually appear.
+  const waitFor = async (selector: string) => {
+    for (let i = 0; i < 100; i++) {
+      const element = document.querySelector(selector);
+      if (element) return element;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    return null;
+  };
 
-    // Add the iframe to the shadow DOM
-    shadow.appendChild(iframe);
+  test('increases font size on Shift+=', async () => {
+    const before = document.documentElement.style.fontSize;
 
-    // Verify the iframe has the correct dimensions
-    expect(iframe.style.position).toBe('fixed');
-    expect(iframe.style.top).toBe('0px'); // 0% from top
-    expect(iframe.style.left).toBe('5%'); // 5% from left
-    expect(iframe.style.width).toBe('90%'); // 90% width
-    expect(iframe.style.height).toBe('100%'); // 100% height
+    pressKey({ key: '=', shiftKey: true });
+    await settle();
+
+    const after = document.documentElement.style.fontSize;
+    expect(parseFloat(after)).toBeGreaterThan(parseFloat(before || '32'));
+    expect(mockStorageSet).toHaveBeenCalledWith({ fontScale: 1.1 });
   });
 
-  test('should handle font size increase with Shift+=', () => {
-    // Mock the font scaling functions
-    let currentFontScale = 1.0;
-    
-    // Simulate Shift+= key press
-    const event = new window.KeyboardEvent('keydown', {
-      key: '=',
-      shiftKey: true,
-      bubbles: true
-    });
+  test('decreases font size on Shift+-', async () => {
+    const before = parseFloat(document.documentElement.style.fontSize);
 
-    // Apply font scaling logic
-    const baseFontSize = 32 * currentFontScale; // 32px base * scale
-    currentFontScale = Math.min(2.0, currentFontScale + 0.1); // Increase by 0.1
-    const newBaseFontSize = 32 * currentFontScale; // 32px base * new scale
+    pressKey({ key: '-', shiftKey: true });
+    await settle();
 
-    // Verify font size increased
-    expect(newBaseFontSize).toBeGreaterThan(baseFontSize);
-    expect(currentFontScale).toBe(1.1); // Should be 1.0 + 0.1
+    expect(parseFloat(document.documentElement.style.fontSize)).toBeLessThan(
+      before,
+    );
+    expect(mockStorageSet).toHaveBeenCalledWith({ fontScale: 1 });
   });
 
-  test('should handle font size decrease with Shift+-', () => {
-    // Mock the font scaling functions
-    let currentFontScale = 1.0;
-    
-    // Simulate Shift+- key press
-    const event = new window.KeyboardEvent('keydown', {
-      key: '-',
-      shiftKey: true,
-      bubbles: true
-    });
-
-    // Apply font scaling logic
-    const baseFontSize = 32 * currentFontScale; // 32px base * scale
-    currentFontScale = Math.max(0.5, currentFontScale - 0.1); // Decrease by 0.1
-    const newBaseFontSize = 32 * currentFontScale; // 32px base * new scale
-
-    // Verify font size decreased
-    expect(newBaseFontSize).toBeLessThan(baseFontSize);
-    expect(currentFontScale).toBe(0.9); // Should be 1.0 - 0.1
+  test('injects the iframe on the default Ctrl+` shortcut', async () => {
+    pressKey({ key: '`', ctrlKey: true });
+    expect(await waitFor('#prism-iframe-container')).toBeTruthy();
   });
 
-  test('should toggle iframe with Ctrl+K', () => {
-    // Mock the toggleChatPopup function behavior
-    let iframeExists = false;
-    
-    // Simulate Ctrl+K key press
-    const event = new window.KeyboardEvent('keydown', {
-      key: 'k',
-      ctrlKey: true,
-      bubbles: true
-    });
+  test('replaces the existing iframe instead of duplicating it', async () => {
+    pressKey({ key: '`', ctrlKey: true });
+    expect(await waitFor('#prism-iframe-container')).toBeTruthy();
 
-    // Simulate toggle behavior
-    if (!iframeExists) {
-      // Inject iframe
-      iframeExists = true;
-    } else {
-      // Remove iframe
-      iframeExists = false;
+    pressKey({ key: '`', ctrlKey: true });
+    await waitFor('#prism-iframe-container');
+    await settle();
+
+    expect(document.querySelectorAll('#prism-iframe-container')).toHaveLength(
+      1,
+    );
+  });
+
+  test('ignores the default shortcut when a custom key is configured', async () => {
+    mockStorageGet.mockImplementation((keys: string[]) =>
+      Promise.resolve(
+        keys.includes('displaySettings')
+          ? { displaySettings: { iframeToggleKey: 'j' } }
+          : {},
+      ),
+    );
+
+    pressKey({ key: '`', ctrlKey: true });
+    await settle();
+
+    expect(document.getElementById('prism-iframe-container')).toBeNull();
+
+    pressKey({ key: 'j', ctrlKey: true });
+    expect(await waitFor('#prism-iframe-container')).toBeTruthy();
+  });
+
+  test('does not change font size from inside an input field', async () => {
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    const before = document.documentElement.style.fontSize;
+
+    pressKey({ key: '=', shiftKey: true }, input);
+    await settle();
+
+    expect(document.documentElement.style.fontSize).toBe(before);
+    expect(mockStorageSet).not.toHaveBeenCalled();
+
+    input.remove();
+  });
+
+  test('opens the prompt chat iframe with clear and retry controls', async () => {
+    for (const key of 'prompt') {
+      pressKey({ key });
     }
 
-    // Toggle again
-    if (!iframeExists) {
-      iframeExists = true;
-    } else {
-      iframeExists = false;
-    }
+    const container = await waitFor('#prism-chat-popup-container');
+    expect(container).toBeTruthy();
 
-    // Verify toggle behavior
-    expect(iframeExists).toBe(false); // Should be toggled off after two presses
-  });
+    const shadow = container?.shadowRoot;
+    expect(shadow?.querySelector('#prism-chat-iframe')).toBeTruthy();
+    expect(shadow?.querySelector('button[title="Clear chat"]')).toBeTruthy();
+    expect(
+      shadow?.querySelector('button[title="Retry last message"]'),
+    ).toBeTruthy();
 
-  test('should not trigger shortcuts in input fields', () => {
-    // Create an input element
-    const inputElement = document.createElement('input');
-    document.body.appendChild(inputElement);
-
-    // Simulate Shift+= key press on input element
-    const event = new window.KeyboardEvent('keydown', {
-      key: '=',
-      shiftKey: true,
-      target: inputElement,
-      bubbles: true
-    });
-
-    // Check if target is an input field
-    const isInputElement = event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA';
-    const isContentEditable = (event.target as HTMLElement).isContentEditable;
-
-    // Verify that shortcuts are not processed in input fields
-    expect(isInputElement).toBe(true);
-    expect(isContentEditable).toBe(false);
-  });
-
-  test('should handle clear and retry buttons', () => {
-    // Create the container
-    const container = document.createElement('div');
-    container.id = 'prism-chat-popup-container';
-    document.body.appendChild(container);
-
-    // Create Shadow DOM to isolate styles
-    const shadow = container.attachShadow({ mode: 'open' });
-
-    // Create the iframe
-    const iframe = document.createElement('iframe');
-    iframe.src = 'chrome-extension://test-extension/chat.html';
-    iframe.id = 'prism-chat-iframe';
-    shadow.appendChild(iframe);
-
-    // Add controls container
-    const controlsContainer = document.createElement('div');
-    controlsContainer.style.cssText = `
-      position: absolute;
-      top: 10px;
-      right: 10px;
-      z-index: 2147483648;
-      display: flex;
-      gap: 5px;
-    `;
-
-    // Add clear button
-    const clearButton = document.createElement('button');
-    clearButton.innerHTML = '🗑️';
-    clearButton.title = 'Clear chat';
-    clearButton.style.cssText = `
-      background: #ff4757;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      width: 30px;
-      height: 30px;
-      cursor: pointer;
-      font-size: 14px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    `;
-
-    // Add retry button
-    const retryButton = document.createElement('button');
-    retryButton.innerHTML = '🔄';
-    retryButton.title = 'Retry last message';
-    retryButton.style.cssText = `
-      background: #374151;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      width: 30px;
-      height: 30px;
-      cursor: pointer;
-      font-size: 14px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    `;
-
-    // Add close button
-    const closeButton = document.createElement('button');
-    closeButton.innerHTML = '✕';
-    closeButton.title = 'Close iframe';
-    closeButton.style.cssText = `
-      background: #4f46e5;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      width: 30px;
-      height: 30px;
-      cursor: pointer;
-      font-size: 14px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    `;
-
-    // Add all buttons to the controls container
-    controlsContainer.appendChild(clearButton);
-    controlsContainer.appendChild(retryButton);
-    controlsContainer.appendChild(closeButton);
-
-    // Add controls to shadow DOM
-    shadow.appendChild(controlsContainer);
-
-    // Verify all buttons exist
-    expect(shadow.querySelector('button[title="Clear chat"]')).toBeTruthy();
-    expect(shadow.querySelector('button[title="Retry last message"]')).toBeTruthy();
-    expect(shadow.querySelector('button[title="Close iframe"]')).toBeTruthy();
+    // jsdom reports contentWindow as null for iframes inside a shadow root,
+    // so the clear/retry postMessage targets are not observable here.
+    const closeButton = shadow?.querySelector(
+      'button[title="Close iframe"]',
+    ) as HTMLButtonElement;
+    closeButton.click();
+    expect(document.getElementById('prism-chat-popup-container')).toBeNull();
   });
 });

@@ -9,6 +9,7 @@ import type { ChatSession, PromptShortcut } from '@prism/shared-types';
 import { ImageGenerationService } from '@prism/image-gen';
 import type { Message, ContextData, AIConfig } from '@prism/shared-types';
 import { VoiceInput } from '../popup/VoiceInput';
+import { ErrorModalHost } from '../components/ErrorModal';
 import '../popup/Popup.scss'; // Reuse popup styles
 
 // Initialize with default settings - will be overridden by stored settings
@@ -90,6 +91,8 @@ export function StandaloneChatPage() {
   );
   const [imageGenerationApiKey, setImageGenerationApiKey] =
     useState<string>('');
+
+  const [historyMissing, setHistoryMissing] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -297,7 +300,19 @@ export function StandaloneChatPage() {
       // Fallback to localStorage if database fails
       const savedHistory = localStorage.getItem('history');
       if (savedHistory) {
-        setMessages(JSON.parse(savedHistory));
+        try {
+          setMessages(JSON.parse(savedHistory));
+        } catch (fallbackError) {
+          console.error(
+            'Failed to parse fallback chat history:',
+            fallbackError,
+          );
+          setMessages([]);
+          setHistoryMissing(true);
+        }
+      } else {
+        setMessages([]);
+        setHistoryMissing(true);
       }
     }
   };
@@ -359,10 +374,12 @@ export function StandaloneChatPage() {
         setMessages(JSON.parse(savedHistory));
       } else {
         setMessages([]);
+        setHistoryMissing(true);
       }
     } catch (error) {
       console.error('Failed to load session:', error);
       setMessages([]);
+      setHistoryMissing(true);
     }
   };
 
@@ -1419,6 +1436,9 @@ export function StandaloneChatPage() {
 
       {showMenu && renderMenu()}
       {showPrompts && renderPromptShortcuts()}
+      {historyMissing && (
+        <ErrorModalHost onClose={() => setHistoryMissing(false)} />
+      )}
     </div>
   );
 }

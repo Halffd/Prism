@@ -38,6 +38,7 @@ import { PersonaSelector } from '../components/PersonaSelector';
 import { PromptPresetManager } from '../components/PromptPresetManager';
 import { WorldInfoManager } from '../components/WorldInfoManager';
 import { WebSearchPanel } from '../components/WebSearchPanel';
+import { ErrorModalHost } from '../components/ErrorModal';
 import { CouncilPanel } from '../components/CouncilPanel';
 import { MultiSendPanel } from '../components/MultiSendPanel';
 import { DebatePanel } from '../components/DebatePanel';
@@ -159,6 +160,8 @@ export function ChatPage() {
   const [showSearchPanel, setShowSearchPanel] = useState(false);
   const selectedProvider = reduxSelectedProvider;
 
+  const [historyMissing, setHistoryMissing] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -204,6 +207,7 @@ export function ChatPage() {
     } catch (error) {
       console.error('Failed to load chat history from database:', error);
       dispatch(setMessages([]));
+      setHistoryMissing(true);
     }
   };
 
@@ -246,10 +250,12 @@ export function ChatPage() {
         dispatch(setMessages(history));
       } else {
         dispatch(setMessages([]));
+        setHistoryMissing(true);
       }
     } catch (error) {
       console.error('Failed to load session:', error);
       dispatch(setMessages([]));
+      setHistoryMissing(true);
     }
   };
 
@@ -1409,6 +1415,10 @@ export function ChatPage() {
             <WorldInfoManager />
           </div>
         </div>
+      )}
+
+      {historyMissing && (
+        <ErrorModalHost onClose={() => setHistoryMissing(false)} />
       )}
     </div>
   );

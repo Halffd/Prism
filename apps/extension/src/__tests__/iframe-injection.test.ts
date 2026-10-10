@@ -1,216 +1,168 @@
-import { JSDOM } from 'jsdom';
+import {
+  createIframe,
+  createIframeContainer,
+  attachShadowToElement,
+  removeIframe,
+} from '../content/iframe-manager';
+
+jest.mock('../popup/Popup', () => ({
+  Popup: () => null,
+}));
 
 describe('Chat Popup Iframe Injection', () => {
-  let dom: JSDOM;
-  let window: any;
-  let document: Document;
-
   beforeEach(() => {
-    dom = new JSDOM('<!DOCTYPE html><html><body></body></html>', {
-      url: 'https://example.com',
-      pretendToBeVisual: true,
-      resources: 'usable'
-    });
-    window = dom.window;
-    document = window.document;
-
-    // Mock the chrome API
     (global as any).chrome = {
       runtime: {
         getURL: (path: string) => `chrome-extension://test-extension/${path}`,
-        sendMessage: jest.fn()
+        sendMessage: jest.fn(),
       },
       storage: {
         local: {
           get: jest.fn().mockResolvedValue({}),
-          set: jest.fn().mockResolvedValue({})
-        }
+          set: jest.fn().mockResolvedValue(undefined),
+        },
       },
       tabs: {
         query: jest.fn().mockResolvedValue([{ id: 1 }]),
-        sendMessage: jest.fn().mockResolvedValue({})
-      }
+        sendMessage: jest.fn().mockResolvedValue({}),
+      },
     };
-
-    // Mock the shadow DOM functionality
-    document.body.attachShadow = jest.fn().mockReturnValue({
-      appendChild: jest.fn()
-    });
   });
 
   afterEach(() => {
+    removeIframe('prism-chat-popup-container');
+    document.getElementById('prism-iframe-styles')?.remove();
+    document.body.innerHTML = '';
     delete (global as any).chrome;
   });
 
-  test('should inject chat popup iframe with shadow DOM', () => {
-    // Import the content script functions
-    // Note: In a real test, we would import the actual functions
-    // For this test, we'll simulate the injection process
-    
-    // Create the container
-    const container = document.createElement('div');
-    container.id = 'prism-chat-popup-container';
+  test('creates an iframe inside a shadow root on the container', () => {
+    const container = createIframeContainer('prism-chat-popup-container');
     document.body.appendChild(container);
 
-    // Create Shadow DOM to isolate styles
-    const shadow = container.attachShadow({ mode: 'open' });
-
-    // Create the iframe
-    const iframe = document.createElement('iframe');
-    iframe.src = 'chrome-extension://test-extension/chat.html';
-    iframe.id = 'prism-chat-iframe';
-    iframe.style.cssText = `
-      position: fixed;
-      top: 10px;
-      right: 10px;
-      width: 400px;
-      height: 600px;
-      z-index: 2147483647;
-      border: none;
-      border-radius: 8px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-      background: white;
-    `;
-
-    // Add close button
-    const closeButton = document.createElement('button');
-    closeButton.innerHTML = '✕';
-    closeButton.style.cssText = `
-      position: absolute;
-      top: 5px;
-      right: 5px;
-      background: #ff4757;
-      color: white;
-      border: none;
-      border-radius: 50%;
-      width: 25px;
-      height: 25px;
-      cursor: pointer;
-      z-index: 2147483648;
-      font-size: 14px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    `;
-
-    // Add the iframe and close button to the shadow DOM
+    const shadow = attachShadowToElement(container);
+    const iframe = createIframe({
+      src: 'chrome-extension://test-extension/chat.html',
+      id: 'prism-chat-iframe',
+      style: 'width: 400px; height: 600px;',
+    });
     shadow.appendChild(iframe);
-    shadow.appendChild(closeButton);
 
-    // Verify the container was added to the body
-    expect(document.getElementById('prism-chat-popup-container')).toBeTruthy();
-
-    // Verify the iframe was added to the shadow DOM
-    const shadowRoot = (document.getElementById('prism-chat-popup-container') as any).shadowRoot;
-    expect(shadowRoot).toBeTruthy();
-    expect(shadowRoot.querySelector('iframe')).toBeTruthy();
-    expect(shadowRoot.querySelector('button')).toBeTruthy();
+    const mounted = document.getElementById('prism-chat-popup-container');
+    expect(mounted).toBeTruthy();
+    expect(mounted?.shadowRoot).toBeTruthy();
+    expect(mounted?.shadowRoot?.querySelector('iframe')).toBeTruthy();
+    expect(mounted?.shadowRoot?.querySelector('iframe')?.id).toBe(
+      'prism-chat-iframe',
+    );
   });
 
-  test('should not inject duplicate chat popup containers', () => {
-    // Create the first container
-    const container1 = document.createElement('div');
-    container1.id = 'prism-chat-popup-container';
-    document.body.appendChild(container1);
+  test('does not create a second container with the same id', () => {
+    const first = createIframeContainer('prism-chat-popup-container');
+    document.body.appendChild(first);
 
-    // Try to create another container with the same ID
-    const existingContainer = document.getElementById('prism-chat-popup-container');
-    expect(existingContainer).toBeTruthy();
-
-    // In a real implementation, the function would check for existence before creating
-    // This test verifies the existence check logic
-    const shouldCreateNew = !document.getElementById('prism-chat-popup-container');
-    expect(shouldCreateNew).toBeFalsy();
+    const shouldCreateNew = !document.getElementById(
+      'prism-chat-popup-container',
+    );
+    expect(shouldCreateNew).toBe(false);
+    expect(
+      document.querySelectorAll('#prism-chat-popup-container'),
+    ).toHaveLength(1);
   });
 
-  test('should remove chat popup when requested', () => {
-    // Create the container
-    const container = document.createElement('div');
-    container.id = 'prism-chat-popup-container';
+  test('removes the container', () => {
+    const container = createIframeContainer('prism-chat-popup-container');
     document.body.appendChild(container);
 
-    // Verify it exists
-    expect(document.getElementById('prism-chat-popup-container')).toBeTruthy();
+    removeIframe('prism-chat-popup-container');
 
-    // Remove the container (simulating the removeChatPopup function)
-    const containerToRemove = document.getElementById('prism-chat-popup-container');
-    if (containerToRemove) {
-      containerToRemove.remove();
-    }
-
-    // Verify it's gone
     expect(document.getElementById('prism-chat-popup-container')).toBeNull();
   });
 
-  test('should handle iframe resize functionality', () => {
-    // Create the container
-    const container = document.createElement('div');
-    container.id = 'prism-chat-popup-container';
-    document.body.appendChild(container);
+  describe('injectIframePopup', () => {
+    // injectIframePopup awaits chrome.storage before appending the container.
+    const inject = async () => {
+      const { injectIframePopup } = await import('../iframe/IframePopup');
+      await injectIframePopup();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    };
 
-    // Create Shadow DOM to isolate styles
-    const shadow = container.attachShadow({ mode: 'open' });
+    test('injects a resizable and draggable container', async () => {
+      await inject();
 
-    // Create the iframe
-    const iframe = document.createElement('iframe');
-    iframe.src = 'chrome-extension://test-extension/chat.html';
-    iframe.id = 'prism-chat-iframe';
-    iframe.style.width = '400px';
-    iframe.style.height = '600px';
-    shadow.appendChild(iframe);
+      const container = document.getElementById('prism-iframe-container');
+      expect(container).toBeTruthy();
+      expect(container?.querySelector('.iframe-header')).toBeTruthy();
+      expect(container?.querySelector('#prism-iframe-resizer')).toBeTruthy();
 
-    // Add resize handle
-    const resizeHandle = document.createElement('div');
-    resizeHandle.classList.add('resize-handle');
-    shadow.appendChild(resizeHandle);
+      container?.classList.add('show');
+      expect(container?.classList.contains('show')).toBe(true);
+    });
 
-    // Simulate resize functionality
-    const initialWidth = parseInt(window.getComputedStyle(iframe).width, 10);
-    const initialHeight = parseInt(window.getComputedStyle(iframe).height, 10);
+    test('resizes the container when the resizer is dragged', async () => {
+      await inject();
 
-    // Simulate a resize event (in a real implementation, this would happen via mouse events)
-    const newWidth = initialWidth + 50;
-    const newHeight = initialHeight + 50;
-    
-    iframe.style.width = newWidth + 'px';
-    iframe.style.height = newHeight + 'px';
+      const container = document.getElementById(
+        'prism-iframe-container',
+      ) as HTMLElement;
+      const resizer = container.querySelector(
+        '#prism-iframe-resizer',
+      ) as HTMLElement;
 
-    // Verify the iframe dimensions changed
-    expect(parseInt(window.getComputedStyle(iframe).width, 10)).toBe(newWidth);
-    expect(parseInt(window.getComputedStyle(iframe).height, 10)).toBe(newHeight);
-  });
+      // jsdom reports zero for offsetWidth/Height, so the drag has to exceed
+      // the 300x200 minimum for the size to change.
+      resizer.dispatchEvent(
+        new MouseEvent('mousedown', {
+          bubbles: true,
+          clientX: 0,
+          clientY: 0,
+        }),
+      );
+      document.dispatchEvent(
+        new MouseEvent('mousemove', {
+          bubbles: true,
+          clientX: 400,
+          clientY: 300,
+        }),
+      );
 
-  test('should handle iframe drag functionality', () => {
-    // Create the container
-    const container = document.createElement('div');
-    container.id = 'prism-chat-popup-container';
-    document.body.appendChild(container);
+      expect(parseInt(container.style.width, 10)).toBe(400);
+      expect(parseInt(container.style.height, 10)).toBe(300);
 
-    // Create Shadow DOM to isolate styles
-    const shadow = container.attachShadow({ mode: 'open' });
+      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
 
-    // Create the iframe
-    const iframe = document.createElement('iframe');
-    iframe.src = 'chrome-extension://test-extension/chat.html';
-    iframe.id = 'prism-chat-iframe';
-    iframe.style.position = 'fixed';
-    iframe.style.top = '10px';
-    iframe.style.left = '10px';
-    shadow.appendChild(iframe);
+      // stopResize persists the measured container size; jsdom reports 0 for
+      // offsetWidth/offsetHeight, so only the persisted key is assertable here.
+      const setMock = (global as any).chrome.storage.local.set as jest.Mock;
+      expect(setMock).toHaveBeenCalledWith({
+        iframeSize: expect.objectContaining({ width: expect.any(Number) }),
+      });
+    });
 
-    // Simulate drag functionality
-    const initialTop = parseInt(window.getComputedStyle(iframe).top, 10);
-    const initialLeft = parseInt(window.getComputedStyle(iframe).left, 10);
+    test('moves the container when the header is dragged', async () => {
+      await inject();
 
-    // Simulate a drag event (in a real implementation, this would happen via mouse events)
-    const newTop = initialTop + 100;
-    const newLeft = initialLeft + 100;
-    
-    iframe.style.top = newTop + 'px';
-    iframe.style.left = newLeft + 'px';
+      const container = document.getElementById(
+        'prism-iframe-container',
+      ) as HTMLElement;
+      const header = container.querySelector('.iframe-header') as HTMLElement;
 
-    // Verify the iframe position changed
-    expect(parseInt(window.getComputedStyle(iframe).top, 10)).toBe(newTop);
-    expect(parseInt(window.getComputedStyle(iframe).left, 10)).toBe(newLeft);
+      header.dispatchEvent(
+        new MouseEvent('mousedown', {
+          bubbles: true,
+          clientX: 10,
+          clientY: 10,
+        }),
+      );
+      document.dispatchEvent(
+        new MouseEvent('mousemove', {
+          bubbles: true,
+          clientX: 60,
+          clientY: 40,
+        }),
+      );
+
+      expect(container.style.transform).toBe('translate3d(50px, 30px, 0)');
+    });
   });
 });
