@@ -478,6 +478,7 @@ export function ChatScreen() {
         localSearchProvider={settings.localSearchProvider}
         searxngUrl={settings.searxngUrl}
         defaultToolPermission={settings.defaultToolPermission}
+        hardware={settings.aiConfig.hardware}
         onSetProvider={settings.setProvider}
         onSetAdapterMode={settings.setAdapterMode}
         onSetCapabilityMode={settings.setCapabilityMode}
@@ -486,6 +487,7 @@ export function ChatScreen() {
         onSetSearxngUrl={settings.setSearxngUrl}
         onSetModel={settings.setModel}
         onSetDefaultToolPermission={settings.setDefaultToolPermission}
+        onSetHardware={settings.setHardware}
         onClose={() => {
           settings.setShowSettings(false);
           setScreen('chat');

@@ -5,6 +5,7 @@ import type {
   AIMode,
   AICapability,
   LocalSearchProvider,
+  HardwareProfile,
 } from '@prism/shared-types';
 
 interface SettingsState {
@@ -18,6 +19,8 @@ interface SettingsState {
   localSearchProvider: LocalSearchProvider;
   searxngUrl: string;
   showSettings: boolean;
+  /** Hardware profile for local inference. */
+  hardware?: HardwareProfile;
 }
 
 export function useSettings() {
@@ -34,6 +37,7 @@ export function useSettings() {
     localSearchProvider: 'duckduckgo',
     searxngUrl: 'http://localhost:8888',
     showSettings: false,
+    hardware: { preferredCompute: 'auto' },
   });
 
   const setProvider = useCallback((provider: AIProvider) => {
@@ -104,6 +108,13 @@ export function useSettings() {
     }));
   }, []);
 
+  const setHardware = useCallback((hardware: HardwareProfile) => {
+    setState((prev) => ({
+      ...prev,
+      hardware,
+    }));
+  }, []);
+
   return {
     ...state,
     setProvider,
@@ -117,5 +128,6 @@ export function useSettings() {
     setShowSettings,
     setModel,
     setDefaultToolPermission,
+    setHardware,
   };
 }

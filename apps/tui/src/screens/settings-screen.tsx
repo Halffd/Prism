@@ -6,6 +6,7 @@ import type {
   AIMode,
   AICapability,
   LocalSearchProvider,
+  HardwareProfile,
 } from '@prism/shared-types';
 
 const PROVIDERS: AIProvider[] = ['openai', 'gemini', 'qwen', 'prism-api'];
@@ -52,6 +53,7 @@ interface SettingsScreenProps {
   localSearchProvider: LocalSearchProvider;
   searxngUrl: string;
   defaultToolPermission?: 'allow' | 'deny' | 'ask';
+  hardware?: HardwareProfile;
   onSetProvider: (p: AIProvider) => void;
   onSetAdapterMode: (m: AIMode) => void;
   onSetCapabilityMode: (c: AICapability, m: AIMode) => void;
@@ -60,6 +62,7 @@ interface SettingsScreenProps {
   onSetSearxngUrl: (u: string) => void;
   onSetModel: (m: string) => void;
   onSetDefaultToolPermission?: (p: 'allow' | 'deny' | 'ask') => void;
+  onSetHardware?: (h: HardwareProfile) => void;
   onClose: () => void;
 }
 
@@ -70,6 +73,7 @@ type Section =
   | 'search'
   | 'capabilities'
   | 'permissions'
+  | 'hardware'
   | 'model';
 
 const PERMISSION_LEVELS: Array<'allow' | 'ask' | 'deny'> = [
@@ -87,6 +91,7 @@ export function SettingsScreen({
   localSearchProvider,
   searxngUrl,
   defaultToolPermission,
+  hardware = { preferredCompute: 'auto' },
   onSetProvider,
   onSetAdapterMode,
   onSetCapabilityMode,
@@ -95,6 +100,7 @@ export function SettingsScreen({
   onSetSearxngUrl,
   onSetModel,
   onSetDefaultToolPermission,
+  onSetHardware,
   onClose,
 }: SettingsScreenProps) {
   const { exit } = useApp();
@@ -114,6 +120,7 @@ export function SettingsScreen({
     'search',
     'capabilities',
     'permissions',
+    'hardware',
     'model',
   ];
   const sectionIdx = sections.indexOf(activeSection);
@@ -249,6 +256,25 @@ export function SettingsScreen({
         onSetCapabilityMode(cap, nextMode);
       } else if (activeSection === 'permissions') {
         onSetDefaultToolPermission?.(PERMISSION_LEVELS[selectedIdx]);
+      } else if (activeSection === 'hardware') {
+        const levels: Array<
+          | 'auto'
+          | 'cpu-only'
+          | 'gpu-auto'
+          | 'gpu-nvidia'
+          | 'gpu-amd'
+          | 'gpu-intel'
+        > = [
+          'auto',
+          'cpu-only',
+          'gpu-auto',
+          'gpu-nvidia',
+          'gpu-amd',
+          'gpu-intel',
+        ];
+        const currentIdx = levels.indexOf(hardware.preferredCompute);
+        const nextIdx = (currentIdx + 1) % levels.length;
+        onSetHardware?.({ ...hardware, preferredCompute: levels[nextIdx] });
       } else if (activeSection === 'model') {
         setEditingModel(true);
         setModelDraft(model ?? '');
@@ -503,6 +529,61 @@ export function SettingsScreen({
       <Box flexDirection="column" paddingBottom={spacing.lg}>
         <Text
           color={
+            activeSection === 'hardware'
+              ? colors.primary
+              : colors.on_surface_variant
+          }
+          bold={activeSection === 'hardware'}
+        >
+          Hardware {activeSection === 'hardware' ? '<' : ''}
+        </Text>
+        <Box flexDirection="column" paddingLeft={spacing.lg}>
+          <Text color={colors.on_surface_variant}>
+            Preferred Compute: {hardware.preferredCompute}
+          </Text>
+          {hardware.gpuLayersOverride !== undefined && (
+            <Text color={colors.on_surface_variant}>
+              GPU Layers: {hardware.gpuLayersOverride}
+            </Text>
+          )}
+          {hardware.contextTokens !== undefined && (
+            <Text color={colors.on_surface_variant}>
+              Context Tokens: {hardware.contextTokens}
+            </Text>
+          )}
+          <Text color={colors.on_surface_variant}>
+            {hardware.preferredCompute === 'cpu-only' ? '> ' : ' '}CPU Only
+          </Text>
+          <Text color={colors.on_surface_variant}>
+            {hardware.preferredCompute === 'gpu-auto' ? '> ' : ' '}GPU Auto
+          </Text>
+          <Text color={colors.on_surface_variant}>
+            {hardware.preferredCompute === 'gpu-nvidia' ? '> ' : ' '}GPU NVIDIA
+          </Text>
+          <Text color={colors.on_surface_variant}>
+            {hardware.preferredCompute === 'gpu-amd' ? '> ' : ' '}GPU AMD
+          </Text>
+          <Text color={colors.on_surface_variant}>
+            {hardware.preferredCompute === 'gpu-intel' ? '> ' : ' '}GPU Intel
+          </Text>
+          {hardware.gpuLayersOverride !== undefined && (
+            <Text color={colors.outline_variant}>
+              {' '}
+              [Enter: cycle GPU layers]
+            </Text>
+          )}
+          {hardware.contextTokens !== undefined && (
+            <Text color={colors.outline_variant}>
+              {' '}
+              [Enter: cycle context tokens]
+            </Text>
+          )}
+        </Box>
+      </Box>
+
+      <Box flexDirection="column" paddingBottom={spacing.lg}>
+        <Text
+          color={
             activeSection === 'model'
               ? colors.primary
               : colors.on_surface_variant
@@ -522,10 +603,6 @@ export function SettingsScreen({
           )}
         </Box>
       </Box>
-
-      <Text color={colors.outline_variant}>
-        Press 'q' to quit | Esc to return to chat
-      </Text>
     </Box>
   );
 }
