@@ -74,6 +74,10 @@ export const agentSlice = createSlice({
       }
     },
   },
+  selectors: {
+    selectAgents: (state: AgentState) => state.agents,
+    selectActiveAgentId: (state: AgentState) => state.activeAgentId,
+  },
 });
 
 export const {

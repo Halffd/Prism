@@ -4,8 +4,8 @@
     "outDir": "dist",
     "tsBuildInfoFile": "dist/tsconfig.app.tsbuildinfo",
     "jsx": "react-jsx",
-    "lib": ["es2022"],
-    "types": ["node"],
+    "lib": ["es2022", "dom"],
+    "types": ["node", "react"],
     "rootDir": "src",
     "baseUrl": "../..",
     "paths": {
@@ -54,6 +54,9 @@
     },
     {
       "path": "../../libs/logging/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/redux-store/tsconfig.lib.json"
     }
   ]
 }

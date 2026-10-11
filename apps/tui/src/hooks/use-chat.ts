@@ -33,6 +33,7 @@ interface ChatState {
   agentEnabled: boolean;
   agentInProgress: boolean;
   agentResult: AgentResult | null;
+  agentStep: number;
 }
 
 export function useChat() {
@@ -59,6 +60,7 @@ export function useChat() {
     agentEnabled: false,
     agentInProgress: false,
     agentResult: null,
+    agentStep: 0,
   });
 
   const addMessage = useCallback((message: Message) => {
@@ -114,6 +116,7 @@ export function useChat() {
       agentEnabled: false,
       agentInProgress: false,
       agentResult: null,
+      agentStep: 0,
     });
   }, []);
 
@@ -229,6 +232,10 @@ export function useChat() {
     setState((prev) => ({ ...prev, agentResult: result }));
   }, []);
 
+  const setAgentStep = useCallback((step: number) => {
+    setState((prev) => ({ ...prev, agentStep: step }));
+  }, []);
+
   const setMultiSendInProgress = useCallback((inProgress: boolean) => {
     setState((prev) => ({ ...prev, multiSendInProgress: inProgress }));
   }, []);
@@ -286,5 +293,6 @@ export function useChat() {
     toggleAgent,
     setAgentInProgress,
     setAgentResult,
+    setAgentStep,
   };
 }

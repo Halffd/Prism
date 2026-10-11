@@ -30,17 +30,17 @@ hardware modes, agent memories. See TUI.
 
 ## TUI (apps/tui)
 
-| Feature                                  | Status      | Notes                                                                                              |
-| ---------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------- |
-| Chat + streaming                         | done        | Ink, shares ai-adapters                                                                            |
-| Status bar                               | done        | provider/model/adapterMode/online + tok/s · latency · ctx · session tokens                         |
-| Web/deep/council/multi-send/debate/agent | done        | Ctrl+W/D/V/M/B keybindings                                                                         |
-| SillyTavern characters                   | done        | group chat + character select                                                                      |
-| Themes                                   | partial     | nocturnal-editorial only; 6-theme port planned                                                     |
-| Tools + permissions (allow/deny/ask) | done | TUI agent runtime: Node executor (shell/read_file) + PermissionAwareToolExecutor; y/n ask prompt; settings section (allow/ask/deny) |
-| RAG (attach documents) | done | /rag <path> ingests local files (chunk + embed, in-memory store); top-k chunks auto-injected on send |
-| Personalities & agent memories | partial | 20 defaults + memory store + system-prompt composition done; TUI agent picker UI next |
-| Hardware modes (cpu/gpu/amd/intel) | partial | libs plumbing done (num_gpu/num_ctx via LocalAdapter); TUI hardware settings section next |
+| Feature                                  | Status  | Notes                                                                                                                               |
+| ---------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Chat + streaming                         | done    | Ink, shares ai-adapters                                                                                                             |
+| Status bar                               | done    | provider/model/adapterMode/online + tok/s · latency · ctx · session tokens                                                          |
+| Web/deep/council/multi-send/debate/agent | done    | Ctrl+W/D/V/M/B keybindings                                                                                                          |
+| SillyTavern characters                   | done    | group chat + character select                                                                                                       |
+| Themes                                   | partial | nocturnal-editorial only; 6-theme port planned                                                                                      |
+| Tools + permissions (allow/deny/ask)     | done    | TUI agent runtime: Node executor (shell/read_file) + PermissionAwareToolExecutor; y/n ask prompt; settings section (allow/ask/deny) |
+| RAG (attach documents)                   | done    | /rag <path> ingests local files (chunk + embed, in-memory store); top-k chunks auto-injected on send                                |
+| Personalities & agent memories           | done    | 20 defaults + memory store + system-prompt composition done; AgentPicker UI in TUI done                                             |
+| Hardware modes (cpu/gpu/amd/intel)       | partial | libs plumbing done (num_gpu/num_ctx via LocalAdapter); TUI hardware settings section next                                           |
 
 ## Desktop (apps/desktop)
 
@@ -62,12 +62,12 @@ hardware modes, agent memories. See TUI.
 
 ## API server (apps/api) — self-hosted Node/Express
 
-| Feature | Status | Notes |
-|---|---|---|
-| Structured logs | done | JSON lines to stdout (level/channel/method/status/duration) |
-| /metrics | done | Prometheus text format: counters per route/status, p50/p95/p99, uptime |
-| /tools/execute | done | Permission-checked tool execution: PRISM_ENABLE_TOOL_EXECUTION=1 opt-in, command allowlist (read-only default), path-traversal guard, output cap |
-| /health | done | uptime + timestamp |
+| Feature         | Status | Notes                                                                                                                                            |
+| --------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Structured logs | done   | JSON lines to stdout (level/channel/method/status/duration)                                                                                      |
+| /metrics        | done   | Prometheus text format: counters per route/status, p50/p95/p99, uptime                                                                           |
+| /tools/execute  | done   | Permission-checked tool execution: PRISM_ENABLE_TOOL_EXECUTION=1 opt-in, command allowlist (read-only default), path-traversal guard, output cap |
+| /health         | done   | uptime + timestamp                                                                                                                               |
 
 ## Shared libs (used by TUI/desktop; not extension UI)
 
