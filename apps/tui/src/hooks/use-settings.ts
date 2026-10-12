@@ -19,8 +19,6 @@ interface SettingsState {
   localSearchProvider: LocalSearchProvider;
   searxngUrl: string;
   showSettings: boolean;
-  /** Hardware profile for local inference. */
-  hardware?: HardwareProfile;
 }
 
 export function useSettings() {
@@ -29,6 +27,7 @@ export function useSettings() {
       provider: 'openai',
       apiUrl: 'https://api.openai.com/v1',
       providerKeys: { openai: '' },
+      hardware: { preferredCompute: 'auto' },
     },
     adapterMode: 'api',
     capabilityModes: {},
@@ -37,7 +36,6 @@ export function useSettings() {
     localSearchProvider: 'duckduckgo',
     searxngUrl: 'http://localhost:8888',
     showSettings: false,
-    hardware: { preferredCompute: 'auto' },
   });
 
   const setProvider = useCallback((provider: AIProvider) => {
@@ -111,7 +109,7 @@ export function useSettings() {
   const setHardware = useCallback((hardware: HardwareProfile) => {
     setState((prev) => ({
       ...prev,
-      hardware,
+      aiConfig: { ...prev.aiConfig, hardware },
     }));
   }, []);
 

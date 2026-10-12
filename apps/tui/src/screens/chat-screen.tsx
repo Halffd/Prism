@@ -43,7 +43,7 @@ export function ChatScreen() {
       localApiUrl: settings.localApiUrl,
       localSearchProvider: settings.localSearchProvider,
       searxngUrl: settings.searxngUrl,
-      hardware: settings.hardware,
+      hardware: settings.aiConfig.hardware,
     });
   }
 
@@ -55,7 +55,7 @@ export function ChatScreen() {
       localApiUrl: settings.localApiUrl,
       localSearchProvider: settings.localSearchProvider,
       searxngUrl: settings.searxngUrl,
-      hardware: settings.hardware,
+      hardware: settings.aiConfig.hardware,
     });
   }, [
     settings.aiConfig,
@@ -64,7 +64,6 @@ export function ChatScreen() {
     settings.localApiUrl,
     settings.localSearchProvider,
     settings.searxngUrl,
-    settings.hardware,
   ]);
 
   const performWebSearch = useCallback(
@@ -481,7 +480,7 @@ export function ChatScreen() {
         localSearchProvider={settings.localSearchProvider}
         searxngUrl={settings.searxngUrl}
         defaultToolPermission={settings.defaultToolPermission}
-        hardware={settings.hardware}
+        hardware={settings.aiConfig.hardware}
         onSetProvider={settings.setProvider}
         onSetAdapterMode={settings.setAdapterMode}
         onSetCapabilityMode={settings.setCapabilityMode}
