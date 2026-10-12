@@ -44,6 +44,19 @@ const LOCAL_SEARCH_OPTIONS: {
   { key: 'searxng', label: 'SearXNG', desc: 'Self-hosted, requires docker' },
 ];
 
+const COMPUTE_LEVELS: HardwareProfile['preferredCompute'][] = [
+  'auto',
+  'cpu-only',
+  'gpu-auto',
+  'gpu-nvidia',
+  'gpu-amd',
+  'gpu-intel',
+];
+
+const GPU_LAYER_OPTIONS = [0, 8, 16, 24, 32, 99];
+
+const CONTEXT_TOKEN_OPTIONS = [1024, 2048, 4096, 8192, 16384, 32768];
+
 interface SettingsScreenProps {
   provider: AIProvider;
   model?: string;
@@ -124,6 +137,25 @@ export function SettingsScreen({
     'model',
   ];
   const sectionIdx = sections.indexOf(activeSection);
+
+  const hardwareRows: Array<'compute' | 'gpu-layers' | 'context-tokens'> = [
+    'compute',
+  ];
+  if (hardware.gpuLayersOverride !== undefined) {
+    hardwareRows.push('gpu-layers');
+  }
+  if (hardware.contextTokens !== undefined) {
+    hardwareRows.push('context-tokens');
+  }
+  const hwComputeSelected = activeSection === 'hardware' && selectedIdx === 0;
+  const hwGpuLayersSelected =
+    activeSection === 'hardware' &&
+    hardware.gpuLayersOverride !== undefined &&
+    selectedIdx === 1;
+  const hwContextSelected =
+    activeSection === 'hardware' &&
+    ((hardware.gpuLayersOverride !== undefined && selectedIdx === 2) ||
+      (hardware.gpuLayersOverride === undefined && selectedIdx === 1));
 
   useInput((input, key) => {
     if (editingUrl) {
@@ -225,6 +257,8 @@ export function SettingsScreen({
             ? LOCAL_SEARCH_OPTIONS.length
             : LOCAL_SEARCH_OPTIONS.length - 1;
         setSelectedIdx((i) => Math.min(maxIdx, i + 1));
+      } else if (activeSection === 'hardware') {
+        setSelectedIdx((i) => Math.min(hardwareRows.length - 1, i + 1));
       }
       return;
     }
@@ -257,24 +291,27 @@ export function SettingsScreen({
       } else if (activeSection === 'permissions') {
         onSetDefaultToolPermission?.(PERMISSION_LEVELS[selectedIdx]);
       } else if (activeSection === 'hardware') {
-        const levels: Array<
-          | 'auto'
-          | 'cpu-only'
-          | 'gpu-auto'
-          | 'gpu-nvidia'
-          | 'gpu-amd'
-          | 'gpu-intel'
-        > = [
-          'auto',
-          'cpu-only',
-          'gpu-auto',
-          'gpu-nvidia',
-          'gpu-amd',
-          'gpu-intel',
-        ];
-        const currentIdx = levels.indexOf(hardware.preferredCompute);
-        const nextIdx = (currentIdx + 1) % levels.length;
-        onSetHardware?.({ ...hardware, preferredCompute: levels[nextIdx] });
+        const row = hardwareRows[selectedIdx] ?? 'compute';
+        if (row === 'gpu-layers' && hardware.gpuLayersOverride !== undefined) {
+          const idx = GPU_LAYER_OPTIONS.indexOf(hardware.gpuLayersOverride);
+          const next = GPU_LAYER_OPTIONS[(idx + 1) % GPU_LAYER_OPTIONS.length];
+          onSetHardware?.({ ...hardware, gpuLayersOverride: next });
+        } else if (
+          row === 'context-tokens' &&
+          hardware.contextTokens !== undefined
+        ) {
+          const idx = CONTEXT_TOKEN_OPTIONS.indexOf(hardware.contextTokens);
+          const next =
+            CONTEXT_TOKEN_OPTIONS[(idx + 1) % CONTEXT_TOKEN_OPTIONS.length];
+          onSetHardware?.({ ...hardware, contextTokens: next });
+        } else {
+          const currentIdx = COMPUTE_LEVELS.indexOf(hardware.preferredCompute);
+          const nextIdx = (currentIdx + 1) % COMPUTE_LEVELS.length;
+          onSetHardware?.({
+            ...hardware,
+            preferredCompute: COMPUTE_LEVELS[nextIdx],
+          });
+        }
       } else if (activeSection === 'model') {
         setEditingModel(true);
         setModelDraft(model ?? '');
@@ -538,44 +575,36 @@ export function SettingsScreen({
           Hardware {activeSection === 'hardware' ? '<' : ''}
         </Text>
         <Box flexDirection="column" paddingLeft={spacing.lg}>
-          <Text color={colors.on_surface_variant}>
-            Preferred Compute: {hardware.preferredCompute}
+          <Text
+            color={
+              hwComputeSelected ? colors.on_surface : colors.on_surface_variant
+            }
+          >
+            {hwComputeSelected ? '> ' : '  '}
+            Preferred Compute: {hardware.preferredCompute} [Enter: cycle]
           </Text>
           {hardware.gpuLayersOverride !== undefined && (
-            <Text color={colors.on_surface_variant}>
-              GPU Layers: {hardware.gpuLayersOverride}
+            <Text
+              color={
+                hwGpuLayersSelected
+                  ? colors.on_surface
+                  : colors.on_surface_variant
+              }
+            >
+              {hwGpuLayersSelected ? '> ' : '  '}
+              GPU Layers: {hardware.gpuLayersOverride} [Enter: cycle]
             </Text>
           )}
           {hardware.contextTokens !== undefined && (
-            <Text color={colors.on_surface_variant}>
-              Context Tokens: {hardware.contextTokens}
-            </Text>
-          )}
-          <Text color={colors.on_surface_variant}>
-            {hardware.preferredCompute === 'cpu-only' ? '> ' : ' '}CPU Only
-          </Text>
-          <Text color={colors.on_surface_variant}>
-            {hardware.preferredCompute === 'gpu-auto' ? '> ' : ' '}GPU Auto
-          </Text>
-          <Text color={colors.on_surface_variant}>
-            {hardware.preferredCompute === 'gpu-nvidia' ? '> ' : ' '}GPU NVIDIA
-          </Text>
-          <Text color={colors.on_surface_variant}>
-            {hardware.preferredCompute === 'gpu-amd' ? '> ' : ' '}GPU AMD
-          </Text>
-          <Text color={colors.on_surface_variant}>
-            {hardware.preferredCompute === 'gpu-intel' ? '> ' : ' '}GPU Intel
-          </Text>
-          {hardware.gpuLayersOverride !== undefined && (
-            <Text color={colors.outline_variant}>
-              {' '}
-              [Enter: cycle GPU layers]
-            </Text>
-          )}
-          {hardware.contextTokens !== undefined && (
-            <Text color={colors.outline_variant}>
-              {' '}
-              [Enter: cycle context tokens]
+            <Text
+              color={
+                hwContextSelected
+                  ? colors.on_surface
+                  : colors.on_surface_variant
+              }
+            >
+              {hwContextSelected ? '> ' : '  '}
+              Context Tokens: {hardware.contextTokens} [Enter: cycle]
             </Text>
           )}
         </Box>
