@@ -1,10 +1,31 @@
 import type {
-  AIConfig, AIMode, AICapability, Message, AdapterConfig, ServiceConfig,
-  LocalSearchProvider, LLMRequest, LLMResult, WebSearchRequest, WebSearchResult,
-  DeepSearchRequest, DeepSearchResult, DeepSearchPhase, CouncilRequest,
-  CouncilResponse, CouncilMember, MultiSendRequest, MultiSendResponse,
-  MultiSendTarget, DebateRequest, DebateResult, DebateParticipant,
-  AgentRequest, AgentResult, Result,
+  AIConfig,
+  AIMode,
+  AICapability,
+  Message,
+  AdapterConfig,
+  ServiceConfig,
+  LocalSearchProvider,
+  HardwareProfile,
+  LLMRequest,
+  LLMResult,
+  WebSearchRequest,
+  WebSearchResult,
+  DeepSearchRequest,
+  DeepSearchResult,
+  DeepSearchPhase,
+  CouncilRequest,
+  CouncilResponse,
+  CouncilMember,
+  MultiSendRequest,
+  MultiSendResponse,
+  MultiSendTarget,
+  DebateRequest,
+  DebateResult,
+  DebateParticipant,
+  AgentRequest,
+  AgentResult,
+  Result,
 } from '@prism/shared-types';
 import { AdapterRouter } from '@prism/ai-adapters';
 import { nanoid } from 'nanoid';
@@ -16,6 +37,8 @@ export interface TUIClientConfig {
   localApiUrl?: string;
   localSearchProvider?: LocalSearchProvider;
   searxngUrl?: string;
+  /** Hardware profile forwarded to the local adapter. */
+  hardware?: HardwareProfile;
   prismApiUrl?: string;
   prismApiKey?: string;
 }
@@ -32,7 +55,8 @@ export class TUIClient {
     this.capabilityModes = config.capabilityModes;
 
     const serviceConfig: ServiceConfig = {
-      apiKey: (config.aiConfig.providerKeys ?? {})[config.aiConfig.provider] ?? '',
+      apiKey:
+        (config.aiConfig.providerKeys ?? {})[config.aiConfig.provider] ?? '',
       apiUrl: config.aiConfig.apiUrl,
       model: config.aiConfig.model,
       provider: config.aiConfig.provider,
@@ -46,6 +70,7 @@ export class TUIClient {
       localSearchProvider: config.localSearchProvider,
       searxngUrl: config.searxngUrl,
       providerKeys: config.aiConfig.providerKeys,
+      hardware: config.hardware,
     };
 
     this.adapterRouter = new AdapterRouter(serviceConfig, adapterConfig);
@@ -82,7 +107,10 @@ export class TUIClient {
     };
   }
 
-  async webSearch(query: string, maxResults = 5): Promise<Result<WebSearchResult>> {
+  async webSearch(
+    query: string,
+    maxResults = 5,
+  ): Promise<Result<WebSearchResult>> {
     const request: WebSearchRequest = { query, maxResults };
     return this.adapterRouter.webSearch(request);
   }
@@ -92,14 +120,23 @@ export class TUIClient {
     onPhaseUpdate?: (phase: DeepSearchPhase) => void,
   ): Promise<Result<DeepSearchResult>> {
     const request: DeepSearchRequest = {
-      query, maxDepth: 3, maxSearches: 5, maxExtractions: 8, onPhaseUpdate,
+      query,
+      maxDepth: 3,
+      maxSearches: 5,
+      maxExtractions: 8,
+      onPhaseUpdate,
     };
     return this.adapterRouter.deepSearch(request);
   }
 
-  async council(query: string, members: CouncilMember[], votingStrategy?: 'single-judge' | 'peer-vote' | 'consensus'): Promise<Result<CouncilResponse>> {
+  async council(
+    query: string,
+    members: CouncilMember[],
+    votingStrategy?: 'single-judge' | 'peer-vote' | 'consensus',
+  ): Promise<Result<CouncilResponse>> {
     const request: CouncilRequest = {
-      prompt: query, members,
+      prompt: query,
+      members,
       votingStrategy: votingStrategy ?? 'single-judge',
       judgeProvider: this.aiConfig.provider,
       judgeModel: this.aiConfig.model,
@@ -107,9 +144,15 @@ export class TUIClient {
     return this.adapterRouter.council(request);
   }
 
-  async multiSend(query: string, targets: MultiSendTarget[], conversationHistory?: Message[]): Promise<Result<MultiSendResponse>> {
+  async multiSend(
+    query: string,
+    targets: MultiSendTarget[],
+    conversationHistory?: Message[],
+  ): Promise<Result<MultiSendResponse>> {
     const request: MultiSendRequest = {
-      prompt: query, targets, conversationHistory,
+      prompt: query,
+      targets,
+      conversationHistory,
       systemPrompt: this.aiConfig.systemPrompt,
     };
     return this.adapterRouter.multiSend(request);
@@ -120,10 +163,16 @@ export class TUIClient {
     participants: DebateParticipant[],
     mode: 'dual' | 'group' = 'dual',
     maxTurns?: number,
-    onTurnUpdate?: (turn: import('@prism/shared-types').DebateTurn, turnIndex: number, totalTurns: number) => void,
+    onTurnUpdate?: (
+      turn: import('@prism/shared-types').DebateTurn,
+      turnIndex: number,
+      totalTurns: number,
+    ) => void,
   ): Promise<Result<DebateResult>> {
     const request: DebateRequest = {
-      topic, participants, mode,
+      topic,
+      participants,
+      mode,
       maxTurns: maxTurns ?? (mode === 'dual' ? 6 : participants.length * 2),
       systemPrompt: this.aiConfig.systemPrompt,
       onTurnUpdate,
@@ -139,6 +188,7 @@ export class TUIClient {
     if (config.aiConfig) this.aiConfig = config.aiConfig;
     if (config.adapterMode) this.adapterMode = config.adapterMode;
     if (config.capabilityModes) this.capabilityModes = config.capabilityModes;
+    if (config.hardware) this.adapterRouter.updateHardware(config.hardware);
   }
 }
 

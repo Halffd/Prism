@@ -53,9 +53,27 @@ const COMPUTE_LEVELS: HardwareProfile['preferredCompute'][] = [
   'gpu-intel',
 ];
 
-const GPU_LAYER_OPTIONS = [0, 8, 16, 24, 32, 99];
+/** undefined = server default (no num_gpu override). 99 = offload all layers. */
+const GPU_LAYER_CYCLE: Array<number | undefined> = [
+  undefined,
+  0,
+  8,
+  16,
+  24,
+  32,
+  99,
+];
 
-const CONTEXT_TOKEN_OPTIONS = [1024, 2048, 4096, 8192, 16384, 32768];
+/** undefined = server default (no num_ctx override). */
+const CONTEXT_TOKEN_CYCLE: Array<number | undefined> = [
+  undefined,
+  1024,
+  2048,
+  4096,
+  8192,
+  16384,
+  32768,
+];
 
 interface SettingsScreenProps {
   provider: AIProvider;
@@ -138,24 +156,9 @@ export function SettingsScreen({
   ];
   const sectionIdx = sections.indexOf(activeSection);
 
-  const hardwareRows: Array<'compute' | 'gpu-layers' | 'context-tokens'> = [
-    'compute',
-  ];
-  if (hardware.gpuLayersOverride !== undefined) {
-    hardwareRows.push('gpu-layers');
-  }
-  if (hardware.contextTokens !== undefined) {
-    hardwareRows.push('context-tokens');
-  }
   const hwComputeSelected = activeSection === 'hardware' && selectedIdx === 0;
-  const hwGpuLayersSelected =
-    activeSection === 'hardware' &&
-    hardware.gpuLayersOverride !== undefined &&
-    selectedIdx === 1;
-  const hwContextSelected =
-    activeSection === 'hardware' &&
-    ((hardware.gpuLayersOverride !== undefined && selectedIdx === 2) ||
-      (hardware.gpuLayersOverride === undefined && selectedIdx === 1));
+  const hwGpuLayersSelected = activeSection === 'hardware' && selectedIdx === 1;
+  const hwContextSelected = activeSection === 'hardware' && selectedIdx === 2;
 
   useInput((input, key) => {
     if (editingUrl) {
@@ -258,7 +261,7 @@ export function SettingsScreen({
             : LOCAL_SEARCH_OPTIONS.length - 1;
         setSelectedIdx((i) => Math.min(maxIdx, i + 1));
       } else if (activeSection === 'hardware') {
-        setSelectedIdx((i) => Math.min(hardwareRows.length - 1, i + 1));
+        setSelectedIdx((i) => Math.min(2, i + 1));
       }
       return;
     }
@@ -291,18 +294,14 @@ export function SettingsScreen({
       } else if (activeSection === 'permissions') {
         onSetDefaultToolPermission?.(PERMISSION_LEVELS[selectedIdx]);
       } else if (activeSection === 'hardware') {
-        const row = hardwareRows[selectedIdx] ?? 'compute';
-        if (row === 'gpu-layers' && hardware.gpuLayersOverride !== undefined) {
-          const idx = GPU_LAYER_OPTIONS.indexOf(hardware.gpuLayersOverride);
-          const next = GPU_LAYER_OPTIONS[(idx + 1) % GPU_LAYER_OPTIONS.length];
+        if (selectedIdx === 1) {
+          const idx = GPU_LAYER_CYCLE.indexOf(hardware.gpuLayersOverride);
+          const next = GPU_LAYER_CYCLE[(idx + 1) % GPU_LAYER_CYCLE.length];
           onSetHardware?.({ ...hardware, gpuLayersOverride: next });
-        } else if (
-          row === 'context-tokens' &&
-          hardware.contextTokens !== undefined
-        ) {
-          const idx = CONTEXT_TOKEN_OPTIONS.indexOf(hardware.contextTokens);
+        } else if (selectedIdx === 2) {
+          const idx = CONTEXT_TOKEN_CYCLE.indexOf(hardware.contextTokens);
           const next =
-            CONTEXT_TOKEN_OPTIONS[(idx + 1) % CONTEXT_TOKEN_OPTIONS.length];
+            CONTEXT_TOKEN_CYCLE[(idx + 1) % CONTEXT_TOKEN_CYCLE.length];
           onSetHardware?.({ ...hardware, contextTokens: next });
         } else {
           const currentIdx = COMPUTE_LEVELS.indexOf(hardware.preferredCompute);
@@ -583,30 +582,32 @@ export function SettingsScreen({
             {hwComputeSelected ? '> ' : '  '}
             Preferred Compute: {hardware.preferredCompute} [Enter: cycle]
           </Text>
-          {hardware.gpuLayersOverride !== undefined && (
-            <Text
-              color={
-                hwGpuLayersSelected
-                  ? colors.on_surface
-                  : colors.on_surface_variant
-              }
-            >
-              {hwGpuLayersSelected ? '> ' : '  '}
-              GPU Layers: {hardware.gpuLayersOverride} [Enter: cycle]
-            </Text>
-          )}
-          {hardware.contextTokens !== undefined && (
-            <Text
-              color={
-                hwContextSelected
-                  ? colors.on_surface
-                  : colors.on_surface_variant
-              }
-            >
-              {hwContextSelected ? '> ' : '  '}
-              Context Tokens: {hardware.contextTokens} [Enter: cycle]
-            </Text>
-          )}
+          <Text
+            color={
+              hwGpuLayersSelected
+                ? colors.on_surface
+                : colors.on_surface_variant
+            }
+          >
+            {hwGpuLayersSelected ? '> ' : '  '}
+            GPU Layers:{' '}
+            {hardware.gpuLayersOverride !== undefined
+              ? hardware.gpuLayersOverride
+              : 'default'}{' '}
+            [Enter: cycle]
+          </Text>
+          <Text
+            color={
+              hwContextSelected ? colors.on_surface : colors.on_surface_variant
+            }
+          >
+            {hwContextSelected ? '> ' : '  '}
+            Context Tokens:{' '}
+            {hardware.contextTokens !== undefined
+              ? hardware.contextTokens
+              : 'default'}{' '}
+            [Enter: cycle]
+          </Text>
         </Box>
       </Box>
 
