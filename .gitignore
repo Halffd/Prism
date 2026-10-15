@@ -69,3 +69,5 @@ vitest.config.*.timestamp*
 out
 .opencode
 docs/plan
+# Rust
+apps/egui/target/
