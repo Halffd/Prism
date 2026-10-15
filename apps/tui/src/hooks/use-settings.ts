@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import type {
   AIConfig,
   AIProvider,
@@ -7,6 +7,14 @@ import type {
   LocalSearchProvider,
   HardwareProfile,
 } from '@prism/shared-types';
+import {
+  loadPersisted,
+  savePersisted,
+  toPersisted,
+} from '../lib/settings-store';
+
+/** Debounce window for writes so rapid setting changes coalesce. */
+const SAVE_DEBOUNCE_MS = 250;
 
 interface SettingsState {
   aiConfig: AIConfig;
@@ -22,21 +30,79 @@ interface SettingsState {
 }
 
 export function useSettings() {
-  const [state, setState] = useState<SettingsState>({
-    aiConfig: {
-      provider: 'openai',
-      apiUrl: 'https://api.openai.com/v1',
-      providerKeys: { openai: '' },
-      hardware: { preferredCompute: 'auto' },
-    },
-    adapterMode: 'api',
-    capabilityModes: {},
-    availableProviders: ['openai', 'gemini', 'qwen', 'prism-api'],
-    localApiUrl: 'http://localhost:8080',
-    localSearchProvider: 'duckduckgo',
-    searxngUrl: 'http://localhost:8888',
-    showSettings: false,
+  const [state, setState] = useState<SettingsState>(() => {
+    const persisted = loadPersisted();
+    return {
+      aiConfig: persisted.aiConfig,
+      adapterMode: persisted.adapterMode,
+      capabilityModes: persisted.capabilityModes,
+      defaultToolPermission: persisted.defaultToolPermission,
+      availableProviders: ['openai', 'gemini', 'qwen', 'prism-api'],
+      localApiUrl: persisted.localApiUrl,
+      localSearchProvider: persisted.localSearchProvider,
+      searxngUrl: persisted.searxngUrl,
+      showSettings: false,
+    };
   });
+
+  // Persist the file-backed subset whenever its content changes. The
+  // serialized form is the effect dependency, so UI-only toggles
+  // (showSettings) do not trigger writes.
+  const persistedJson = useMemo(
+    () => JSON.stringify(toPersisted(state)),
+    [state],
+  );
+  const lastSeenRef = useRef<string>('');
+  const pendingRef = useRef<string | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!lastSeenRef.current) {
+      // First mount: content came from disk (or defaults), nothing to save.
+      lastSeenRef.current = persistedJson;
+      return;
+    }
+    if (persistedJson === lastSeenRef.current) {
+      return;
+    }
+    lastSeenRef.current = persistedJson;
+    pendingRef.current = persistedJson;
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+    }
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      const json = pendingRef.current;
+      pendingRef.current = null;
+      if (!json) {
+        return;
+      }
+      try {
+        savePersisted(JSON.parse(json));
+      } catch {
+        // Disk errors (read-only home, full disk) must not crash the TUI.
+      }
+    }, SAVE_DEBOUNCE_MS);
+  }, [persistedJson]);
+
+  // Flush a pending debounced write when the TUI unmounts (exit).
+  useEffect(
+    () => () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      const json = pendingRef.current;
+      if (json) {
+        try {
+          savePersisted(JSON.parse(json));
+        } catch {
+          // Ignore: same disk-error policy as above.
+        }
+      }
+    },
+    [],
+  );
 
   const setProvider = useCallback((provider: AIProvider) => {
     setState((prev) => ({

@@ -633,6 +633,10 @@ export function SettingsScreen({
           )}
         </Box>
       </Box>
+
+      <Text color={colors.outline_variant}>
+        Settings persist automatically (plaintext keys, like the extension).
+      </Text>
     </Box>
   );
 }
