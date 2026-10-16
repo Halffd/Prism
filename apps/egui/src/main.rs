@@ -8,8 +8,10 @@
 
 mod app;
 mod client;
+mod conversations;
 mod providers;
 mod settings;
+mod thinking;
 
 use std::sync::OnceLock;
 
