@@ -1,0 +1,17 @@
+[package]
+name = "prism-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "WASM bindings for prism-core — the JS-host contract (JSON strings in/out, byte chunks into decoders)"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+prism-core = { path = "../prism-core", default-features = false }
+wasm-bindgen = "0.2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"

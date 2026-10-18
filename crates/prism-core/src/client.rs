@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::mpsc::Sender;
 
 /// One chat message sent to the model.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
