@@ -1,0 +1,18 @@
+{
+  "name": "prism-wasm",
+  "type": "module",
+  "description": "WASM bindings for prism-core — the JS-host contract (JSON strings in/out, byte chunks into decoders)",
+  "version": "0.1.0",
+  "files": [
+    "prism_wasm_bg.wasm",
+    "prism_wasm.js",
+    "prism_wasm_bg.js",
+    "prism_wasm.d.ts"
+  ],
+  "main": "prism_wasm.js",
+  "types": "prism_wasm.d.ts",
+  "sideEffects": [
+    "./prism_wasm.js",
+    "./snippets/*"
+  ]
+}

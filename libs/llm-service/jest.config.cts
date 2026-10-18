@@ -13,6 +13,11 @@ module.exports = {
   displayName: '@prism/llm-service',
   preset: '../../jest.preset.js',
   testEnvironment: 'node',
+  moduleNameMapper: {
+    '^\\./wasm-pkg-node/prism_wasm\\.js$':
+      '<rootDir>/src/wasm-pkg-node/prism_wasm.js',
+    '^(\\.{1,2}/.*)\\.js$': '$1',
+  },
   transform: {
     '^.+\\.[tj]s$': ['@swc/jest', swcJestConfig],
   },

@@ -118,7 +118,7 @@ fn settings_fixtures_normalize_to_expected() {
 fn providers_and_defaults_are_sane() {
     let providers: Value = serde_json::from_str(&prism_wasm::providers_json()).unwrap();
     let list = providers.as_array().expect("provider array");
-    assert_eq!(list.len(), 11, "provider count");
+    assert_eq!(list.len(), 17, "provider count");
     let defaults: Value = serde_json::from_str(&prism_wasm::default_settings_json()).unwrap();
     assert_eq!(defaults["provider"], "openai");
     assert_eq!(defaults["max_tokens"], 2048);

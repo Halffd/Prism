@@ -23,6 +23,308 @@ export interface ChatCompletionResponse {
   thinking?: string;
 }
 
+
+/** Legacy vision-path thinking injection (last user message). */
+function injectLastUserThinking(messages: Message[]): Message[] {
+  const msgs = [...messages];
+  let lastUserIdx = -1;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].role === 'user') {
+      lastUserIdx = i;
+      break;
+    }
+  }
+  if (lastUserIdx !== -1) {
+    msgs[lastUserIdx] = {
+      ...msgs[lastUserIdx],
+      content: `Before answering, reason through the problem step by step inside <thinking></thinking> tags, then give the final answer after the closing tag.\n\n${msgs[lastUserIdx].content}`,
+    };
+  }
+  return msgs;
+}
+
+interface WasmSseDecoder {
+  feed(chunk: Uint8Array): string;
+  finish(): string;
+  is_done(): boolean;
+}
+
+interface WasmNdjsonDecoder {
+  feed(chunk: Uint8Array): string;
+  finish(): string;
+  is_done(): boolean;
+}
+
+export interface WasmCore {
+  SseDecoder: new () => WasmSseDecoder;
+  NdjsonDecoder: new () => WasmNdjsonDecoder;
+  build_stream_body: (reqJson: string) => string;
+  build_ollama_body: (reqJson: string) => string;
+  build_api_chat_body: (reqJson: string) => string;
+  parse_api_response: (body: string) => string;
+  parse_models_response: (body: string) => string;
+  strip_thinking: (content: string) => string;
+  apply_thinking: (messagesJson: string) => string;
+  ollama_root_url: (base: string) => string;
+  providers_json: () => string;
+}
+
+let corePromise: Promise<WasmCore> | null = null;
+
+/** Load the core once per environment (node pkg vs browser pkg). */
+async function loadCore(): Promise<WasmCore> {
+  if (!corePromise) {
+    corePromise = (async () => {
+      const isNode = typeof process !== 'undefined' && !!process.versions?.node;
+      if (isNode) {
+        // process.getBuiltinModule bypasses jest's module interception
+        // (Node 22.3+); createRequire then loads the nodejs pkg from
+        // real disk, outside jest's moduleNameMapper.
+        const proc = process as unknown as {
+          getBuiltinModule?: (id: string) => {
+            createRequire: (filename: string) => (id: string) => unknown;
+          };
+        };
+        const nodeModule = proc.getBuiltinModule?.('module');
+        if (!nodeModule) {
+          throw new Error('wasm loader: node builtin module unavailable');
+        }
+        // Node branch only: __filename exists under CJS (jest, tsc
+        // builds). No import.meta token here — it would force @swc/jest
+        // to emit ESM and break the jest require chain. Browser builds
+        // take the dynamic-import branch and never need an anchor.
+        const anchor =
+          typeof __filename !== 'undefined'
+            ? __filename
+            : process.cwd() + '/index.js';
+        const req = nodeModule.createRequire(anchor);
+        // resolve-then-require: absolute path keeps the load outside
+        // jest's relative moduleNameMapper.
+        const resolved = req.resolve('./wasm-pkg-node/prism_wasm.js');
+        return req(resolved) as WasmCore;
+      }
+      // @ts-ignore — wasm-pack bundler glue (node16 resolution limitation)
+      const web = await import('./wasm-pkg-web/prism_wasm.js');
+      await (web as unknown as { default: () => Promise<void> }).default();
+      return web as unknown as WasmCore;
+    })();
+  }
+  return corePromise;
+}
+
+type StreamEvent = { Chunk: string } | 'Done' | { Error: string };
+
+interface ProviderDef {
+  id: string;
+  base_url: string;
+}
+
+let providerTable: ProviderDef[] | null = null;
+
+async function providers(): Promise<ProviderDef[]> {
+  const core = await loadCore();
+  if (!providerTable) {
+    providerTable = JSON.parse(core.providers_json()) as ProviderDef[];
+  }
+  return providerTable;
+}
+
+function ensureV1Suffix(base: string): string {
+  const trimmed = base.replace(/\/+$/, '');
+  return trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`;
+}
+
+function parseBodyResult(json: string): string {
+  const parsed = JSON.parse(json) as { Ok?: unknown; Err?: string };
+  if (parsed.Err !== undefined || parsed.Ok === undefined) {
+    throw new Error(`core rejected request: ${parsed.Err ?? 'unknown'}`);
+  }
+  // The builder embeds the body as a JSON value inside {"Ok": ...}.
+  return JSON.stringify(parsed.Ok);
+}
+
+/** Drain decoded events; concatenate chunk text; throw on Error events. */
+async function decodeStreamToText(
+  body: AsyncIterable<Uint8Array>,
+  decoder: WasmSseDecoder | WasmNdjsonDecoder,
+): Promise<string> {
+  let text = '';
+  for await (const chunk of body) {
+    const events = JSON.parse(decoder.feed(chunk)) as StreamEvent[];
+    for (const event of events) {
+      if (typeof event === 'string') {
+        if (event === 'Done') return text;
+      } else if ('Chunk' in event) {
+        text += event.Chunk;
+      } else if ('Error' in event) {
+        throw new Error(event.Error);
+      }
+    }
+  }
+  JSON.parse(decoder.finish()) as StreamEvent[];
+  return text;
+}
+
+/** Full assistant text for an OpenAI-compatible stream. */
+async function directStream(
+  base: string,
+  apiKey: string,
+  bodyJson: string,
+): Promise<string> {
+  const response = await fetch(`${base}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+    },
+    body: bodyJson,
+  });
+  if (!response.ok || !response.body) {
+    const text = await response.text().catch(() => '');
+    throw new Error(
+      `server returned ${response.status}: ${text.slice(0, 300)}`,
+    );
+  }
+  return decodeStreamToText(
+    response.body as unknown as AsyncIterable<Uint8Array>,
+    new (await loadCore()).SseDecoder(),
+  );
+}
+
+async function coreChatComplete(
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  config: AIConfig,
+): Promise<string> {
+  const core = await loadCore();
+  const provider = config.provider;
+
+  if (provider === 'prism-api') {
+    const server = config.apiUrl || 'http://localhost:3000';
+    const token = config.providerKeys?.['prism-api'] || config.apiKey || '';
+    const last = messages[messages.length - 1]?.content ?? '';
+    const bodyJson = parseBodyResult(
+      core.build_api_chat_body(
+        JSON.stringify({ server_url: server, token, content: last }),
+      ),
+    );
+    const response = await fetch(`${server.replace(/\/+$/, '')}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: bodyJson,
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(
+        `server returned ${response.status}: ${text.slice(0, 300)}`,
+      );
+    }
+    const parsed = JSON.parse(
+      core.parse_api_response(await response.text()),
+    ) as {
+      Ok?: string;
+      Err?: string;
+    };
+    if (parsed.Err !== undefined) {
+      throw new Error(parsed.Err);
+    }
+    return parsed.Ok ?? '';
+  }
+
+  if (provider === 'ollama') {
+    // Old llm-service behavior: ollama always goes native /api/chat.
+    const root = core.ollama_root_url(
+      config.localApiUrl || 'http://localhost:11434',
+    );
+    const bodyJson = parseBodyResult(
+      core.build_ollama_body(
+        JSON.stringify({
+          base_url: root,
+          model: config.model || 'llama3',
+          temperature: config.temperature ?? 0.8,
+          messages,
+          num_ctx: config.hardware?.contextTokens,
+          num_gpu:
+            config.hardware?.preferredCompute === 'cpu-only'
+              ? 0
+              : config.hardware?.gpuLayersOverride,
+          max_tokens: config.maxTokens,
+        }),
+      ),
+    );
+    const response = await fetch(`${root}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: bodyJson,
+    });
+    if (!response.ok || !response.body) {
+      const text = await response.text().catch(() => '');
+      throw new Error(
+        `server returned ${response.status}: ${text.slice(0, 300)}`,
+      );
+    }
+    return decodeStreamToText(
+      response.body as unknown as AsyncIterable<Uint8Array>,
+      new core.NdjsonDecoder(),
+    );
+  }
+
+  if (
+    provider === 'llamacpp' ||
+    provider === 'sglang' ||
+    provider === 'koboldcpp'
+  ) {
+    const raw =
+      config.localApiUrl ||
+      config.apiUrl ||
+      (await providers()).find((p) => p.id === provider)?.base_url ||
+      'http://localhost:8080';
+    const base = ensureV1Suffix(raw);
+    const bodyJson = parseBodyResult(
+      core.build_stream_body(
+        JSON.stringify({
+          base_url: base,
+          api_key: config.apiKey || '',
+          model: config.model || '',
+          temperature: config.temperature ?? 0.8,
+          messages,
+          max_tokens: config.maxTokens,
+          top_p: config.topP,
+        }),
+      ),
+    );
+    return directStream(base, config.apiKey || '', bodyJson);
+  }
+
+  // Cloud OpenAI-compat set (openai, gemini, qwen, deepseek, grok,
+  // openrouter, nvidia-nim, groq, cerebras, together, fireworks,
+  // perplexity, mistral) + default fallback.
+  const fromConfig = config.apiUrl?.trim();
+  const base = (
+    fromConfig ||
+    (await providers()).find((p) => p.id === provider)?.base_url ||
+    'https://api.openai.com/v1'
+  ).replace(/\/+$/, '');
+  const apiKey = config.providerKeys?.[provider] || config.apiKey || '';
+  const bodyJson = parseBodyResult(
+    core.build_stream_body(
+      JSON.stringify({
+        base_url: base,
+        api_key: apiKey,
+        model: config.model || 'gpt-3.5-turbo',
+        temperature: config.temperature ?? 0.7,
+        messages,
+        max_tokens: config.maxTokens,
+        top_p: config.topP,
+      }),
+    ),
+  );
+  return directStream(base, apiKey, bodyJson);
+}
+
 export class AIService {
   private config: AIConfig;
 
@@ -33,95 +335,94 @@ export class AIService {
   async chatCompletion(
     request: ChatCompletionRequest,
   ): Promise<ChatCompletionResponse> {
-    // Central thinking handling: when thinkingMode is enabled, inject a
-    // step-by-step scratchpad instruction (works across every provider) and
-    // strip the reasoning block from the returned content. Provider-native
-    // thinking (Anthropic budget_tokens) is handled in libs/llm adapters path.
+    const { messages } = request;
     const thinkEnabled = request.config.thinkingMode?.enabled === true;
-    const effectiveRequest: ChatCompletionRequest = thinkEnabled
-      ? {
-          ...request,
-          messages: (() => {
-            const msgs = [...request.messages];
-            let lastUserIdx = -1;
-            for (let i = msgs.length - 1; i >= 0; i--) {
-              if (msgs[i].role === 'user') {
-                lastUserIdx = i;
-                break;
-              }
-            }
-            if (lastUserIdx !== -1) {
-              msgs[lastUserIdx] = {
-                ...msgs[lastUserIdx],
-                content: `Before answering, reason through the problem step by step inside <thinking></thinking> tags, then give the final answer after the closing tag.\n\n${msgs[lastUserIdx].content}`,
-              };
-            }
-            return msgs;
-          })(),
-        }
-      : request;
+    const hasImages = messages.some((m) => m.images && m.images.length > 0);
 
-    const raw = await this.dispatchChat(effectiveRequest);
-
-    if (thinkEnabled && raw.content.includes('<thinking>')) {
-      const match = raw.content.match(/<thinking>([\s\S]*?)<\/thinking>/);
-      return {
-        ...raw,
-        content: raw.content
-          .replace(/<thinking>[\s\S]*?<\/thinking>\s*/, '')
-          .trim(),
-        thinking: match?.[1]?.trim(),
-      };
+    // Vision stays on the legacy provider paths until the core supports
+    // image content (v1 core contract is text-only). Those paths keep
+    // the legacy thinking mechanics (last-user injection + regex strip).
+    if (hasImages) {
+      const effectiveRequest = thinkEnabled
+        ? { ...request, messages: injectLastUserThinking(messages) }
+        : request;
+      const raw = await this.legacyImagesDispatch(effectiveRequest);
+      if (thinkEnabled && raw.content.includes('<thinking>')) {
+        const match = raw.content.match(/<thinking>([\s\S]*?)<\/thinking>/);
+        return {
+          ...raw,
+          content: raw.content
+            .replace(/<thinking>[\s\S]*?<\/thinking>\s*/, '')
+            .trim(),
+          thinking: match?.[1]?.trim(),
+        };
+      }
+      return raw;
     }
-    return raw;
+
+    // Text path: core-owned end to end. The wasm core injects the
+    // scratchpad instruction (FIRST user message — core semantics; the
+    // legacy TS path used the last one) and strips the reasoning block.
+    const core = await loadCore();
+    let wire = messages.map((m) => ({
+      role: m.role as 'system' | 'user' | 'assistant',
+      content: m.content,
+    }));
+    if (thinkEnabled) {
+      wire = JSON.parse(core.apply_thinking(JSON.stringify(wire)));
+    }
+    // Non-compat legacy providers keep their native methods until the
+    // core grows adapters for them.
+    switch (request.config.provider) {
+      case 'claude':
+        return this.claudeChatCompletion({
+          ...request,
+          messages: wire as unknown as Message[],
+        });
+      case 'transformers':
+        return this.transformersChatCompletion({
+          ...request,
+          messages: wire as unknown as Message[],
+        });
+      case 'poe':
+        return this.poeChatCompletion({
+          ...request,
+          messages: wire as unknown as Message[],
+        });
+      case 'cloudflare-workers':
+        return this.cloudflareWorkersChatCompletion({
+          ...request,
+          messages: wire as unknown as Message[],
+        });
+      case 'zai':
+        return this.zaiChatCompletion({
+          ...request,
+          messages: wire as unknown as Message[],
+        });
+      default:
+        break;
+    }
+
+    const content = await coreChatComplete(wire, request.config);
+    if (thinkEnabled) {
+      const [clean, reasoning] = JSON.parse(core.strip_thinking(content)) as [
+        string,
+        string | null,
+      ];
+      return { content: clean, thinking: reasoning ?? undefined };
+    }
+    return { content };
   }
 
-  private dispatchChat(
+  /** Legacy vision dispatch (openai/gemini paths support images). */
+  private async legacyImagesDispatch(
     request: ChatCompletionRequest,
   ): Promise<ChatCompletionResponse> {
-    switch (this.config.provider) {
-      case 'openai':
-        return this.openAIChatCompletion(request);
+    switch (request.config.provider) {
       case 'gemini':
         return this.geminiChatCompletion(request);
-      case 'qwen':
-        return this.qwenChatCompletion(request);
-      case 'prism-api':
-        return this.prismApiChatCompletion(request);
-      case 'koboldcpp':
-        return this.koboldCppChatCompletion(request);
-      case 'llamacpp':
-        return this.llamaCppChatCompletion(request);
-      case 'ollama':
-        return this.ollamaChatCompletion(request);
-      case 'sglang':
-        return this.sglangChatCompletion(request);
-      case 'transformers':
-        return this.transformersChatCompletion(request);
-      case 'claude':
-        return this.claudeChatCompletion(request);
-      case 'deepseek':
-        return this.deepseekChatCompletion(request);
-      case 'grok':
-        return this.grokChatCompletion(request);
-      case 'openrouter':
-        return this.openrouterChatCompletion(request);
-      case 'poe':
-        return this.poeChatCompletion(request);
-      case 'nvidia-nim':
-        return this.nvidiaNimChatCompletion(request);
-      case 'groq':
-        return this.groqChatCompletion(request);
-      case 'cerebras':
-        return this.cerebrasChatCompletion(request);
-      case 'cloudflare-workers':
-        return this.cloudflareWorkersChatCompletion(request);
-      case 'fireworks':
-        return this.fireworksChatCompletion(request);
-      case 'zai':
-        return this.zaiChatCompletion(request);
       default:
-        throw new Error(`Unsupported AI provider: ${this.config.provider}`);
+        return this.openAIChatCompletion(request);
     }
   }
 
@@ -280,87 +581,6 @@ export class AIService {
       console.error('Error generating content with Google Gen AI SDK:', error);
       throw error;
     }
-  }
-
-  private async qwenChatCompletion(
-    request: ChatCompletionRequest,
-  ): Promise<ChatCompletionResponse> {
-    const { messages, config } = request;
-
-    // Format messages for Qwen API (Alibaba Cloud)
-    // For multimodal support in Qwen, we need to handle images specially
-    const qwenMessages = messages.map((msg) => {
-      if (msg.images && msg.images.length > 0) {
-        // For Qwen multimodal, combine text and image URLs in the content
-        let content = msg.content;
-        if (msg.images && msg.images.length > 0) {
-          msg.images.forEach((img) => {
-            content += ` [IMAGE_URL: ${img}]`;
-          });
-        }
-        return {
-          role: msg.role,
-          content: content,
-        };
-      } else {
-        return {
-          role: msg.role,
-          content: msg.content,
-        };
-      }
-    });
-
-    // Using Alibaba Cloud's Qwen API endpoint
-    // This is a hypothetical endpoint - in reality, we'd need to use Alibaba Cloud's actual API
-    const apiUrl =
-      config.apiUrl ||
-      'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation';
-
-    const response = await axios.post(
-      apiUrl,
-      {
-        model: config.model || 'qwen-vl-max', // Use vision model for image support
-        input: {
-          messages: qwenMessages,
-        },
-        parameters: {
-          temperature: config.temperature,
-          max_tokens: config.maxTokens,
-          top_p: config.topP,
-        },
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${config.apiKey}`,
-          'Content-Type': 'application/json',
-          'X-DashScope-Async': 'enable', // For async processing if needed
-        },
-      },
-    );
-
-    const output = response.data.output;
-    return {
-      content: output.text,
-      tokensUsed: output.usage?.total_tokens,
-      model: config.model || 'qwen-vl-max',
-    };
-  }
-
-  private async prismApiChatCompletion(
-    request: ChatCompletionRequest,
-  ): Promise<ChatCompletionResponse> {
-    // This maintains compatibility with the existing Prism API
-    throw new Error(
-      'Prism API integration not implemented in AIService. Use PrismClient instead.',
-    );
-  }
-
-  updateConfig(newConfig: AIConfig) {
-    this.config = { ...this.config, ...newConfig };
-  }
-
-  getCurrentConfig(): AIConfig {
-    return this.config;
   }
 
   async getAvailableModels(): Promise<string[]> {
@@ -750,208 +970,6 @@ export class AIService {
     return ['poe', 'sage', 'dragonfruit', 'citrine'];
   }
 
-  private async koboldCppChatCompletion(
-    request: ChatCompletionRequest,
-  ): Promise<ChatCompletionResponse> {
-    const { messages, config } = request;
-    const koboldMessages = messages.map((msg) => ({
-      role: msg.role,
-      content: msg.content,
-    }));
-
-    const apiUrl =
-      config.localApiUrl || config.apiUrl || 'http://localhost:5001';
-
-    const response = await axios.post(
-      `${apiUrl}/api/v1/generate`,
-      {
-        prompt: this.formatPrompt(koboldMessages),
-        max_length: config.maxTokens || 200,
-        temperature: config.temperature || 0.8,
-        top_p: config.topP || 0.9,
-        top_k: 100,
-        rep_pen: 1.1,
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      },
-    );
-
-    return {
-      content: response.data.results[0].text,
-      tokensUsed: undefined, // KoboldCPP doesn't typically return token usage
-      model: config.model || 'default',
-    };
-  }
-
-  private async llamaCppChatCompletion(
-    request: ChatCompletionRequest,
-  ): Promise<ChatCompletionResponse> {
-    const { messages, config } = request;
-    const llamaMessages = messages.map((msg) => {
-      if (msg.images && msg.images.length > 0) {
-        // Create a content array with text and image URLs for multimodal support
-        const content: Array<{
-          type: string;
-          text?: string;
-          image_url?: { url: string };
-        }> = [];
-
-        if (msg.content) {
-          content.push({
-            type: 'text',
-            text: msg.content,
-          });
-        }
-
-        msg.images.forEach((image) => {
-          content.push({
-            type: 'image_url',
-            image_url: { url: image },
-          });
-        });
-
-        return {
-          role: msg.role,
-          content: content,
-        };
-      } else {
-        return {
-          role: msg.role,
-          content: msg.content,
-        };
-      }
-    });
-
-    const apiUrl =
-      config.localApiUrl || config.apiUrl || 'http://localhost:8080';
-
-    const response = await axios.post(
-      `${apiUrl}/v1/chat/completions`,
-      {
-        model: config.model || '',
-        messages: llamaMessages,
-        temperature: config.temperature || 0.8,
-        max_tokens: config.maxTokens,
-        top_p: config.topP,
-        stream: false,
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      },
-    );
-
-    return {
-      content: response.data.choices[0].message.content,
-      tokensUsed: response.data.usage?.total_tokens,
-      model: response.data.model,
-    };
-  }
-
-  private async ollamaChatCompletion(
-    request: ChatCompletionRequest,
-  ): Promise<ChatCompletionResponse> {
-    const { messages, config } = request;
-    // Ollama supports images in its API - create the proper message format
-    const ollamaMessages = messages.map((msg) => {
-      if (msg.images && msg.images.length > 0) {
-        return {
-          role: msg.role,
-          content: msg.content,
-          images: msg.images.map((img) => {
-            // For Ollama, image data needs to be base64 encoded without data:image/ prefix
-            if (img.startsWith('data:image/')) {
-              return img.split(',')[1]; // Get the base64 part
-            }
-            return img; // If already base64, return as is
-          }),
-        };
-      } else {
-        return {
-          role: msg.role,
-          content: msg.content,
-        };
-      }
-    });
-
-    const apiUrl =
-      config.localApiUrl || config.apiUrl || 'http://localhost:11434';
-
-    const response = await axios.post(
-      `${apiUrl}/api/chat`,
-      {
-        model: config.model || 'llava', // Use a vision model for image support
-        messages: ollamaMessages,
-        options: {
-          temperature: config.temperature || 0.8,
-          num_predict: config.maxTokens,
-          top_p: config.topP,
-        },
-        stream: false,
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      },
-    );
-
-    return {
-      content: response.data.message.content,
-      tokensUsed: undefined, // Ollama doesn't return token usage in the same way
-      model: config.model || 'llava',
-    };
-  }
-
-  private async sglangChatCompletion(
-    request: ChatCompletionRequest,
-  ): Promise<ChatCompletionResponse> {
-    const { messages, config } = request;
-    const sglangMessages = messages.map((msg) => ({
-      role: msg.role,
-      content: msg.content,
-    }));
-
-    const apiUrl =
-      config.localApiUrl || config.apiUrl || 'http://localhost:30000'; // Default SGLang port
-
-    const response = await axios.post(
-      `${apiUrl}/v1/chat/completions`,
-      {
-        model: config.model || '',
-        messages: sglangMessages,
-        temperature: config.temperature || 0.7,
-        max_tokens: config.maxTokens,
-        top_p: config.topP,
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      },
-    );
-
-    return {
-      content: response.data.choices[0].message.content,
-      tokensUsed: response.data.usage?.total_tokens,
-      model: response.data.model,
-    };
-  }
-
-  private formatPrompt(
-    messages: Array<{ role: string; content: string }>,
-  ): string {
-    // Format messages into a single prompt for KoboldCPP
-    return (
-      messages.map((msg) => `${msg.role}: ${msg.content}`).join('\n\n') +
-      '\n\nassistant:'
-    );
-  }
-
   private async transformersChatCompletion(
     request: ChatCompletionRequest,
   ): Promise<ChatCompletionResponse> {
@@ -1069,104 +1087,6 @@ export class AIService {
     };
   }
 
-  private async deepseekChatCompletion(
-    request: ChatCompletionRequest,
-  ): Promise<ChatCompletionResponse> {
-    const { messages, config } = request;
-
-    const apiUrl =
-      config.localApiUrl || config.apiUrl || 'https://api.deepseek.com';
-
-    const response = await axios.post(
-      `${apiUrl}/chat/completions`,
-      {
-        model: config.model || 'deepseek-chat',
-        messages: this.formatOpenAICompatibleMessages(messages),
-        temperature: config.temperature || 0.7,
-        max_tokens: config.maxTokens || 1024,
-        top_p: config.topP || 0.9,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${config.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-      },
-    );
-
-    return {
-      content: response.data.choices[0].message.content,
-      tokensUsed: response.data.usage?.total_tokens,
-      model: response.data.model,
-    };
-  }
-
-  private async grokChatCompletion(
-    request: ChatCompletionRequest,
-  ): Promise<ChatCompletionResponse> {
-    const { messages, config } = request;
-
-    const apiUrl = config.localApiUrl || config.apiUrl || 'https://api.x.ai/v1';
-
-    const response = await axios.post(
-      `${apiUrl}/chat/completions`,
-      {
-        model: config.model || 'grok-beta',
-        messages: this.formatOpenAICompatibleMessages(messages),
-        temperature: config.temperature || 0.7,
-        max_tokens: config.maxTokens || 1024,
-        top_p: config.topP || 0.9,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${config.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-      },
-    );
-
-    return {
-      content: response.data.choices[0].message.content,
-      tokensUsed: response.data.usage?.total_tokens,
-      model: response.data.model,
-    };
-  }
-
-  private async openrouterChatCompletion(
-    request: ChatCompletionRequest,
-  ): Promise<ChatCompletionResponse> {
-    const { messages, config } = request;
-
-    const apiUrl =
-      config.localApiUrl || config.apiUrl || 'https://openrouter.ai/api/v1';
-
-    const response = await axios.post(
-      `${apiUrl}/chat/completions`,
-      {
-        model: config.model || 'openchat/openchat-7b',
-        messages: this.formatOpenAICompatibleMessages(messages),
-        temperature: config.temperature || 0.7,
-        max_tokens: config.maxTokens || 1024,
-        top_p: config.topP || 0.9,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${config.apiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://prism-extension.com',
-          'X-Title': 'Prism Extension',
-          'User-Agent': 'Prism Extension',
-        },
-      },
-    );
-
-    return {
-      content: response.data.choices[0].message.content,
-      tokensUsed: response.data.usage?.total_tokens,
-      model: response.data.model,
-    };
-  }
-
   private async poeChatCompletion(
     request: ChatCompletionRequest,
   ): Promise<ChatCompletionResponse> {
@@ -1187,92 +1107,6 @@ export class AIService {
         "This is a simulated response from POE. In a real implementation, this would connect to POE's API.",
       tokensUsed: 25,
       model: config.model || 'poe',
-    };
-  }
-
-  private async nvidiaNimChatCompletion(
-    request: ChatCompletionRequest,
-  ): Promise<ChatCompletionResponse> {
-    const { messages, config } = request;
-    const response = await axios.post(
-      config.apiUrl || 'https://integrate.api.nvidia.com/v1/chat/completions',
-      {
-        model: config.model || 'meta/llama3-8b-instruct',
-        messages: this.formatOpenAICompatibleMessages(messages),
-        temperature: config.temperature,
-        max_tokens: config.maxTokens,
-        top_p: config.topP,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${config.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-      },
-    );
-
-    return {
-      content: response.data.choices[0].message.content,
-      tokensUsed: response.data.usage?.total_tokens,
-      model: response.data.model,
-    };
-  }
-
-  private async groqChatCompletion(
-    request: ChatCompletionRequest,
-  ): Promise<ChatCompletionResponse> {
-    const { messages, config } = request;
-    const response = await axios.post(
-      'https://api.groq.com/openai/v1/chat/completions',
-      {
-        model: config.model || 'llama3-8b-8192',
-        messages: this.formatOpenAICompatibleMessages(messages),
-        temperature: config.temperature,
-        max_tokens: config.maxTokens,
-        top_p: config.topP,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${config.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-      },
-    );
-
-    return {
-      content: response.data.choices[0].message.content,
-      tokensUsed: response.data.usage?.total_tokens,
-      model: response.data.model,
-    };
-  }
-
-  private async cerebrasChatCompletion(
-    request: ChatCompletionRequest,
-  ): Promise<ChatCompletionResponse> {
-    const { messages, config } = request;
-    const response = await axios.post(
-      'https://api.cerebras.ai/v1/chat/completions',
-      {
-        model: config.model || 'llama3.1-8b',
-        messages: messages.map((msg) => ({
-          role: msg.role,
-          content: msg.content,
-        })),
-        temperature: config.temperature,
-        max_tokens: config.maxTokens,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${config.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-      },
-    );
-
-    return {
-      content: response.data.choices[0].message.content,
-      tokensUsed: response.data.usage?.total_tokens,
-      model: response.data.model,
     };
   }
 
@@ -1304,34 +1138,6 @@ export class AIService {
     };
   }
 
-  private async fireworksChatCompletion(
-    request: ChatCompletionRequest,
-  ): Promise<ChatCompletionResponse> {
-    const { messages, config } = request;
-    const response = await axios.post(
-      'https://api.fireworks.ai/inference/v1/chat/completions',
-      {
-        model:
-          config.model || 'accounts/fireworks/models/llama-v3p1-8b-instruct',
-        messages: this.formatOpenAICompatibleMessages(messages),
-        temperature: config.temperature,
-        max_tokens: config.maxTokens,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${config.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-      },
-    );
-
-    return {
-      content: response.data.choices[0].message.content,
-      tokensUsed: response.data.usage?.total_tokens,
-      model: response.data.model,
-    };
-  }
-
   private async zaiChatCompletion(
     request: ChatCompletionRequest,
   ): Promise<ChatCompletionResponse> {
@@ -1360,26 +1166,6 @@ export class AIService {
       tokensUsed: response.data.usage?.total_tokens,
       model: response.data.model,
     };
-  }
-
-  private formatOpenAICompatibleMessages(messages: Message[]) {
-    return messages.map((msg) => {
-      if (msg.images && msg.images.length > 0) {
-        const content: Array<{
-          type: string;
-          text?: string;
-          image_url?: { url: string };
-        }> = [];
-        if (msg.content) {
-          content.push({ type: 'text', text: msg.content });
-        }
-        msg.images.forEach((image) => {
-          content.push({ type: 'image_url', image_url: { url: image } });
-        });
-        return { role: msg.role, content };
-      }
-      return { role: msg.role, content: msg.content };
-    });
   }
 
   async transcribeAudio(

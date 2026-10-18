@@ -127,9 +127,19 @@ doc-first-suite-later (the documented drift trap).
    `wasm-pack build --target nodejs crates/prism-wasm --out-dir
 ../../apps/api/src/wasm-pkg`).
 6. TUI swaps.
-7. extension + web swap. The Expo/React Native app `apps/Prism` is
-   dead — Slint mobile replaces it. (Reprieve only as an explicit new
-   decision: RN cannot run WASM; it would need a JSI native module.)
+7. ~~extension + web swap; Expo RN app `apps/Prism` is dead.~~
+   **DONE (code)** — `libs/llm-service` AIService.chatCompletion routes
+   the extension/web text-chat path through the core (dual pkg loader:
+   nodejs pkg for node/tests via process.getBuiltinModule — jest's
+   worker-wide resolver patch breaks createRequire otherwise — and
+   bundler pkg for browsers). Vision (openai/gemini images) + non-compat
+   providers (claude, transformers, poe, cloudflare-workers, zai) keep
+   legacy methods until the core extends. Thinking is now core semantics
+   (first-user injection — legacy TS used last-user). Core providers
+   table +6 (grok, nvidia-nim, cerebras, together, fireworks,
+   perplexity). RN app DELETED. Browser bundler-runtime (webpack/vite
+   wasm loading) UNVERIFIED headless — flagged. Web app itself doesn't
+   import llm-service (no change needed there yet).
 8. Deletions happen IN each swap PR — no deprecation window. Final
    gate: zero imports of `@prism/ai-adapters` / `@prism/llm-service`
    provider paths / duplicated client logic remain.
