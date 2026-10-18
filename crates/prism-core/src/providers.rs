@@ -125,6 +125,12 @@ pub fn models_url(base_url: &str) -> String {
     format!("{}/models", base_url.trim_end_matches('/'))
 }
 
+/// Ollama native API root from a possibly `/v1`-suffixed base URL.
+pub fn ollama_root_url(base_url: &str) -> String {
+    let root = base_url.trim().trim_end_matches('/');
+    root.strip_suffix("/v1").unwrap_or(root).to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,6 +164,22 @@ mod tests {
         assert_eq!(
             models_url("https://api.openai.com/v1/"),
             "https://api.openai.com/v1/models"
+        );
+    }
+
+    #[test]
+    fn strips_v1_suffix_for_ollama_root() {
+        assert_eq!(
+            ollama_root_url("http://localhost:11434/v1"),
+            "http://localhost:11434"
+        );
+        assert_eq!(
+            ollama_root_url("http://localhost:11434"),
+            "http://localhost:11434"
+        );
+        assert_eq!(
+            ollama_root_url(" http://localhost:11434/v1/ "),
+            "http://localhost:11434"
         );
     }
 

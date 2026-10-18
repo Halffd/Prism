@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/prism-core", "apps/egui"]
+members = ["crates/prism-core", "apps/egui", "apps/slint"]
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

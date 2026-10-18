@@ -92,9 +92,15 @@ doc-first-suite-later (the documented drift trap).
    conformance suite green on 18 fixtures whole + byte-split;
    `--no-default-features` build proves the wasm-ready boundary;
    `apps/egui` is a thin host (`bridge.rs`).
-2. Slint desktop UI consuming the core natively, at feature parity
-   with the egui app (chat, settings, conversations, thinking,
-   hardware). egui binary demoted to dev harness, deleted at parity.
+2. ~~Slint desktop UI consuming the core natively, at feature parity
+   with the egui app.~~ **DONE (code)** — `apps/prism-slint`: full-parity
+   chat UI (streaming, chats sidebar with two-step delete, settings
+   panel with per-provider keys / fetch-models / sampling / system
+   prompt / thinking / hardware cycles, Ollama native path, conversation
+   autosave). Host glue hoisted to `prism-core::host`, shared with egui.
+   GUI runtime UNVERIFIED (headless box) — egui remains as the native
+   dev harness until parity is confirmed on a display; deletion
+   deferred to that point.
 3. WASM target + bindings; conformance green on both targets.
 4. Android via Slint.
 5. apps/api swaps onto wasm-in-node; gains SSE endpoint

@@ -22,6 +22,8 @@
 
 pub mod client;
 pub mod conversations;
+#[cfg(feature = "native-transport")]
+pub mod host;
 pub mod providers;
 pub mod settings;
 pub mod storage;

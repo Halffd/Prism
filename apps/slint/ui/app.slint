@@ -1,0 +1,423 @@
+// Prism desktop UI (Slint). State lives in Rust (prism-core + main.rs);
+// this file is presentation only.
+
+import { Button, ComboBox, LineEdit, CheckBox, ListView, ScrollView, Slider, TextEdit } from "std-widgets.slint";
+
+export struct ChatLine {
+    role: string,      // "user" | "assistant" | "system"
+    content: string,
+    thinking: string,  // extracted reasoning; empty = none
+}
+
+export struct ChatRow {
+    id: string,
+    title: string,
+    confirming: bool,  // delete pressed once; second press deletes
+}
+
+export struct KeyRow {
+    provider: string,
+    label: string,
+    key: string,
+}
+
+export component AppWindow inherits Window {
+    title: "Prism";
+    preferred-width: 1150px;
+    preferred-height: 780px;
+    min-width: 720px;
+    min-height: 520px;
+    background: #101418;
+
+    // ---- state driven from Rust ----
+    in property <[ChatLine]> transcript;
+    in property <[ChatRow]> chats;
+    in property <[string]> provider-labels;
+    in property <[KeyRow]> api-keys;
+    in property <[string]> cached-models;
+    in property <[string]> compute-labels;
+    in-out property <int> provider-idx;
+    in-out property <int> connection-idx;
+    in-out property <int> compute-idx;
+    in property <string> provider;
+    in property <string> model;
+    in property <string> model-hint;
+    in-out property <bool> show-chats: true;
+    in-out property <bool> show-settings: true;
+    in property <bool> streaming;
+    in property <string> models-status;
+    in property <string> settings-status;
+    in property <string> prism-url;
+    in property <string> prism-token;
+    in property <string> local-url;
+    in-out property <float> temperature;
+    in property <string> max-tokens;
+    in property <string> top-p;
+    in property <string> freq-penalty;
+    in property <string> pres-penalty;
+    in property <string> system-prompt;
+    in-out property <bool> thinking-enabled;
+    in property <string> gpu-label;
+    in property <string> ctx-label;
+    in-out property <string> input-text;
+
+    // ---- callbacks ----
+    callback send(string);
+    callback scroll-to-end();
+    callback new-chat();
+    callback open-chat(string);
+    callback request-delete(string);
+    callback set-connection(int);
+    callback set-provider(int);
+    callback model-edited(string);
+    callback fetch-models();
+    callback pick-model(string);
+    callback key-edited(string, string);
+    callback temperature-edited(float);
+    callback sampling-edited(string, string);
+    callback system-prompt-edited(string);
+    callback thinking-toggled(bool);
+    callback compute-selected(int);
+    callback cycle-gpu();
+    callback cycle-ctx();
+    callback local-url-edited(string);
+    callback prism-url-edited(string);
+    callback prism-token-edited(string);
+    callback save-settings();
+
+    changed connection-idx => { set-connection(self.connection-idx); }
+    changed provider-idx => { set-provider(self.provider-idx); }
+    changed compute-idx => { compute-selected(self.compute-idx); }
+    changed thinking-enabled => { thinking-toggled(self.thinking-enabled); }
+    changed temperature => { temperature-edited(self.temperature); }
+
+    scroll-to-end => {
+        list.content-y = list.height - list.content-height;
+    }
+
+    HorizontalLayout {
+        // ---- chats sidebar ----
+        if show-chats : Rectangle {
+            width: 230px;
+            background: #161b21;
+            VerticalLayout {
+                padding: 8px;
+                spacing: 6px;
+                HorizontalLayout {
+                    spacing: 6px;
+                    Text {
+                        text: "Chats";
+                        color: #e8e6e3;
+                        font-size: 16px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Button { text: "+"; clicked => { new-chat(); } }
+                }
+                ListView {
+                    for chat in chats : Rectangle {
+                        height: 32px;
+                        HorizontalLayout {
+                            spacing: 4px;
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                row-ta := TouchArea {
+                                    clicked => { open-chat(chat.id); }
+                                    mouse-cursor: pointer;
+                                }
+                                background: row-ta.has-hover ? #222a33 : transparent;
+                                Text {
+                                    text: chat.title;
+                                    color: row-ta.has-hover ? #ffffff : #cfd8dc;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                            }
+                            Button {
+                                text: chat.confirming ? "sure?" : "x";
+                                clicked => { request-delete(chat.id); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ---- main column ----
+        VerticalLayout {
+            HorizontalLayout {
+                padding: 8px;
+                spacing: 8px;
+                Button { checkable: true; checked <=> show-chats; text: "Chats"; }
+                ComboBox {
+                    model: ["Direct", "Prism API"];
+                    current-index <=> connection-idx;
+                    width: 130px;
+                }
+                if connection-idx == 0 : ComboBox {
+                    model: provider-labels;
+                    current-index <=> provider-idx;
+                    width: 190px;
+                }
+                LineEdit {
+                    text: model;
+                    placeholder-text: model-hint;
+                    edited(t) => { model-edited(t); }
+                    width: 180px;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                if streaming : Text {
+                    text: "…responding";
+                    color: #f5d76e;
+                    vertical-alignment: center;
+                }
+                Button { checkable: true; checked <=> show-settings; text: "Settings"; }
+            }
+
+            if transcript.length == 0 : Text {
+                text: "Pick a provider in Settings, then say hello.";
+                color: #66707a;
+                horizontal-alignment: center;
+            }
+
+            list := ListView {
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+                for line in transcript : Rectangle {
+                    height: line-view.preferred-height;
+                    line-view := VerticalLayout {
+                        padding-top: 6px;
+                        padding-bottom: 6px;
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        spacing: 4px;
+                        if line.role == "user" : Text {
+                            text: "You";
+                            color: #82aaff;
+                            font-weight: 700;
+                        }
+                        if line.role == "assistant" : Text {
+                            text: "Prism";
+                            color: #7ee787;
+                            font-weight: 700;
+                        }
+                        if line.thinking != "" : VerticalLayout {
+                            spacing: 2px;
+                            Text {
+                                text: "Thinking";
+                                color: #8b95a1;
+                                font-size: 11px;
+                                font-weight: 700;
+                            }
+                            Text {
+                                text: line.thinking;
+                                color: #8b95a1;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                            }
+                        }
+                        if line.content != "" : Text {
+                            text: line.content;
+                            color: line.role == "system" ? #f0ad4e : #e8e6e3;
+                            font-size: line.role == "system" ? 11px : 14px;
+                            wrap: word-wrap;
+                        }
+                        if line.role == "assistant" && line.content == "" && streaming : Text {
+                            text: "…";
+                            color: #66707a;
+                        }
+                        Rectangle {
+                            height: 1px;
+                            background: #232a31;
+                        }
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                padding: 8px;
+                spacing: 8px;
+                Button {
+                    text: "Send";
+                    enabled: !streaming && input-text != "";
+                    clicked => {
+                        send(input-text);
+                        input-text = "";
+                    }
+                }
+                LineEdit {
+                    horizontal-stretch: 1;
+                    text <=> input-text;
+                    placeholder-text: "Type a message… (Enter to send)";
+                    enabled: !streaming;
+                    accepted(t) => {
+                        send(t);
+                        input-text = "";
+                    }
+                }
+            }
+        }
+
+        // ---- settings panel ----
+        if show-settings : Rectangle {
+            width: 380px;
+            background: #161b21;
+            ScrollView {
+                VerticalLayout {
+                    padding: 10px;
+                    spacing: 8px;
+
+                    Text { text: "Settings"; color: #e8e6e3; font-size: 17px; font-weight: 700; }
+
+                    Text { text: "Connection"; color: #9fb0bd; font-weight: 700; }
+                    if connection-idx == 1 : VerticalLayout {
+                        spacing: 4px;
+                        Text { text: "Server URL"; color: #8b95a1; font-size: 12px; }
+                        LineEdit {
+                            text: prism-url;
+                            edited(t) => { prism-url-edited(t); }
+                        }
+                        Text { text: "JWT token"; color: #8b95a1; font-size: 12px; }
+                        LineEdit {
+                            text: prism-token;
+                            input-type: password;
+                            edited(t) => { prism-token-edited(t); }
+                        }
+                    }
+
+                    if connection-idx == 0 : VerticalLayout {
+                        spacing: 8px;
+
+                        Text { text: "Provider & model"; color: #9fb0bd; font-weight: 700; }
+                        Text { text: "Model (empty = provider default)"; color: #8b95a1; font-size: 12px; }
+                        LineEdit {
+                            text: model;
+                            placeholder-text: model-hint;
+                            edited(t) => { model-edited(t); }
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Button { text: "Fetch models"; clicked => { fetch-models(); } }
+                            Text { text: models-status; color: #8b95a1; font-size: 11px; vertical-alignment: center; }
+                        }
+                        if cached-models.length > 0 : VerticalLayout {
+                            spacing: 2px;
+                            Text { text: "Cached models (click to use)"; color: #8b95a1; font-size: 12px; }
+                            for m in cached-models : Rectangle {
+                                height: 24px;
+                                m-ta := TouchArea {
+                                    clicked => { pick-model(m); }
+                                    mouse-cursor: pointer;
+                                }
+                                background: m-ta.has-hover ? #222a33 : transparent;
+                                Text { text: m; color: #cfd8dc; font-size: 12px; vertical-alignment: center; overflow: elide; }
+                            }
+                        }
+                        if provider == "ollama" : VerticalLayout {
+                            spacing: 4px;
+                            Text { text: "Ollama URL"; color: #8b95a1; font-size: 12px; }
+                            LineEdit {
+                                text: local-url;
+                                edited(t) => { local-url-edited(t); }
+                            }
+                        }
+
+                        Text { text: "API keys"; color: #9fb0bd; font-weight: 700; }
+                        for k in api-keys : VerticalLayout {
+                            spacing: 2px;
+                            Text { text: k.label; color: #8b95a1; font-size: 12px; }
+                            LineEdit {
+                                text: k.key;
+                                input-type: password;
+                                edited(t) => { key-edited(k.provider, t); }
+                            }
+                        }
+                        Text {
+                            text: "Keys are stored in plaintext, like the extension.";
+                            color: #66707a;
+                            font-size: 11px;
+                        }
+
+                        Text { text: "Sampling"; color: #9fb0bd; font-weight: 700; }
+                        Text { text: "Temperature"; color: #8b95a1; font-size: 12px; }
+                        Slider {
+                            minimum: 0;
+                            maximum: 2;
+                            value <=> temperature;
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            VerticalLayout {
+                                spacing: 2px;
+                                Text { text: "Max tokens"; color: #8b95a1; font-size: 12px; }
+                                LineEdit { text: max-tokens; edited(t) => { sampling-edited("max-tokens", t); } }
+                            }
+                            VerticalLayout {
+                                spacing: 2px;
+                                Text { text: "Top P"; color: #8b95a1; font-size: 12px; }
+                                LineEdit { text: top-p; edited(t) => { sampling-edited("top-p", t); } }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            VerticalLayout {
+                                spacing: 2px;
+                                Text { text: "Frequency penalty"; color: #8b95a1; font-size: 12px; }
+                                LineEdit { text: freq-penalty; edited(t) => { sampling-edited("freq", t); } }
+                            }
+                            VerticalLayout {
+                                spacing: 2px;
+                                Text { text: "Presence penalty"; color: #8b95a1; font-size: 12px; }
+                                LineEdit { text: pres-penalty; edited(t) => { sampling-edited("pres", t); } }
+                            }
+                        }
+                        Text {
+                            text: "Empty = omit (server default).";
+                            color: #66707a;
+                            font-size: 11px;
+                        }
+
+                        Text { text: "System prompt"; color: #9fb0bd; font-weight: 700; }
+                        TextEdit {
+                            height: 90px;
+                            text: system-prompt;
+                            edited(t) => { system-prompt-edited(t); }
+                        }
+
+                        CheckBox {
+                            text: "Reason in <thinking> tags first";
+                            checked <=> thinking-enabled;
+                        }
+                        Text {
+                            text: "Shown above the answer.";
+                            color: #66707a;
+                            font-size: 11px;
+                        }
+
+                        Text { text: "Hardware"; color: #9fb0bd; font-weight: 700; }
+                        Text { text: "Preferred compute"; color: #8b95a1; font-size: 12px; }
+                        ComboBox {
+                            model: compute-labels;
+                            current-index <=> compute-idx;
+                        }
+                        Button { text: gpu-label; clicked => { cycle-gpu(); } }
+                        Button { text: ctx-label; clicked => { cycle-ctx(); } }
+                        Text {
+                            text: "Applied via Ollama's native /api/chat when set; llama.cpp/KoboldCpp take these as launch flags.";
+                            color: #66707a;
+                            font-size: 11px;
+                            wrap: word-wrap;
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Button { text: "Save settings"; clicked => { save-settings(); } }
+                        Text { text: settings-status; color: #8b95a1; font-size: 11px; vertical-alignment: center; }
+                    }
+                }
+            }
+        }
+    }
+}

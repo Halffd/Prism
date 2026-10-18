@@ -12,7 +12,7 @@ use prism_core::client::{
     StreamRequest,
 };
 use prism_core::conversations::{self, Conversation, ConversationMeta, StoredMessage};
-use prism_core::providers::{self, PROVIDERS};
+use prism_core::providers::{self, ollama_root_url, PROVIDERS};
 use prism_core::settings::{Connection, Settings};
 use prism_core::thinking;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
@@ -491,11 +491,6 @@ fn parse_opt_f32(buf: &str) -> Option<Option<f32>> {
 }
 
 /// Ollama native API root from a possibly `/v1`-suffixed base URL.
-fn ollama_root_url(base_url: &str) -> String {
-    let root = base_url.trim().trim_end_matches('/');
-    root.strip_suffix("/v1").unwrap_or(root).to_string()
-}
-
 impl Default for PrismApp {
     fn default() -> Self {
         Self::new()
