@@ -241,7 +241,12 @@ fn require_idle(
     lines_model: &Rc<VecModel<ChatLine>>,
 ) -> bool {
     if state.borrow().streaming {
-        push_system(ui, state, lines_model, "Wait for the response to finish.".into());
+        push_system(
+            ui,
+            state,
+            lines_model,
+            "Wait for the response to finish.".into(),
+        );
         return false;
     }
     true
@@ -288,7 +293,12 @@ fn persist_current(
                 state.borrow_mut().chats = chats;
                 refresh_chats(ui, state);
             }
-            Err(e) => push_system(ui, state, lines_model, format!("failed to save conversation: {e}")),
+            Err(e) => push_system(
+                ui,
+                state,
+                lines_model,
+                format!("failed to save conversation: {e}"),
+            ),
         }
     }
 }
@@ -308,11 +318,7 @@ fn finalize_thinking(st: &mut State) {
     }
 }
 
-fn drain_events(
-    ui: &AppWindow,
-    state: &Rc<RefCell<State>>,
-    lines_model: &Rc<VecModel<ChatLine>>,
-) {
+fn drain_events(ui: &AppWindow, state: &Rc<RefCell<State>>, lines_model: &Rc<VecModel<ChatLine>>) {
     let mut st = state.borrow_mut();
     let Some(rx) = st.rx.take() else {
         return;
@@ -373,11 +379,7 @@ fn drain_models(ui: &AppWindow, state: &Rc<RefCell<State>>) {
         Ok(ModelsEvent::Loaded { models }) => {
             let n = models.len();
             let provider = st.settings.provider.clone();
-            let cache = st
-                .settings
-                .model_cache
-                .entry(provider)
-                .or_default();
+            let cache = st.settings.model_cache.entry(provider).or_default();
             for m in models {
                 if !cache.contains(&m) {
                     cache.push(m);
@@ -486,6 +488,7 @@ fn send(
                     temperature: st.settings.temperature,
                     messages: history,
                     num_ctx: hw.context_tokens,
+                    max_tokens: st.settings.max_tokens,
                     num_gpu: if hw.preferred_compute == "cpu-only" {
                         Some(0)
                     } else {
@@ -518,7 +521,12 @@ fn send(
         Connection::PrismApi => {
             if st.settings.prism_api_token.trim().is_empty() {
                 drop(st);
-                push_system(ui, state, lines_model, "Prism API token required. Open settings.".into());
+                push_system(
+                    ui,
+                    state,
+                    lines_model,
+                    "Prism API token required. Open settings.".into(),
+                );
                 return;
             }
             let req = ApiChatRequest {
@@ -713,7 +721,12 @@ fn main() {
             let confirming = state_c.borrow().confirm_delete.as_deref() == Some(id.as_str());
             if confirming {
                 if let Err(e) = host::delete_conversation(&id) {
-                    push_system(&ui, &state_c, &lines_c, format!("failed to delete conversation: {e}"));
+                    push_system(
+                        &ui,
+                        &state_c,
+                        &lines_c,
+                        format!("failed to delete conversation: {e}"),
+                    );
                 }
                 {
                     let mut st = state_c.borrow_mut();

@@ -226,6 +226,7 @@ impl PrismApp {
                         messages: history,
                         num_ctx: hw.context_tokens,
                         num_gpu,
+                        max_tokens: self.settings.max_tokens,
                     };
                     self.streaming = true;
                     self.rx = Some(rx);
