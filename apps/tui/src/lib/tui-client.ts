@@ -7,8 +7,6 @@ import type {
   ServiceConfig,
   LocalSearchProvider,
   HardwareProfile,
-  LLMRequest,
-  LLMResult,
   WebSearchRequest,
   WebSearchResult,
   DeepSearchRequest,
@@ -28,6 +26,7 @@ import type {
   Result,
 } from '@prism/shared-types';
 import { AdapterRouter } from '@prism/ai-adapters';
+import { coreChat, type CoreConnection } from './core-llm';
 import { nanoid } from 'nanoid';
 
 export interface TUIClientConfig {
@@ -48,11 +47,19 @@ export class TUIClient {
   private adapterRouter: AdapterRouter;
   private adapterMode: AIMode;
   private capabilityModes: Partial<Record<AICapability, AIMode>>;
+  private localApiUrl?: string;
+  private hardware?: HardwareProfile;
+  private prismApiUrl?: string;
+  private prismApiKey?: string;
 
   constructor(config: TUIClientConfig) {
     this.aiConfig = config.aiConfig;
     this.adapterMode = config.adapterMode;
     this.capabilityModes = config.capabilityModes;
+    this.localApiUrl = config.localApiUrl;
+    this.hardware = config.hardware;
+    this.prismApiUrl = config.prismApiUrl;
+    this.prismApiKey = config.prismApiKey;
 
     const serviceConfig: ServiceConfig = {
       apiKey:
@@ -83,20 +90,37 @@ export class TUIClient {
   }
 
   async chat(messages: Message[]): Promise<Message> {
-    const request: LLMRequest = {
-      messages,
-      model: this.aiConfig.model ?? 'gpt-3.5-turbo',
-      temperature: this.aiConfig.temperature ?? 0.7,
-      maxTokens: this.aiConfig.maxTokens ?? 2048,
-    };
-
-    const result: Result<LLMResult> = await this.adapterRouter.llm(request);
+    const connection: CoreConnection =
+      this.adapterMode === 'server'
+        ? 'server'
+        : this.adapterMode === 'local'
+          ? 'local'
+          : 'api';
 
     let fullContent: string;
-    if (result.ok) {
-      fullContent = result.value.content;
-    } else {
-      fullContent = `[Error: ${result.error}]`;
+    try {
+      fullContent = await coreChat({
+        connection,
+        provider: this.aiConfig.provider,
+        apiKey:
+          (this.aiConfig.providerKeys ?? {})[this.aiConfig.provider] ??
+          this.aiConfig.apiKey ??
+          '',
+        model: this.aiConfig.model || 'gpt-3.5-turbo',
+        temperature: this.aiConfig.temperature ?? 0.7,
+        maxTokens: this.aiConfig.maxTokens ?? 2048,
+        apiUrl: this.aiConfig.apiUrl,
+        localApiUrl: this.localApiUrl,
+        hardware: this.hardware,
+        prismApiUrl: this.prismApiUrl,
+        prismApiKey: this.prismApiKey,
+        messages: messages.map((m) => ({
+          role: m.role as 'system' | 'user' | 'assistant',
+          content: m.content,
+        })),
+      });
+    } catch (error: unknown) {
+      fullContent = `[Error: ${error instanceof Error ? error.message : String(error)}]`;
     }
 
     return {

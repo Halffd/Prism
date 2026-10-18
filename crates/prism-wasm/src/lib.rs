@@ -169,6 +169,12 @@ pub fn new_conversation_id() -> String {
     conversations::new_id()
 }
 
+/// Ollama native API root from a possibly `/v1`-suffixed base URL.
+#[wasm_bindgen]
+pub fn ollama_root_url(base_url: &str) -> String {
+    prism_core::providers::ollama_root_url(base_url)
+}
+
 /// Current unix epoch milliseconds (JS BigInt).
 #[wasm_bindgen]
 pub fn now_ms() -> u64 {

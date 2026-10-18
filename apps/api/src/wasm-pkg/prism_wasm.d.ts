@@ -80,6 +80,11 @@ export function normalize_settings_json(input: string): string;
 export function now_ms(): bigint;
 
 /**
+ * Ollama native API root from a possibly `/v1`-suffixed base URL.
+ */
+export function ollama_root_url(base_url: string): string;
+
+/**
  * Parse a prism-api `POST /api/chat` response body.
  * Returns `{"Ok": "..."}` or `{"Err": "..."}`.
  */

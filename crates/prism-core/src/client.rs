@@ -54,6 +54,8 @@ pub struct OllamaChatRequest {
     pub num_ctx: Option<u32>,
     /// `options.num_gpu` (GPU layer offload; 0 = CPU only).
     pub num_gpu: Option<u32>,
+    /// `options.num_predict` (max tokens to generate).
+    pub max_tokens: Option<u32>,
 }
 
 /// Request for the prism-api server (non-streaming).
@@ -380,6 +382,9 @@ pub fn ollama_chat_body(req: &OllamaChatRequest) -> serde_json::Value {
     }
     if let Some(gpu) = req.num_gpu {
         options["num_gpu"] = serde_json::json!(gpu);
+    }
+    if let Some(predict) = req.max_tokens {
+        options["num_predict"] = serde_json::json!(predict);
     }
     serde_json::json!({
         "model": req.model,
@@ -736,10 +741,12 @@ mod tests {
             messages: vec![],
             num_ctx: Some(4096),
             num_gpu: Some(0),
+            max_tokens: Some(2048),
         };
         let body = ollama_chat_body(&req);
         assert_eq!(body["options"]["num_ctx"], 4096);
         assert_eq!(body["options"]["num_gpu"], 0);
+        assert_eq!(body["options"]["num_predict"], 2048);
         assert_eq!(body["stream"], true);
     }
 

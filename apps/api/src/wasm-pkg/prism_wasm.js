@@ -310,6 +310,27 @@ function now_ms() {
 exports.now_ms = now_ms;
 
 /**
+ * Ollama native API root from a possibly `/v1`-suffixed base URL.
+ * @param {string} base_url
+ * @returns {string}
+ */
+function ollama_root_url(base_url) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(base_url, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.ollama_root_url(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.ollama_root_url = ollama_root_url;
+
+/**
  * Parse a prism-api `POST /api/chat` response body.
  * Returns `{"Ok": "..."}` or `{"Err": "..."}`.
  * @param {string} body

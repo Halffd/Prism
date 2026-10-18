@@ -16,6 +16,7 @@ export const ndjsondecoder_new: () => number;
 export const new_conversation_id: () => [number, number];
 export const normalize_settings_json: (a: number, b: number) => [number, number];
 export const now_ms: () => bigint;
+export const ollama_root_url: (a: number, b: number) => [number, number];
 export const parse_api_response: (a: number, b: number) => [number, number];
 export const parse_models_response: (a: number, b: number) => [number, number];
 export const providers_json: () => [number, number];

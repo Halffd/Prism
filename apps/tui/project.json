@@ -5,10 +5,12 @@
   "targets": {
     "build": {
       "executor": "nx:run-commands",
-      "outputs": ["{workspaceRoot}/dist/apps/tui"],
+      "outputs": [
+        "{workspaceRoot}/dist/apps/tui"
+      ],
       "options": {
         "commands": [
-          "esbuild apps/tui/src/index.tsx --bundle --platform=node --format=esm --outdir=dist/apps/tui --external:ink --external:ink-text-input --external:ink-spinner --external:react --external:react-reconciler --external:nanoid '--banner:js=import { createRequire } from \"module\"; const require = createRequire(import.meta.url);' --sourcemap"
+          "esbuild apps/tui/src/index.tsx --bundle --platform=node --format=esm --outdir=dist/apps/tui --external:ink --external:ink-text-input --external:ink-spinner --external:react --external:react-reconciler --external:nanoid '--banner:js=import { createRequire } from \"module\"; const require = createRequire(import.meta.url);' --sourcemap && cp -r apps/tui/wasm-pkg dist/apps/tui/"
         ],
         "cwd": "."
       },
@@ -16,7 +18,7 @@
         "development": {},
         "production": {
           "commands": [
-            "esbuild apps/tui/src/index.tsx --bundle --platform=node --format=esm --outdir=dist/apps/tui --external:ink --external:ink-text-input --external:ink-spinner --external:react --external:react-reconciler --external:nanoid '--banner:js=import { createRequire } from \"module\"; const require = createRequire(import.meta.url);' --minify"
+            "esbuild apps/tui/src/index.tsx --bundle --platform=node --format=esm --outdir=dist/apps/tui --external:ink --external:ink-text-input --external:ink-spinner --external:react --external:react-reconciler --external:nanoid '--banner:js=import { createRequire } from \"module\"; const require = createRequire(import.meta.url);' --minify && cp -r apps/tui/wasm-pkg dist/apps/tui/"
           ]
         }
       }
