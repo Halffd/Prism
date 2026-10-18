@@ -4,6 +4,12 @@ Native desktop chat client for Prism, built with [egui](https://github.com/emilk
 via eframe. Talks to AI providers directly or through a running Prism API
 server.
 
+This crate is a **thin host over `crates/prism-core`** — the single AI
+core shared by all Prism surfaces. The host owns only the UI, the tokio
+executor (`bridge::runtime`) and platform paths; all provider clients,
+stream decoders, thinking, settings and conversation persistence live in
+the core.
+
 ## Features
 
 - Chat window with streaming responses (OpenAI-compatible SSE)

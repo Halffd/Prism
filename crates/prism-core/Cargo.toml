@@ -1,0 +1,26 @@
+[package]
+name = "prism-core"
+version = "0.1.0"
+edition = "2021"
+description = "Single AI core for all Prism surfaces: provider clients, streaming decoders, thinking, settings, conversations"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+futures-util = { workspace = true }
+
+# Native transport (reqwest + tokio). WASM builds use their own transport
+# impl (fetch) and disable this feature; the core logic itself is
+# transport-free and replays byte fixtures identically on both targets.
+tokio = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+proptest = { workspace = true }
+
+[features]
+default = ["native-transport"]
+native-transport = ["dep:tokio", "dep:reqwest"]

@@ -71,3 +71,6 @@ out
 docs/plan
 # Rust
 apps/egui/target/
+
+# Rust workspace build dir
+/target/

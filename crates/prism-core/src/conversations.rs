@@ -1,16 +1,19 @@
 //! Conversation persistence.
 //!
-//! Each conversation is one JSON file under
-//! `~/.config/prism-egui/conversations/` (or `$PRISM_EGUI_CONVERSATIONS`
-//! for tests/overrides). Writes are atomic (tmp + rename). Message
-//! content is stored verbatim — `<thinking>` tags stay embedded so the
-//! thinking renderer works unchanged after a reload.
+//! Each conversation is one JSON file inside a host-provided directory
+//! (native: e.g. `~/.config/prism-egui/conversations/`; WASM hosts map
+//! this to their storage). Writes are atomic via the `Storage` trait.
+//! Message content for assistant messages is stored cleaned — reasoning
+//! extracted from `<thinking>` tags goes into `thinking`, so the
+//! renderer works unchanged after a reload.
 
+use crate::storage::Storage;
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 /// One stored transcript message. Role is "user" | "assistant" | "system".
 /// For assistant messages, `thinking` holds the reasoning extracted from
-/// `<thinking>` tags (content is stored cleaned). `#[serde(default)]`
+/// `<thinking>` tags (content is the cleaned answer). `#[serde(default)]`
 /// keeps older files loadable.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StoredMessage {
@@ -55,17 +58,6 @@ pub fn new_id() -> String {
     format!("{nanos:x}")
 }
 
-/// Conversation storage dir, if known. `$PRISM_EGUI_CONVERSATIONS`
-/// overrides the platform config dir (portable setups).
-pub fn conversations_dir() -> Option<std::path::PathBuf> {
-    if let Ok(dir) = std::env::var("PRISM_EGUI_CONVERSATIONS") {
-        if !dir.is_empty() {
-            return Some(std::path::PathBuf::from(dir));
-        }
-    }
-    dirs::config_dir().map(|d| d.join("prism-egui").join("conversations"))
-}
-
 /// Auto-title: first user message, truncated on a char boundary.
 pub fn derive_title(messages: &[StoredMessage]) -> String {
     let first_user = messages
@@ -91,91 +83,65 @@ fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.chars().all(|c| c.is_ascii_hexdigit()) && id.len() <= 32
 }
 
-fn path_for(dir: &std::path::Path, id: &str) -> std::path::PathBuf {
+fn path_for(dir: &Path, id: &str) -> PathBuf {
     dir.join(format!("{id}.json"))
 }
 
 /// Save a conversation (atomic tmp + rename), creating the dir if needed.
-pub fn save(conv: &Conversation) -> anyhow::Result<()> {
-    let dir =
-        conversations_dir().ok_or_else(|| anyhow::anyhow!("no config directory available"))?;
-    save_in(&dir, conv)
-}
-
-/// Dir-injected save (tests, alternate roots).
-pub fn save_in(dir: &std::path::Path, conv: &Conversation) -> anyhow::Result<()> {
+pub fn save_conversation(
+    storage: &dyn Storage,
+    dir: &Path,
+    conv: &Conversation,
+) -> anyhow::Result<()> {
     if !valid_id(&conv.id) {
         anyhow::bail!("invalid conversation id");
     }
-    std::fs::create_dir_all(dir)?;
+    storage.create_dir_all(dir)?;
     let path = path_for(dir, &conv.id);
     let json = serde_json::to_string_pretty(conv)?;
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, json)?;
-    std::fs::rename(&tmp, path)?;
+    storage.write_atomic(&path, &json)?;
     Ok(())
 }
 
 /// Load one conversation by id; `None` if missing/corrupt/invalid id.
-pub fn load(id: &str) -> Option<Conversation> {
-    load_in(&conversations_dir()?, id)
-}
-
-/// Dir-injected load (tests, alternate roots).
-pub fn load_in(dir: &std::path::Path, id: &str) -> Option<Conversation> {
+pub fn load_conversation(storage: &dyn Storage, dir: &Path, id: &str) -> Option<Conversation> {
     if !valid_id(id) {
         return None;
     }
-    let text = std::fs::read_to_string(path_for(dir, id)).ok()?;
+    let text = storage.read_to_string(&path_for(dir, id)).ok()?;
     match serde_json::from_str::<Conversation>(&text) {
         Ok(c) => Some(c),
         Err(e) => {
-            eprintln!("prism-egui: ignoring corrupt conversation {id}: {e}");
+            eprintln!("prism-core: ignoring corrupt conversation {id}: {e}");
             None
         }
     }
 }
 
 /// Delete a conversation file. Missing file is not an error.
-pub fn delete(id: &str) -> anyhow::Result<()> {
-    let Some(dir) = conversations_dir() else {
-        return Ok(());
-    };
-    delete_in(&dir, id)
-}
-
-/// Dir-injected delete (tests, alternate roots).
-pub fn delete_in(dir: &std::path::Path, id: &str) -> anyhow::Result<()> {
+pub fn delete_conversation(storage: &dyn Storage, dir: &Path, id: &str) -> anyhow::Result<()> {
     if !valid_id(id) {
         anyhow::bail!("invalid conversation id");
     }
-    match std::fs::remove_file(path_for(dir, id)) {
+    match storage.remove_file(&path_for(dir, id)) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e.into()),
     }
 }
 
-/// List all conversations, newest first. Corrupt files are skipped.
-pub fn list() -> Vec<ConversationMeta> {
-    match conversations_dir() {
-        Some(dir) => list_in(&dir),
-        None => Vec::new(),
-    }
-}
-
-/// Dir-injected listing (tests, alternate roots).
-pub fn list_in(dir: &std::path::Path) -> Vec<ConversationMeta> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
+/// List all conversations in `dir`, newest first. Corrupt files are
+/// skipped.
+pub fn list_conversations(storage: &dyn Storage, dir: &Path) -> Vec<ConversationMeta> {
+    let Ok(entries) = storage.read_dir(dir) else {
         return Vec::new();
     };
     let mut metas = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
+    for path in entries {
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
         }
-        let Ok(text) = std::fs::read_to_string(&path) else {
+        let Ok(text) = storage.read_to_string(&path) else {
             continue;
         };
         let Ok(conv) = serde_json::from_str::<Conversation>(&text) else {
@@ -194,6 +160,7 @@ pub fn list_in(dir: &std::path::Path) -> Vec<ConversationMeta> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::FsStorage;
 
     fn msg(role: &str, content: &str) -> StoredMessage {
         StoredMessage {
@@ -250,17 +217,18 @@ mod tests {
         let id = new_id();
         let conv = sample(&id, now_ms());
 
-        save_in(dir.path(), &conv).unwrap();
-        let loaded = load_in(dir.path(), &id).expect("loaded");
+        save_conversation(&FsStorage, dir.path(), &conv).unwrap();
+        let loaded = load_conversation(&FsStorage, dir.path(), &id).expect("loaded");
         assert_eq!(loaded, conv);
 
         // No temp file left behind.
         let tmp = dir.path().join(format!("{id}.json.tmp"));
         assert!(!tmp.exists());
 
-        delete_in(dir.path(), &id).unwrap();
-        assert!(load_in(dir.path(), &id).is_none());
-        delete_in(dir.path(), &id).unwrap(); // deleting again is fine
+        delete_conversation(&FsStorage, dir.path(), &id).unwrap();
+        assert!(load_conversation(&FsStorage, dir.path(), &id).is_none());
+        // Deleting again is fine.
+        delete_conversation(&FsStorage, dir.path(), &id).unwrap();
     }
 
     #[test]
@@ -269,25 +237,25 @@ mod tests {
 
         let mut a = sample(&new_id(), 100);
         a.title = "older".into();
-        save_in(dir.path(), &a).unwrap();
+        save_conversation(&FsStorage, dir.path(), &a).unwrap();
         std::fs::write(dir.path().join("garbage.json"), "{not json").unwrap();
         std::fs::write(dir.path().join("wrong-ext.txt"), "[]").unwrap();
         std::thread::sleep(std::time::Duration::from_millis(5));
         let mut b = sample(&new_id(), now_ms());
         b.title = "newer".into();
-        save_in(dir.path(), &b).unwrap();
+        save_conversation(&FsStorage, dir.path(), &b).unwrap();
 
-        let metas = list_in(dir.path());
+        let metas = list_conversations(&FsStorage, dir.path());
         let titles: Vec<_> = metas.iter().map(|m| m.title.as_str()).collect();
         assert_eq!(titles, vec!["newer", "older"]);
     }
 
     #[test]
-    fn load_rejects_invalid_ids() {
+    fn rejects_invalid_ids() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(load_in(dir.path(), "../escape").is_none());
-        assert!(load_in(dir.path(), "").is_none());
-        assert!(delete_in(dir.path(), "../escape").is_err());
-        assert!(save_in(dir.path(), &sample("../escape", 1)).is_err());
+        assert!(load_conversation(&FsStorage, dir.path(), "../escape").is_none());
+        assert!(load_conversation(&FsStorage, dir.path(), "").is_none());
+        assert!(delete_conversation(&FsStorage, dir.path(), "../escape").is_err());
+        assert!(save_conversation(&FsStorage, dir.path(), &sample("../escape", 1)).is_err());
     }
 }

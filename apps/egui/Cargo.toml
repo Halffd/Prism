@@ -2,18 +2,11 @@
 name = "prism-egui"
 version = "0.1.0"
 edition = "2021"
-description = "Prism desktop chat client built with egui"
+description = "Prism desktop chat client built with egui — thin host over prism-core"
 
 [dependencies]
+prism-core = { path = "../../crates/prism-core" }
 eframe = "0.36"
 egui = "0.36"
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
-reqwest = { version = "0.13", features = ["json", "stream"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+tokio = { workspace = true }
 dirs = "6"
-anyhow = "1"
-futures-util = "0.3"
-
-[dev-dependencies]
-tempfile = "3"

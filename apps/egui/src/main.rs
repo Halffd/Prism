@@ -1,32 +1,18 @@
 //! Prism desktop client built with egui.
 //!
-//! Chat with AI providers directly (OpenAI, Gemini, Qwen, Ollama —
-//! all through OpenAI-compatible endpoints) or through a running
-//! Prism API server.
+//! Thin host over `prism-core` (single AI core for all Prism surfaces):
+//! this crate owns the UI, the tokio executor and platform paths. All
+//! provider clients, decoders, thinking, settings and conversation
+//! persistence live in the core crate.
+//!
+//! See `docs/plans/single-core-plan.md`.
 
 #![forbid(unsafe_code)]
 
 mod app;
-mod client;
-mod conversations;
-mod providers;
-mod settings;
-mod thinking;
+mod bridge;
 
-use std::sync::OnceLock;
-
-/// Shared tokio runtime for background HTTP work. Built lazily on
-/// first use; egui drives the UI thread, requests run here.
-pub fn runtime() -> &'static tokio::runtime::Runtime {
-    static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
-    RUNTIME.get_or_init(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .enable_all()
-            .build()
-            .expect("failed to build tokio runtime")
-    })
-}
+use eframe::egui;
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {

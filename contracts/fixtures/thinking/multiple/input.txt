@@ -1,0 +1,2 @@
+<thinking>first</thinking>
+answer one <thinking>second</thinking> answer two

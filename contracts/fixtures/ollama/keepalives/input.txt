@@ -1,0 +1,4 @@
+{"model":"m","message":{"role":"assistant","content":""},"done":false}
+
+{"message":{"content":"x"},"done":false}
+{"done":true}

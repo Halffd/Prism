@@ -6,11 +6,15 @@
 //! prompt, thinking mode (`<thinking>` scratchpad), hardware profile
 //! (via Ollama's native API) and conversation persistence.
 
-use crate::client::{self, ChatMessage, ModelsEvent, ModelsRequest, StreamEvent};
-use crate::conversations::{self, Conversation, ConversationMeta, StoredMessage};
-use crate::providers::{self, PROVIDERS};
-use crate::settings::{self, Connection, Settings};
-use crate::thinking;
+use crate::bridge;
+use prism_core::client::{
+    ApiChatRequest, ChatMessage, ModelsEvent, ModelsRequest, OllamaChatRequest, StreamEvent,
+    StreamRequest,
+};
+use prism_core::conversations::{self, Conversation, ConversationMeta, StoredMessage};
+use prism_core::providers::{self, PROVIDERS};
+use prism_core::settings::{Connection, Settings};
+use prism_core::thinking;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::Duration;
 
@@ -86,7 +90,7 @@ pub struct PrismApp {
 
 impl PrismApp {
     pub fn new() -> Self {
-        let settings = settings::load();
+        let settings = bridge::load_settings();
         let mut app = PrismApp {
             settings,
             transcript: Vec::new(),
@@ -215,7 +219,7 @@ impl PrismApp {
                     } else {
                         hw.gpu_layers_override
                     };
-                    let req = client::OllamaChatRequest {
+                    let req = OllamaChatRequest {
                         base_url: root,
                         model: self.effective_model(),
                         temperature: self.settings.temperature,
@@ -225,10 +229,10 @@ impl PrismApp {
                     };
                     self.streaming = true;
                     self.rx = Some(rx);
-                    client::spawn_ollama_chat(req, tx);
+                    bridge::spawn_ollama_chat(req, tx);
                 } else {
                     let base_url = def.map(|d| d.base_url.to_string()).unwrap_or_default();
-                    let req = client::StreamRequest {
+                    let req = StreamRequest {
                         base_url,
                         api_key: key.trim().to_string(),
                         model: self.effective_model(),
@@ -241,7 +245,7 @@ impl PrismApp {
                     };
                     self.streaming = true;
                     self.rx = Some(rx);
-                    client::spawn_stream(req, tx);
+                    bridge::spawn_stream(req, tx);
                 }
             }
             Connection::PrismApi => {
@@ -249,7 +253,7 @@ impl PrismApp {
                     self.push_system("Prism API token required. Open settings.".into());
                     return;
                 }
-                let req = client::ApiChatRequest {
+                let req = ApiChatRequest {
                     server_url: self.settings.prism_api_url.trim().to_string(),
                     token: self.settings.prism_api_token.trim().to_string(),
                     content: history
@@ -259,7 +263,7 @@ impl PrismApp {
                 };
                 self.streaming = true;
                 self.rx = Some(rx);
-                client::spawn_api_chat(req, tx);
+                bridge::spawn_api_chat(req, tx);
             }
         }
 
@@ -362,7 +366,7 @@ impl PrismApp {
     }
 
     fn refresh_chats(&mut self) {
-        self.chat_list = conversations::list();
+        self.chat_list = bridge::list_conversations();
     }
 
     /// Save the current transcript (creates the conversation file on
@@ -394,7 +398,7 @@ impl PrismApp {
             updated_at: now,
             messages: stored,
         };
-        if let Err(e) = conversations::save(&conv) {
+        if let Err(e) = bridge::save_conversation(&conv) {
             self.push_system(format!("failed to save conversation: {e}"));
         }
         self.refresh_chats();
@@ -425,7 +429,7 @@ impl PrismApp {
             return;
         }
         self.persist_current();
-        match conversations::load(id) {
+        match bridge::load_conversation(id) {
             Some(c) => {
                 self.transcript = c
                     .messages
@@ -448,7 +452,7 @@ impl PrismApp {
         if !self.require_idle() {
             return;
         }
-        if let Err(e) = conversations::delete(id) {
+        if let Err(e) = bridge::delete_conversation(id) {
             self.push_system(format!("failed to delete conversation: {e}"));
         }
         if self.current_id.as_deref() == Some(id) {
@@ -893,12 +897,12 @@ impl eframe::App for PrismApp {
                             ui.add_space(8.0);
                             ui.horizontal(|ui| {
                                 if ui.button("Save settings").clicked() {
-                                    self.settings_status = match settings::config_path() {
-                                        Some(path) => match self.settings.save_to(&path) {
-                                            Ok(()) => format!("saved to {}", path.display()),
-                                            Err(e) => format!("save failed: {e}"),
+                                    self.settings_status = match bridge::save_settings(&self.settings) {
+                                        Ok(()) => match bridge::settings_path() {
+                                            Some(path) => format!("saved to {}", path.display()),
+                                            None => "saved".into(),
                                         },
-                                        None => "no config dir on this platform".into(),
+                                        Err(e) => format!("save failed: {e}"),
                                     };
                                 }
                                 ui.colored_label(
@@ -1025,7 +1029,7 @@ impl PrismApp {
         let (tx, rx) = mpsc::channel();
         self.rx_models = Some(rx);
         self.models_status = "fetching…".into();
-        client::spawn_models_fetch(
+        bridge::spawn_models_fetch(
             ModelsRequest {
                 base_url,
                 api_key: key.trim().to_string(),

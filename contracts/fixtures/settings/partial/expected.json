@@ -1,0 +1,19 @@
+{
+  "connection": "Direct",
+  "provider": "qwen",
+  "model": "",
+  "api_key": "",
+  "provider_keys": {},
+  "model_cache": {},
+  "temperature": 0.7,
+  "max_tokens": 2048,
+  "top_p": null,
+  "frequency_penalty": null,
+  "presence_penalty": null,
+  "system_prompt": "",
+  "thinking_enabled": false,
+  "hardware": { "preferred_compute": "auto", "gpu_layers_override": null, "context_tokens": null },
+  "local_base_url": "http://localhost:11434/v1",
+  "prism_api_url": "http://localhost:3000",
+  "prism_api_token": ""
+}

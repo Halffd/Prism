@@ -1,13 +1,14 @@
-//! Settings persistence.
+//! Settings model and storage-trait-backed persistence.
 //!
-//! Settings are stored as JSON in the platform config directory
-//! (e.g. `~/.config/prism-egui/settings.json` on Linux).
-//!
-//! Note: the API key and prism-api token are stored in plaintext,
-//! matching how the Prism extension stores keys in chrome.storage.
+//! Stored as JSON (atomic writes via the `Storage` trait; defaults on
+//! missing or corrupt files). Note: API keys and tokens are stored in
+//! plaintext, matching how the Prism extension stores keys in
+//! chrome.storage.
 
+use crate::storage::Storage;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
 
 /// Connection mode selected in the UI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,16 +127,6 @@ impl Settings {
     }
 }
 
-/// Path of the settings file, if the platform config dir is known.
-pub fn config_path() -> Option<std::path::PathBuf> {
-    dirs::config_dir().map(|d| d.join("prism-egui").join("settings.json"))
-}
-
-/// Load settings; missing or unreadable file yields defaults.
-pub fn load() -> Settings {
-    load_from(config_path().as_deref())
-}
-
 /// Migrate legacy settings: a non-empty top-level `api_key` moves into
 /// `provider_keys[provider]` (per-provider map replaces the single key).
 fn apply_migrations(mut s: Settings) -> Settings {
@@ -148,18 +139,26 @@ fn apply_migrations(mut s: Settings) -> Settings {
     s
 }
 
-fn load_from(path: Option<&std::path::Path>) -> Settings {
-    let Some(path) = path else {
-        return Settings::default();
+/// Parse settings JSON (missing fields default) and apply migrations.
+/// Errors are returned, not swallowed — callers loading from storage
+/// use `load_settings`, which falls back to defaults.
+pub fn settings_from_json(text: &str) -> Result<Settings, serde_json::Error> {
+    Ok(apply_migrations(serde_json::from_str::<Settings>(text)?))
+}
+
+/// Load settings from `path`. Missing, unreadable, or corrupt files
+/// yield defaults; a partially-filled file yields defaults for absent
+/// fields.
+pub fn load_settings(storage: &dyn Storage, path: &Path) -> Settings {
+    let text = match storage.read_to_string(path) {
+        Ok(t) => t,
+        Err(_) => return Settings::default(),
     };
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return Settings::default();
-    };
-    match serde_json::from_str::<Settings>(&text) {
-        Ok(s) => apply_migrations(s),
+    match settings_from_json(&text) {
+        Ok(s) => s,
         Err(e) => {
             eprintln!(
-                "prism-egui: ignoring corrupt settings {}: {e}",
+                "prism-core: ignoring corrupt settings {}: {e}",
                 path.display()
             );
             Settings::default()
@@ -167,25 +166,25 @@ fn load_from(path: Option<&std::path::Path>) -> Settings {
     }
 }
 
-impl Settings {
-    /// Write settings to disk, creating parent dirs. Best-effort
-    /// callers may ignore the returned error (UI shows a status line).
-    pub fn save_to(&self, path: &std::path::Path) -> anyhow::Result<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let json = serde_json::to_string_pretty(self)?;
-        // Write then rename so a crash mid-write cannot truncate the file.
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, json)?;
-        std::fs::rename(&tmp, path)?;
-        Ok(())
+/// Write settings to `path`, creating parent dirs. Atomic write
+/// (tmp + rename) via the storage layer.
+pub fn save_settings(
+    storage: &dyn Storage,
+    path: &Path,
+    settings: &Settings,
+) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        storage.create_dir_all(parent)?;
     }
+    let json = serde_json::to_string_pretty(settings)?;
+    storage.write_atomic(path, &json)?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::FsStorage;
 
     #[test]
     fn roundtrips_through_json() {
@@ -241,7 +240,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
         std::fs::write(&path, "{not json").unwrap();
-        let s = load_from(Some(&path));
+        let s = load_settings(&FsStorage, &path);
         assert_eq!(s, Settings::default());
     }
 
@@ -249,7 +248,7 @@ mod tests {
     fn missing_file_yields_default() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nested").join("settings.json");
-        let s = load_from(Some(&path));
+        let s = load_settings(&FsStorage, &path);
         assert_eq!(s, Settings::default());
     }
 
@@ -259,8 +258,8 @@ mod tests {
         let path = dir.path().join("a").join("b").join("settings.json");
         let mut s = Settings::default();
         s.provider = "ollama".into();
-        s.save_to(&path).unwrap();
-        let back = load_from(Some(&path));
+        save_settings(&FsStorage, &path, &s).unwrap();
+        let back = load_settings(&FsStorage, &path);
         assert_eq!(back, s);
         // No temp file left behind.
         assert!(!path.with_extension("json.tmp").exists());
@@ -276,7 +275,7 @@ mod tests {
             r#"{"provider":"openai","api_key":"sk-legacy","temperature":0.5}"#,
         )
         .unwrap();
-        let s = load_from(Some(&path));
+        let s = load_settings(&FsStorage, &path);
         assert_eq!(s.key_for("openai"), "sk-legacy");
         assert_eq!(
             s.api_key, "",
@@ -288,8 +287,8 @@ mod tests {
         );
         // Migration survives a save/reload cycle.
         let path2 = dir.path().join("2").join("settings.json");
-        s.save_to(&path2).unwrap();
-        let back = load_from(Some(&path2));
+        save_settings(&FsStorage, &path2, &s).unwrap();
+        let back = load_settings(&FsStorage, &path2);
         assert_eq!(back.key_for("openai"), "sk-legacy");
     }
 

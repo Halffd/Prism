@@ -1,0 +1,8 @@
+data: {"id":"1","choices":[{"delta":{"role":"assistant"}}]}
+
+data: {"id":"1","choices":[{"delta":{"content":"Hel"}}]}
+
+data: {"id":"1","choices":[{"delta":{"content":"lo"}}]}
+
+data: [DONE]
+

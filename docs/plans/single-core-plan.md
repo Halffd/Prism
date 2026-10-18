@@ -85,9 +85,13 @@ doc-first-suite-later (the documented drift trap).
 
 ### 6. Migration order (with kill dates)
 
-1. Core extraction to `crates/prism-core` behind Transport/Storage
+1. ~~Core extraction to `crates/prism-core` behind Transport/Storage
    (native), fixture conformance; egui binary keeps building as first
-   consumer.
+   consumer.~~ **DONE** — `crates/prism-core` extracted (client,
+   providers, thinking, settings, conversations, transport, storage);
+   conformance suite green on 18 fixtures whole + byte-split;
+   `--no-default-features` build proves the wasm-ready boundary;
+   `apps/egui` is a thin host (`bridge.rs`).
 2. Slint desktop UI consuming the core natively, at feature parity
    with the egui app (chat, settings, conversations, thinking,
    hardware). egui binary demoted to dev harness, deleted at parity.

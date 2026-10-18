@@ -1,0 +1,2 @@
+{"message":{"content":"a"},"done":false}
+{"error":"model 'x' not found"}
