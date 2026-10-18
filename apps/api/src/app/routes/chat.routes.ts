@@ -1,5 +1,9 @@
 import { Router } from 'express';
-import { sendMessage, getHistory } from '../controllers/chat.controller';
+import {
+  sendMessage,
+  getHistory,
+  streamMessage,
+} from '../controllers/chat.controller';
 import { authenticate } from '../middleware/auth';
 
 const router = Router();
@@ -8,6 +12,7 @@ const router = Router();
 
 // Chat endpoints
 router.post('/', authenticate, sendMessage);
+router.post('/stream', authenticate, streamMessage);
 router.get('/history/:sessionId', authenticate, getHistory);
 
 export { router as chatRouter };

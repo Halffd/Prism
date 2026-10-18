@@ -112,8 +112,20 @@ doc-first-suite-later (the documented drift trap).
    Fetch-based Transport intentionally deferred to the host swaps
    (decoder-first contract: hosts drive HTTP, core parses).
 4. Android via Slint.
-5. apps/api swaps onto wasm-in-node; gains SSE endpoint
-   `/api/chat/stream` proxying the core.
+5. ~~apps/api swaps onto wasm-in-node; gains SSE endpoint
+   `/api/chat/stream` proxying the core.~~ **DONE** — request-body
+   builders (`stream_request_body`/`ollama_chat_body`/`api_chat_body`)
+   are core-owned (run_* refactored onto them, unit-tested); exported
+   via `crates/prism-wasm` (`build_stream_body` etc.). api's
+   hand-rolled `llm.service.ts` DELETED; new `llm-core.service.ts`
+   drives fetch + feeds bytes to the wasm SSE decoder (fixture-backed
+   jest tests, 6 passed). `/api/chat/stream` emits OpenAI-compatible
+   SSE frames (consumable by the core's SseDecoder — egui/TUI can
+   adopt streaming later unchanged). Anthropic dropped from the api
+   provider path (core is OpenAI-compat-only) — noted. wasm pkg
+   committed at `apps/api/src/wasm-pkg` (regenerate:
+   `wasm-pack build --target nodejs crates/prism-wasm --out-dir
+../../apps/api/src/wasm-pkg`).
 6. TUI swaps.
 7. extension + web swap. The Expo/React Native app `apps/Prism` is
    dead — Slint mobile replaces it. (Reprieve only as an explicit new

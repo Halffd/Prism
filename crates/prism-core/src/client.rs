@@ -23,7 +23,7 @@ pub struct ChatMessage {
 }
 
 /// Request for direct (OpenAI-compatible) streaming.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct StreamRequest {
     pub base_url: String,
     pub api_key: String,
@@ -43,7 +43,7 @@ pub struct StreamRequest {
 /// Request for Ollama's native `/api/chat` endpoint, used when hardware
 /// overrides (context tokens / GPU layers) must reach the server — the
 /// OpenAI-compat `/v1` path ignores those options.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct OllamaChatRequest {
     /// Ollama root URL without `/v1` (e.g. `http://localhost:11434`).
     pub base_url: String,
@@ -57,7 +57,7 @@ pub struct OllamaChatRequest {
 }
 
 /// Request for the prism-api server (non-streaming).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ApiChatRequest {
     pub server_url: String,
     pub token: String,
@@ -65,7 +65,7 @@ pub struct ApiChatRequest {
 }
 
 /// Request for fetching the model list from an OpenAI-compatible server.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ModelsRequest {
     pub base_url: String,
     pub api_key: String,
@@ -80,7 +80,7 @@ pub enum StreamEvent {
 }
 
 /// Events for background model-list fetches.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub enum ModelsEvent {
     Loaded { models: Vec<String> },
     Error(String),
@@ -347,12 +347,10 @@ pub fn parse_models_response(body: &str) -> Result<Vec<String>, String> {
 // Transport-generic runners
 // ---------------------------------------------------------------------------
 
-pub async fn run_stream<T: Transport + ?Sized>(
-    transport: &T,
-    req: &StreamRequest,
-    tx: &Sender<StreamEvent>,
-) -> Result<(), String> {
-    let url = crate::providers::chat_completions_url(&req.base_url);
+/// Provider POST body for a direct (OpenAI-compatible) stream request.
+/// Single source of truth for the wire contract — `run_stream` uses it
+/// and the WASM/JS hosts call it via `build_stream_body`.
+pub fn stream_request_body(req: &StreamRequest) -> serde_json::Value {
     let mut body = serde_json::json!({
         "model": req.model,
         "messages": req.messages,
@@ -371,6 +369,37 @@ pub async fn run_stream<T: Transport + ?Sized>(
     if let Some(v) = req.presence_penalty {
         body["presence_penalty"] = serde_json::json!(v);
     }
+    body
+}
+
+/// Ollama native `/api/chat` POST body.
+pub fn ollama_chat_body(req: &OllamaChatRequest) -> serde_json::Value {
+    let mut options = serde_json::json!({ "temperature": req.temperature });
+    if let Some(ctx) = req.num_ctx {
+        options["num_ctx"] = serde_json::json!(ctx);
+    }
+    if let Some(gpu) = req.num_gpu {
+        options["num_gpu"] = serde_json::json!(gpu);
+    }
+    serde_json::json!({
+        "model": req.model,
+        "messages": req.messages,
+        "stream": true,
+        "options": options,
+    })
+}
+
+/// prism-api `/api/chat` POST body.
+pub fn api_chat_body(req: &ApiChatRequest) -> serde_json::Value {
+    serde_json::json!({ "content": req.content })
+}
+
+pub async fn run_stream<T: Transport + ?Sized>(
+    transport: &T,
+    req: &StreamRequest,
+    tx: &Sender<StreamEvent>,
+) -> Result<(), String> {
+    let url = crate::providers::chat_completions_url(&req.base_url);
 
     let mut headers = vec![
         ("Content-Type".to_string(), "application/json".to_string()),
@@ -385,7 +414,7 @@ pub async fn run_stream<T: Transport + ?Sized>(
     let http_req = HttpRequest {
         url,
         headers,
-        body: Some(body.to_string()),
+        body: Some(stream_request_body(req).to_string()),
     };
     let mut stream = transport.post_stream(http_req).await?;
     pump(SseDecoder::new(), &mut stream, tx).await
@@ -397,24 +426,10 @@ pub async fn run_ollama_chat<T: Transport + ?Sized>(
     tx: &Sender<StreamEvent>,
 ) -> Result<(), String> {
     let url = format!("{}/api/chat", req.base_url.trim_end_matches('/'));
-    let mut options = serde_json::json!({ "temperature": req.temperature });
-    if let Some(ctx) = req.num_ctx {
-        options["num_ctx"] = serde_json::json!(ctx);
-    }
-    if let Some(gpu) = req.num_gpu {
-        options["num_gpu"] = serde_json::json!(gpu);
-    }
-    let body = serde_json::json!({
-        "model": req.model,
-        "messages": req.messages,
-        "stream": true,
-        "options": options,
-    });
-
     let http_req = HttpRequest {
         url,
         headers: vec![("Content-Type".to_string(), "application/json".to_string())],
-        body: Some(body.to_string()),
+        body: Some(ollama_chat_body(req).to_string()),
     };
     let mut stream = transport.post_stream(http_req).await?;
     pump(NdjsonDecoder::new(), &mut stream, tx).await
@@ -481,7 +496,7 @@ pub async fn run_api_chat<T: Transport + ?Sized>(
             ("Content-Type".to_string(), "application/json".to_string()),
             ("Authorization".to_string(), format!("Bearer {}", req.token)),
         ],
-        body: Some(serde_json::json!({ "content": req.content }).to_string()),
+        body: Some(api_chat_body(req).to_string()),
     };
     let resp_body = transport.post_body(http_req).await?;
     let content = parse_api_response(&String::from_utf8_lossy(&resp_body))?;
@@ -672,5 +687,70 @@ mod tests {
             events,
             vec![StreamEvent::Chunk("a".into()), StreamEvent::Error("boom".into())]
         );
+    }
+
+    fn request() -> StreamRequest {
+        StreamRequest {
+            base_url: "https://api.openai.com/v1".into(),
+            api_key: "sk".into(),
+            model: "gpt-4o".into(),
+            temperature: 0.7,
+            messages: vec![ChatMessage {
+                role: "user".into(),
+                content: "hi".into(),
+            }],
+            max_tokens: None,
+            top_p: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+        }
+    }
+
+    #[test]
+    fn stream_body_omits_unset_sampling_fields() {
+        let body = stream_request_body(&request());
+        assert_eq!(body["model"], "gpt-4o");
+        assert_eq!(body["stream"], true);
+        // f32 widens to f64 in JSON; compare against the widened value.
+        assert_eq!(body["temperature"], serde_json::json!(0.7f32));
+        assert!(body.get("max_tokens").is_none());
+        assert!(body.get("top_p").is_none());
+    }
+
+    #[test]
+    fn stream_body_includes_set_sampling_fields() {
+        let mut req = request();
+        req.max_tokens = Some(512);
+        req.top_p = Some(0.9);
+        let body = stream_request_body(&req);
+        assert_eq!(body["max_tokens"], 512);
+        assert_eq!(body["top_p"], serde_json::json!(0.9f32));
+    }
+
+    #[test]
+    fn ollama_body_carries_hardware_options() {
+        let req = OllamaChatRequest {
+            base_url: "http://localhost:11434".into(),
+            model: "llama3.2".into(),
+            temperature: 0.8,
+            messages: vec![],
+            num_ctx: Some(4096),
+            num_gpu: Some(0),
+        };
+        let body = ollama_chat_body(&req);
+        assert_eq!(body["options"]["num_ctx"], 4096);
+        assert_eq!(body["options"]["num_gpu"], 0);
+        assert_eq!(body["stream"], true);
+    }
+
+    #[test]
+    fn api_chat_body_carries_content() {
+        let req = ApiChatRequest {
+            server_url: "http://localhost:3000".into(),
+            token: "jwt".into(),
+            content: "hello".into(),
+        };
+        let body = api_chat_body(&req);
+        assert_eq!(body["content"], "hello");
     }
 }

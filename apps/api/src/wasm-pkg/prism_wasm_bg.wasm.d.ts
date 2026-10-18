@@ -1,0 +1,31 @@
+/* tslint:disable */
+/* eslint-disable */
+export const memory: WebAssembly.Memory;
+export const __wbg_ndjsondecoder_free: (a: number, b: number) => void;
+export const __wbg_ssedecoder_free: (a: number, b: number) => void;
+export const apply_thinking: (a: number, b: number) => [number, number];
+export const build_api_chat_body: (a: number, b: number) => [number, number];
+export const build_ollama_body: (a: number, b: number) => [number, number];
+export const build_stream_body: (a: number, b: number) => [number, number];
+export const default_settings_json: () => [number, number];
+export const derive_title: (a: number, b: number) => [number, number];
+export const ndjsondecoder_feed: (a: number, b: number, c: number) => [number, number];
+export const ndjsondecoder_finish: (a: number) => [number, number];
+export const ndjsondecoder_is_done: (a: number) => number;
+export const ndjsondecoder_new: () => number;
+export const new_conversation_id: () => [number, number];
+export const normalize_settings_json: (a: number, b: number) => [number, number];
+export const now_ms: () => bigint;
+export const parse_api_response: (a: number, b: number) => [number, number];
+export const parse_models_response: (a: number, b: number) => [number, number];
+export const providers_json: () => [number, number];
+export const ssedecoder_feed: (a: number, b: number, c: number) => [number, number];
+export const ssedecoder_finish: (a: number) => [number, number];
+export const ssedecoder_is_done: (a: number) => number;
+export const ssedecoder_new: () => number;
+export const strip_thinking: (a: number, b: number) => [number, number];
+export const __wbindgen_externrefs: WebAssembly.Table;
+export const __wbindgen_malloc: (a: number, b: number) => number;
+export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+export const __wbindgen_free: (a: number, b: number, c: number) => void;
+export const __wbindgen_start: () => void;

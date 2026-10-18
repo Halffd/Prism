@@ -174,3 +174,49 @@ pub fn new_conversation_id() -> String {
 pub fn now_ms() -> u64 {
     conversations::now_ms()
 }
+
+// ---------------------------------------------------------------------------
+// Request-body builders (the wire contract for hosts that drive HTTP)
+// ---------------------------------------------------------------------------
+
+fn parse_req<T: serde::de::DeserializeOwned>(json: &str) -> Result<T, String> {
+    serde_json::from_str(json).map_err(|e| format!("invalid request JSON: {e}"))
+}
+
+/// Build the provider POST body for a direct stream request.
+/// Input: JSON `StreamRequest` (base_url, api_key, model, temperature,
+/// messages, max_tokens?, top_p?, frequency_penalty?, presence_penalty?).
+/// Returns `{"Ok": body}` / `{"Err": message}`.
+#[wasm_bindgen]
+pub fn build_stream_body(req_json: &str) -> String {
+    result_json(
+        &parse_req::<prism_core::client::StreamRequest>(req_json).map(|ref r| {
+            serde_json::to_value(prism_core::client::stream_request_body(r))
+                .unwrap_or(serde_json::Value::Null)
+        }),
+    )
+}
+
+/// Build the Ollama native `/api/chat` POST body.
+/// Input: JSON `OllamaChatRequest`. Returns `{"Ok": body}` / `{"Err": ...}`.
+#[wasm_bindgen]
+pub fn build_ollama_body(req_json: &str) -> String {
+    result_json(
+        &parse_req::<prism_core::client::OllamaChatRequest>(req_json).map(|ref r| {
+            serde_json::to_value(prism_core::client::ollama_chat_body(r))
+                .unwrap_or(serde_json::Value::Null)
+        }),
+    )
+}
+
+/// Build the prism-api `/api/chat` POST body.
+/// Input: JSON `ApiChatRequest`. Returns `{"Ok": body}` / `{"Err": ...}`.
+#[wasm_bindgen]
+pub fn build_api_chat_body(req_json: &str) -> String {
+    result_json(
+        &parse_req::<prism_core::client::ApiChatRequest>(req_json).map(|ref r| {
+            serde_json::to_value(prism_core::client::api_chat_body(r))
+                .unwrap_or(serde_json::Value::Null)
+        }),
+    )
+}
