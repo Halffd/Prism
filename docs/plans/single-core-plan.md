@@ -145,9 +145,21 @@ doc-first-suite-later (the documented drift trap).
    perplexity). RN app DELETED. Browser bundler-runtime (webpack/vite
    wasm loading) UNVERIFIED headless — flagged. Web app itself doesn't
    import llm-service (no change needed there yet).
-8. Deletions happen IN each swap PR — no deprecation window. Final
-   gate: zero imports of `@prism/ai-adapters` / `@prism/llm-service`
-   provider paths / duplicated client logic remain.
+8. ~~Deletions happen IN each swap PR — no deprecation window.~~
+   **DONE** — every chat wire path is core-mediated:
+   libs/llm `openaiCompatibleComplete` funnel (14 providers incl. all
+   OpenAI-compat + transformers/HF) → core builders + SSE decoder
+   (images keep a legacy branch until core vision); local-adapter
+   chat → core (ollama native / compat /v1; kobold on its /v1
+   endpoint); ai-adapters `thinking.ts` DELETED; llm-service model-list
+   parsing → core `parse_models_response` (OpenAI-shape getters; exotic
+   native lists pending); AIService.updateConfig gap fixed. Loader
+   hardening: candidate-list node resolution + variable-path browser
+   import so consuming dists/bundles resolve the pkg. Final gate
+   result: zero hand-rolled provider chat bodies/parsers remain in TS.
+   Remaining non-core host surfaces (by design): search/capability
+   orchestration, auto-model selection, vision paths, exotic model-list
+   getters, transformers/claude/poe/cloudflare/cohere native adapters.
 
 ### 7. "Fast" = streaming everywhere + measurable budgets
 

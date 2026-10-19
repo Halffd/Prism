@@ -9,12 +9,32 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "forceConsistentCasingInFileNames": true,
-    "lib": ["es2022", "dom"],
-    "types": ["node"]
+    "lib": [
+      "es2022",
+      "dom"
+    ],
+    "types": [
+      "node"
+    ],
+    "paths": {
+      "@prism/llm-service": [
+        "libs/llm-service/src/index.ts"
+      ],
+      "@prism/shared-types": [
+        "libs/shared-types/src/index.ts"
+      ]
+    }
   },
-  "include": ["src/**/*.ts"],
+  "include": [
+    "src/**/*.ts"
+  ],
   "references": [
-    { "path": "../shared-types/tsconfig.lib.json" }
+    {
+      "path": "../llm-service/tsconfig.lib.json"
+    },
+    {
+      "path": "../shared-types/tsconfig.lib.json"
+    }
   ],
   "exclude": [
     "jest.config.ts",

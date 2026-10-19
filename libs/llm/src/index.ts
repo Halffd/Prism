@@ -5,6 +5,7 @@ import type {
   Result,
   ServiceConfig,
 } from '@prism/shared-types';
+import { loadCore, type WasmCore } from '@prism/llm-service';
 
 export interface LLMService {
   readonly provider: string;
@@ -25,6 +26,7 @@ function toOpenAIMessages(messages: Message[]): Record<string, unknown>[] {
   });
 }
 
+
 function extractChoice(data: Record<string, unknown>): {
   content: string;
   finishReason: string | undefined;
@@ -43,81 +45,178 @@ function extractUsage(data: Record<string, unknown>): number | undefined {
   return usage?.total_tokens as number | undefined;
 }
 
-async function openaiCompatibleComplete(
+/**
+ * Legacy non-streaming path for image-bearing requests: the core's
+ * ChatMessage contract is text-only for now, so vision stays here until
+ * the core grows image content support.
+ */
+async function legacyImagesComplete(
   config: ServiceConfig,
   request: LLMRequest,
   defaultBaseUrl: string,
-  defaultModel: string,
   extraHeaders?: Record<string, string>,
 ): Promise<Result<LLMResult>> {
   try {
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${config.apiKey}`,
-      'Content-Type': 'application/json',
-      ...extraHeaders,
-    };
-    const messages = [...toOpenAIMessages(request.messages)];
-    const think = request.thinking;
-    const thinkEnabled = think?.enabled === true;
-    if (thinkEnabled) {
-      // Generic fallback: prepend a scratchpad instruction. Providers with
-      // native reasoning (OpenAI o-series, DeepSeek reasoner) also accept this
-      // harmlessly; the model surfaces its reasoning in the content.
-      const scratch =
-        'Before answering, reason through the problem step by step inside <thinking></thinking> tags, then give the final answer after the closing tag.';
-      const firstUser = messages.find((m) => m.role === 'user');
-      if (firstUser && typeof firstUser.content === 'string') {
-        firstUser.content = `${scratch}\n\n${firstUser.content}`;
-      }
-    }
     const response = await fetch(
       `${config.apiUrl || defaultBaseUrl}/chat/completions`,
       {
         method: 'POST',
-        headers,
+        headers: {
+          Authorization: `Bearer ${config.apiKey}`,
+          'Content-Type': 'application/json',
+          ...extraHeaders,
+        },
         body: JSON.stringify({
-          model: request.model || config.model || defaultModel,
-          messages,
-          temperature: thinkEnabled ? undefined : request.temperature,
+          model: request.model || config.model || '',
+          messages: toOpenAIMessages(request.messages),
+          temperature: request.temperature,
           max_tokens: request.maxTokens,
-          top_p: thinkEnabled ? undefined : request.topP,
-          frequency_penalty: request.frequencyPenalty,
-          presence_penalty: request.presencePenalty,
+          top_p: request.topP,
           stream: false,
         }),
       },
     );
-
     if (!response.ok) {
       const data = (await response.json()) as Record<string, unknown>;
       const errData = data.error as Record<string, unknown> | undefined;
       return {
         ok: false,
-        error: (errData?.message as string) || `LLM request failed`,
+        error: (errData?.message as string) || 'LLM request failed',
       };
     }
-
     const data = (await response.json()) as Record<string, unknown>;
-    const { content, finishReason } = extractChoice(data);
-    let thinking: string | undefined;
-    let finalContent = content;
-    if (thinkEnabled && content.includes('<thinking>')) {
-      const match = content.match(/<thinking>([\s\S]*?)<\/thinking>/);
-      thinking = match?.[1]?.trim();
-      finalContent = content
-        .replace(/<thinking>[\s\S]*?<\/thinking>\s*/, '')
-        .trim();
-    }
+    const choices = (data.choices as Record<string, unknown>[]) || [];
+    const first = choices[0] as Record<string, unknown> | undefined;
+    const msg = first?.message as Record<string, unknown> | undefined;
+    const usage = data.usage as Record<string, unknown> | undefined;
     return {
       ok: true,
       value: {
-        content: finalContent,
-        tokensUsed: extractUsage(data),
+        content: (msg?.content as string) || '',
+        tokensUsed: usage?.total_tokens as number | undefined,
         model: data.model as string,
-        finishReason,
-        thinking,
+        finishReason: first?.finish_reason as string | undefined,
       },
     };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Unknown LLM error',
+    };
+  }
+}
+
+type StreamEvent = { Chunk: string } | 'Done' | { Error: string };
+
+/**
+ * Core-mediated OpenAI-compatible completion: the wasm core builds the
+ * request body and decodes the SSE stream; this host only drives fetch.
+ * Streaming internally — the full-text interface is unchanged.
+ * tokensUsed/finishReason are not carried on streamed responses.
+ */
+async function openaiCompatibleComplete(
+  config: ServiceConfig,
+  request: LLMRequest,
+  defaultBaseUrl: string,
+  _defaultModel: string,
+  extraHeaders?: Record<string, string>,
+): Promise<Result<LLMResult>> {
+  try {
+    const hasImages = request.messages.some(
+      (m) => m.images && m.images.length > 0,
+    );
+    if (hasImages) {
+      return await legacyImagesComplete(
+        config,
+        request,
+        defaultBaseUrl,
+        extraHeaders,
+      );
+    }
+
+    const core: WasmCore = await loadCore();
+    const think = request.thinking;
+    const thinkEnabled = think?.enabled === true;
+    let wire = request.messages.map((m) => ({
+      role: m.role as 'system' | 'user' | 'assistant',
+      content: m.content,
+    }));
+    if (thinkEnabled) {
+      // Core semantics: scratchpad injected into the FIRST user message
+      // (same as the previous TS implementation here).
+      wire = JSON.parse(core.apply_thinking(JSON.stringify(wire)));
+    }
+
+    const base = (config.apiUrl || defaultBaseUrl).replace(/\/+$/, '');
+    const bodyResult = JSON.parse(
+      core.build_stream_body(
+        JSON.stringify({
+          base_url: base,
+          api_key: config.apiKey || '',
+          model: request.model || config.model || 'gpt-4o',
+          temperature: request.temperature ?? 0.7,
+          messages: wire,
+          max_tokens: request.maxTokens,
+          top_p: thinkEnabled ? undefined : request.topP,
+          frequency_penalty: request.frequencyPenalty,
+          presence_penalty: request.presencePenalty,
+        }),
+      ),
+    ) as { Ok?: Record<string, unknown>; Err?: string };
+    if (bodyResult.Err || !bodyResult.Ok) {
+      return {
+        ok: false,
+        error: `core rejected request: ${bodyResult.Err ?? 'unknown'}`,
+      };
+    }
+
+    const response = await fetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+        ...extraHeaders,
+      },
+      body: JSON.stringify(bodyResult.Ok),
+    });
+
+    if (!response.ok || !response.body) {
+      const text = await response.text().catch(() => '');
+      return {
+        ok: false,
+        error: `LLM request failed: ${response.status}: ${text.slice(0, 300)}`,
+      };
+    }
+
+    const decoder = new core.SseDecoder();
+    let content = '';
+    const finish = (): Result<LLMResult> => {
+      let thinking: string | undefined;
+      let finalContent = content;
+      if (thinkEnabled) {
+        const [clean, reasoning] = JSON.parse(
+          core.strip_thinking(content),
+        ) as [string, string | null];
+        finalContent = clean;
+        thinking = reasoning ?? undefined;
+      }
+      return { ok: true, value: { content: finalContent, thinking } };
+    };
+    for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+      const events = JSON.parse(decoder.feed(chunk)) as StreamEvent[];
+      for (const event of events) {
+        if (typeof event === 'string') {
+          if (event === 'Done') return finish();
+        } else if ('Chunk' in event) {
+          content += event.Chunk;
+        } else if ('Error' in event) {
+          return { ok: false, error: event.Error };
+        }
+      }
+    }
+    JSON.parse(decoder.finish()) as StreamEvent[];
+    return finish();
   } catch (err) {
     return {
       ok: false,

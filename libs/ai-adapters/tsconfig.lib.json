@@ -21,6 +21,7 @@
     "src/**/*.ts"
   ],
   "references": [
+    { "path": "../llm-service/tsconfig.lib.json" },
     {
       "path": "../shared-types/tsconfig.lib.json"
     },

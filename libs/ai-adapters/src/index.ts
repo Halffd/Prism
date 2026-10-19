@@ -66,9 +66,4 @@ export { DirectAPIAdapter } from './direct-api-adapter';
 export { ServerAdapter } from './server-adapter';
 export { LocalAdapter } from './local-adapter';
 export { AdapterRouter } from './adapter-router';
-export {
-  applyThinkingToMessages,
-  stripThinkingFromContent,
-  isThinkingEnabled,
-} from './thinking';
 export { selectAutoModel, type AutoModelCriteria } from './auto-model';

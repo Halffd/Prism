@@ -42,7 +42,6 @@ import type {
   DebateTurn,
 } from '@prism/shared-types';
 import type { AIAdapter } from './index';
-import { applyThinkingToMessages, stripThinkingFromContent } from './thinking';
 import {
   DuckDuckGoSearchService,
   SearXNGSearchService,
@@ -58,29 +57,11 @@ const DEFAULT_PORTS: Record<LocalProvider, string> = {
   sglang: 'http://localhost:30000',
 };
 
-function extractBase64(data: string): string {
-  if (data.startsWith('data:image/')) {
-    return data.split(',')[1];
-  }
-  return data;
-}
 
-function toOpenAIMessages(request: LLMRequest): Array<Record<string, unknown>> {
-  const messages = applyThinkingToMessages(request.messages, request.thinking);
-  return messages.map((msg) => {
-    if (msg.images && msg.images.length > 0) {
-      const content: Array<Record<string, unknown>> = [];
-      if (msg.content) {
-        content.push({ type: 'text', text: msg.content });
-      }
-      for (const img of msg.images) {
-        content.push({ type: 'image_url', image_url: { url: img } });
-      }
-      return { role: msg.role, content };
-    }
-    return { role: msg.role, content: msg.content };
-  });
-}
+
+
+
+type StreamEvent = { Chunk: string } | 'Done' | { Error: string };
 
 export class LocalAdapter implements AIAdapter {
   readonly mode: AIMode = 'local';
@@ -144,151 +125,7 @@ export class LocalAdapter implements AIAdapter {
     this.model = model;
   }
 
-  private async ollamaLLM(request: LLMRequest): Promise<Result<LLMResult>> {
-    const ollamaMessages = applyThinkingToMessages(
-      request.messages,
-      request.thinking,
-    ).map((msg) => {
-      if (msg.images && msg.images.length > 0) {
-        return {
-          role: msg.role,
-          content: msg.content,
-          images: msg.images.map(extractBase64),
-        };
-      }
-      return { role: msg.role, content: msg.content };
-    });
 
-    const response = await fetch(`${this.baseUrl}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: this.model || request.model || 'llama3',
-        messages: ollamaMessages,
-        options: {
-          temperature: request.temperature,
-          num_predict: request.maxTokens,
-          ...(this.hardware?.contextTokens
-            ? { num_ctx: this.hardware.contextTokens }
-            : {}),
-          // Ollama accepts num_gpu in options (0 = CPU only).
-          ...(this.hardware?.preferredCompute === 'cpu-only'
-            ? { num_gpu: 0 }
-            : this.hardware?.gpuLayersOverride !== undefined
-              ? { num_gpu: this.hardware.gpuLayersOverride }
-              : {}),
-        },
-        stream: false,
-      }),
-    });
-
-    if (!response.ok) {
-      let errorMsg = `Ollama returned ${response.status}`;
-      try {
-        const e = (await response.json()) as Record<string, unknown>;
-        errorMsg = (e.error as string) || errorMsg;
-      } catch {
-        /* ignore */
-      }
-      return { ok: false, error: errorMsg };
-    }
-
-    const data = (await response.json()) as Record<string, unknown>;
-    const message = data.message as Record<string, unknown>;
-    const stripped = stripThinkingFromContent(
-      (message.content as string) ?? '',
-    );
-    return {
-      ok: true,
-      value: {
-        content: stripped.content,
-        thinking: stripped.thinking,
-        model: (data.model as string) || this.model || 'llama3',
-        tokensUsed: (data.eval_count as number) || undefined,
-      },
-    };
-  }
-
-  private async openAICompatLLM(
-    request: LLMRequest,
-  ): Promise<Result<LLMResult>> {
-    const messages = toOpenAIMessages(request);
-    const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: this.model || request.model || '',
-        messages,
-        temperature: request.temperature,
-        max_tokens: request.maxTokens,
-        stream: false,
-      }),
-    });
-
-    if (!response.ok) {
-      let errorMsg = `Local server returned ${response.status}`;
-      try {
-        const e = (await response.json()) as Record<string, unknown>;
-        errorMsg = (e.error as string) || errorMsg;
-      } catch {
-        /* ignore */
-      }
-      return { ok: false, error: errorMsg };
-    }
-
-    const data = (await response.json()) as Record<string, unknown>;
-    const choices = data.choices as Array<Record<string, unknown>>;
-    const choice = choices?.[0];
-    const choiceMessage = choice?.message as
-      Record<string, unknown> | undefined;
-    const usage = data.usage as Record<string, unknown> | undefined;
-
-    return {
-      ok: true,
-      value: {
-        content: (choiceMessage?.content as string) || '',
-        model: (data.model as string) || this.model || '',
-        tokensUsed: (usage?.total_tokens as number) || undefined,
-      },
-    };
-  }
-
-  private async koboldCppLLM(request: LLMRequest): Promise<Result<LLMResult>> {
-    const prompt =
-      request.messages.map((m) => `${m.role}: ${m.content}`).join('\n\n') +
-      '\n\nassistant:';
-    const response = await fetch(`${this.baseUrl}/api/v1/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompt,
-        max_length: request.maxTokens || 200,
-        temperature: request.temperature || 0.8,
-      }),
-    });
-
-    if (!response.ok) {
-      let errorMsg = `KoboldCpp returned ${response.status}`;
-      try {
-        const e = (await response.json()) as Record<string, unknown>;
-        errorMsg = (e.error as string) || errorMsg;
-      } catch {
-        /* ignore */
-      }
-      return { ok: false, error: errorMsg };
-    }
-
-    const data = (await response.json()) as Record<string, unknown>;
-    const results = data.results as Array<Record<string, unknown>>;
-
-    return {
-      ok: true,
-      value: {
-        content: (results?.[0]?.text as string) || '',
-        model: this.model || 'koboldcpp',
-      },
-    };
-  }
 
   private async unsupported(capability: AICapability): Promise<Result<never>> {
     return {
@@ -297,16 +134,155 @@ export class LocalAdapter implements AIAdapter {
     };
   }
 
+  /**
+   * Core-mediated local chat: request bodies and stream decoders come
+   * from prism-core (WASM). KoboldCpp uses its OpenAI-compatible /v1
+   * endpoint (the legacy /api/v1/generate path is gone).
+   */
+  private async coreLLM(request: LLMRequest): Promise<Result<LLMResult>> {
+    const { loadCore } = await import('@prism/llm-service');
+    const core = await loadCore();
+    let wire = request.messages.map((m) => ({
+      role: m.role,
+      content: m.content,
+    }));
+    if (request.thinking?.enabled) {
+      wire = JSON.parse(core.apply_thinking(JSON.stringify(wire)));
+    }
+
+    if (this.provider === 'ollama') {
+      const root = core.ollama_root_url(this.baseUrl);
+      const bodyResult = JSON.parse(
+        core.build_ollama_body(
+          JSON.stringify({
+            base_url: root,
+            model: this.model || request.model || 'llama3',
+            temperature: request.temperature,
+            messages: wire,
+            num_ctx: this.hardware?.contextTokens,
+            num_gpu:
+              this.hardware?.preferredCompute === 'cpu-only'
+                ? 0
+                : this.hardware?.gpuLayersOverride,
+            max_tokens: request.maxTokens,
+          }),
+        ),
+      ) as { Ok?: Record<string, unknown>; Err?: string };
+      if (bodyResult.Err || !bodyResult.Ok) {
+        return {
+          ok: false,
+          error: `core rejected request: ${bodyResult.Err ?? 'unknown'}`,
+        };
+      }
+      const response = await fetch(`${root}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bodyResult.Ok),
+      });
+      if (!response.ok || !response.body) {
+        const text = await response.text().catch(() => '');
+        return {
+          ok: false,
+          error: `Local server returned ${response.status}: ${text.slice(0, 300)}`,
+        };
+      }
+      const decoder = new core.NdjsonDecoder();
+      let content = '';
+      const finish = (): Result<LLMResult> => {
+        let thinking: string | undefined;
+        let finalContent = content;
+        if (request.thinking?.enabled) {
+          const [clean, reasoning] = JSON.parse(
+            core.strip_thinking(content),
+          ) as [string, string | null];
+          finalContent = clean;
+          thinking = reasoning ?? undefined;
+        }
+        return { ok: true, value: { content: finalContent, thinking } };
+      };
+      for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+        const events = JSON.parse(decoder.feed(chunk)) as (
+          | { Chunk: string }
+          | 'Done'
+          | { Error: string }
+        )[];
+        for (const ev of events) {
+          if (typeof ev === 'string') {
+            if (ev === 'Done') return finish();
+          } else if ('Chunk' in ev) {
+            content += ev.Chunk;
+          } else if ('Error' in ev) {
+            return { ok: false, error: ev.Error };
+          }
+        }
+      }
+      JSON.parse(decoder.finish()) as StreamEvent[];
+      return finish();
+    }
+
+    // llamacpp / sglang / koboldcpp: OpenAI-compatible /v1 endpoint.
+    const trimmed = this.baseUrl.replace(/\/+$/, '');
+    const base = trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`;
+    const bodyResult = JSON.parse(
+      core.build_stream_body(
+        JSON.stringify({
+          base_url: base,
+          api_key: '',
+          model: this.model || request.model || '',
+          temperature: request.temperature,
+          messages: wire,
+          max_tokens: request.maxTokens,
+        }),
+      ),
+    ) as { Ok?: Record<string, unknown>; Err?: string };
+    if (bodyResult.Err || !bodyResult.Ok) {
+      return {
+        ok: false,
+        error: `core rejected request: ${bodyResult.Err ?? 'unknown'}`,
+      };
+    }
+    const response = await fetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+      body: JSON.stringify(bodyResult.Ok),
+    });
+    if (!response.ok || !response.body) {
+      const text = await response.text().catch(() => '');
+      return {
+        ok: false,
+        error: `Local server returned ${response.status}: ${text.slice(0, 300)}`,
+      };
+    }
+    const decoder = new core.SseDecoder();
+    let content = '';
+    for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+      const events = JSON.parse(decoder.feed(chunk)) as (
+        | { Chunk: string }
+        | 'Done'
+        | { Error: string }
+      )[];
+      for (const ev of events) {
+        if (typeof ev === 'string') {
+          if (ev === 'Done') return { ok: true, value: { content } };
+        } else if ('Chunk' in ev) {
+          content += ev.Chunk;
+        } else if ('Error' in ev) {
+          return { ok: false, error: ev.Error };
+        }
+      }
+    }
+    JSON.parse(decoder.finish()) as StreamEvent[];
+    return { ok: true, value: { content } };
+  }
+
   async llm(request: LLMRequest): Promise<Result<LLMResult>> {
     try {
       switch (this.provider) {
         case 'ollama':
-          return await this.ollamaLLM(request);
         case 'koboldcpp':
-          return await this.koboldCppLLM(request);
         case 'llamacpp':
         case 'sglang':
-          return await this.openAICompatLLM(request);
+          return await this.coreLLM(request);
         default:
           return {
             ok: false,
@@ -318,6 +294,7 @@ export class LocalAdapter implements AIAdapter {
       return { ok: false, error: `Local adapter error: ${msg}` };
     }
   }
+
 
   async webSearch(request: WebSearchRequest): Promise<Result<WebSearchResult>> {
     try {

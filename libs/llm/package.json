@@ -1,1 +1,9 @@
-{ "name": "@prism/llm", "version": "0.0.1", "main": "./src/index.ts", "types": "./src/index.ts" }
+{
+  "name": "@prism/llm",
+  "version": "0.0.1",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@prism/llm-service": "*"
+  }
+}

@@ -72,7 +72,7 @@ export interface WasmCore {
 let corePromise: Promise<WasmCore> | null = null;
 
 /** Load the core once per environment (node pkg vs browser pkg). */
-async function loadCore(): Promise<WasmCore> {
+export async function loadCore(): Promise<WasmCore> {
   if (!corePromise) {
     corePromise = (async () => {
       const isNode = typeof process !== 'undefined' && !!process.versions?.node;
@@ -82,7 +82,7 @@ async function loadCore(): Promise<WasmCore> {
         // real disk, outside jest's moduleNameMapper.
         const proc = process as unknown as {
           getBuiltinModule?: (id: string) => {
-            createRequire: (filename: string) => (id: string) => unknown;
+            createRequire: (filename: string) => ((id: string) => unknown) & { resolve: (id: string) => string };
           };
         };
         const nodeModule = proc.getBuiltinModule?.('module');
@@ -98,14 +98,35 @@ async function loadCore(): Promise<WasmCore> {
             ? __filename
             : process.cwd() + '/index.js';
         const req = nodeModule.createRequire(anchor);
-        // resolve-then-require: absolute path keeps the load outside
-        // jest's relative moduleNameMapper.
-        const resolved = req.resolve('./wasm-pkg-node/prism_wasm.js');
-        return req(resolved) as WasmCore;
+        // Resolve from candidate locations: this module's directory
+        // (src layout, jest), a copied pkg beside the build output, or
+        // the monorepo working directory.
+        const candidates = [
+          './wasm-pkg-node/prism_wasm.js',
+          '../../src/wasm-pkg-node/prism_wasm.js',
+          'libs/llm-service/src/wasm-pkg-node/prism_wasm.js',
+        ];
+        let lastError: unknown = null;
+        for (const candidate of candidates) {
+          try {
+            return req(candidate) as WasmCore;
+          } catch (e) {
+            lastError = e;
+          }
+        }
+        throw new Error(
+          `wasm loader: prism_wasm pkg not found (tried ${candidates.length} locations): ${String(lastError)}`,
+        );
       }
       // @ts-ignore — wasm-pack bundler glue (node16 resolution limitation)
-      const web = await import('./wasm-pkg-web/prism_wasm.js');
-      await (web as unknown as { default: () => Promise<void> }).default();
+      // Variable path: bundlers (esbuild) must not try to resolve the
+      // browser pkg inside node dist builds. Deployment copies the pkg
+      // next to the consuming bundle.
+      const webPkg = './wasm-pkg-web/prism_wasm.js';
+      const web = (await import(
+        /* webpackIgnore: true */ /* @vite-ignore */ webPkg
+      )) as unknown as { default: () => Promise<void> };
+      await web.default();
       return web as unknown as WasmCore;
     })();
   }
@@ -325,10 +346,27 @@ async function coreChatComplete(
   return directStream(base, apiKey, bodyJson);
 }
 
+
+/** Parse an OpenAI-shaped GET /models body through the core. */
+async function parseModelsBody(body: unknown): Promise<string[] | null> {
+  const core = await loadCore();
+  const result = JSON.parse(
+    core.parse_models_response(
+      typeof body === 'string' ? body : JSON.stringify(body),
+    ),
+  ) as { Ok?: string[]; Err?: string };
+  return result.Ok ?? null;
+}
+
 export class AIService {
   private config: AIConfig;
 
   constructor(config: AIConfig) {
+    this.config = config;
+  }
+
+  /** Apply a new config to this service instance (api-client contract). */
+  updateConfig(config: AIConfig): void {
     this.config = config;
   }
 
@@ -634,9 +672,9 @@ export class AIService {
       });
 
       // Filter for chat models
-      const chatModels = response.data.data
-        .filter((model: any) => model.id.includes('gpt'))
-        .map((model: any) => model.id)
+      const allModels = (await parseModelsBody(response.data)) ?? [];
+      const chatModels = allModels
+        .filter((id) => id.includes('gpt'))
         .sort();
 
       return chatModels.length > 0
@@ -758,8 +796,9 @@ export class AIService {
         },
       });
 
-      if (response.data && response.data.data) {
-        return response.data.data.map((model: any) => model.id);
+      const parsed = await parseModelsBody(response.data);
+      if (parsed) {
+        return parsed;
       }
     } catch (error) {
       console.error('Error fetching LlamaCPP models:', error);
@@ -855,8 +894,9 @@ export class AIService {
         },
       });
 
-      if (response.data && response.data.data) {
-        return response.data.data.map((model: any) => model.id);
+      const parsed = await parseModelsBody(response.data);
+      if (parsed) {
+        return parsed;
       }
     } catch (error) {
       console.error('Error fetching SGLang models:', error);
@@ -940,10 +980,8 @@ export class AIService {
       });
 
       // Filter for chat models and map to their IDs
-      const chatModels = response.data.data
-        .filter((model: any) => model.capabilities?.chat)
-        .map((model: any) => model.id)
-        .sort();
+      const allModels = (await parseModelsBody(response.data)) ?? [];
+      const chatModels = allModels.slice().sort();
 
       return chatModels.length > 0
         ? chatModels
