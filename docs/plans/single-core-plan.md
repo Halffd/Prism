@@ -64,8 +64,9 @@ One UI codebase across desktop (Linux/Mac/Windows), Android, iOS
   Rust callbacks). The egui logic harvests into the core first, so the
   work is not lost.
 - License: project is MIT; use Slint's royalty-free license (GPLv3
-  build would make the distributed binary GPL). TO-DO: record the
-  royalty-free license acceptance in the repo.
+  build would make the distributed binary GPL). Royalty-free license
+  ACCEPTED 2026-10-19 — decision made in the grill session (locked
+  decisions above); this line is the repo record of that acceptance.
 - iOS builds require a Mac. Android builds are possible from Linux.
 
 ### 5. Fixtures ARE the spec
@@ -126,7 +127,11 @@ doc-first-suite-later (the documented drift trap).
    committed at `apps/api/src/wasm-pkg` (regenerate:
    `wasm-pack build --target nodejs crates/prism-wasm --out-dir
 ../../apps/api/src/wasm-pkg`).
-6. TUI swaps.
+6. ~~TUI swaps.~~ **DONE (code)** — `apps/tui` chat path drives the core
+   wasm via `apps/tui/src/lib/core-llm.ts` in all three connection
+   modes (`3d242f0`); hardware profile flows settings → chat screen →
+   core (num_gpu/num_ctx). AdapterRouter instances remain in
+   tui-client / api-client for non-chat paths — see item 8.
 7. ~~extension + web swap; Expo RN app `apps/Prism` is dead.~~
    **DONE (code)** — `libs/llm-service` AIService.chatCompletion routes
    the extension/web text-chat path through the core (dual pkg loader:

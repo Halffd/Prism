@@ -40,7 +40,7 @@ hardware modes, agent memories. See TUI.
 | Tools + permissions (allow/deny/ask)     | done    | TUI agent runtime: Node executor (shell/read_file) + PermissionAwareToolExecutor; y/n ask prompt; settings section (allow/ask/deny) |
 | RAG (attach documents)                   | done    | /rag <path> ingests local files (chunk + embed, in-memory store); top-k chunks auto-injected on send                                |
 | Personalities & agent memories           | done    | 20 defaults + memory store + system-prompt composition done; AgentPicker UI in TUI done                                             |
-| Hardware modes (cpu/gpu/amd/intel)       | partial | libs plumbing done (num_gpu/num_ctx via LocalAdapter); TUI hardware settings section next                                           |
+| Hardware modes (cpu/gpu/amd/intel)       | done    | TUI settings section (compute/gpu-layers/ctx cycles) → chat path → core wasm (num_gpu/num_ctx)                                      |
 
 ## Desktop (apps/desktop)
 
@@ -51,14 +51,23 @@ hardware modes, agent memories. See TUI.
 | Local LLM adapters                     | done    | Inherited via shared settings                               |
 | Agent features (tools/permissions/RAG) | planned | Shares TUI's libs; desktop wrapper around TUI agent runtime |
 
-## Mobile (apps/Prism, Expo)
+## Desktop (Rust — apps/egui + apps/slint over crates/prism-core)
 
-| Feature           | Status  | Notes                         |
-| ----------------- | ------- | ----------------------------- |
-| Chat screen       | partial | Metrics strip done            |
-| Settings screen   | partial | Provider URLs only            |
-| Themes            | partial | nocturnal-editorial.ts exists |
-| Apply feature set | planned | Roadmap Phase 10              |
+| Feature                                | Status  | Notes                                                                                          |
+| -------------------------------------- | ------- | ---------------------------------------------------------------------------------------------- |
+| egui dev harness                       | done    | Thin host over prism-core (bridge.rs); no own tests, logic lives in the core                   |
+| Slint UI at egui feature parity        | done    | Streaming, chats sidebar w/ two-step delete, settings (keys/models/sampling/thinking/hardware) |
+| GUI runtime verification               | pending | Headless box — slint parity check on a display gates egui deletion (plan item 2)               |
+| Agent features (tools/permissions/RAG) | planned | Stays per-surface until core proven (single-core plan scope)                                   |
+
+## Mobile (planned — Slint, single-core plan item 4)
+
+| Feature  | Status  | Notes                                           |
+| -------- | ------- | ----------------------------------------------- |
+| Android  | planned | Slint 1.15+ supports Android; builds from Linux |
+| iOS      | planned | Requires a Mac                                  |
+
+Expo RN app `apps/Prism` deleted (plan item 7).
 
 ## API server (apps/api) — self-hosted Node/Express
 
@@ -68,6 +77,8 @@ hardware modes, agent memories. See TUI.
 | /metrics        | done   | Prometheus text format: counters per route/status, p50/p95/p99, uptime                                                                           |
 | /tools/execute  | done   | Permission-checked tool execution: PRISM_ENABLE_TOOL_EXECUTION=1 opt-in, command allowlist (read-only default), path-traversal guard, output cap |
 | /health         | done   | uptime + timestamp                                                                                                                               |
+| /api/chat/stream  | done   | SSE proxy over core wasm decoders, OpenAI-compatible frames                                                                                   |
+| Provider path     | done   | llm-core.service.ts drives core wasm; hand-rolled llm.service.ts deleted; Anthropic dropped                                                   |
 
 ## Shared libs (used by TUI/desktop; not extension UI)
 
@@ -88,11 +99,17 @@ hardware modes, agent memories. See TUI.
 | libs/rag (chunking, stores, formatting)   | done — 7 tests |
 | libs/redux-store (chatSlice, presetSlice) | done — 9 tests |
 | libs/context-manager                      | done — 8 tests |
-| libs/shared-db, libs/llm-service          | planned        |
+| libs/shared-db                            | planned        |
+| crates/prism-core (unit + fixture conformance) | done — 52 + 8 tests |
+| crates/prism-wasm (wasm-pack test --node) | done — 7 tests |
+| apps/api llm-core fixture tests           | done — 6 tests |
 
 ## Known debt
 
-- `libs/llm-service` is a 1165-line single file — split per provider
+- `@prism/ai-adapters` imports remain: extension ChatPage (selectAutoModel), tui-client + api-client
+  (AdapterRouter instances for non-chat paths) — deletion target, plan item 8
+- Browser bundler-runtime wasm loading (webpack/vite) UNVERIFIED — headless box
+- GUI runtime UNVERIFIED — egui kept as native dev harness until slint parity is confirmed on a display
 - Old Electron leftover at `apps/apps/desktop/desktop` — delete after confirming new desktop app is canonical
 - Agent tool-calling is prompt-parsing based (ReAct), not native function calling
 - Extension ChatPage previously grew RAG/agent-runtime UI that belonged in the
