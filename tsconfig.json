@@ -4,12 +4,6 @@
   "files": [],
   "references": [
     {
-      "path": "./apps/Prism-e2e"
-    },
-    {
-      "path": "./apps/Prism"
-    },
-    {
       "path": "./apps/extension-e2e"
     },
     {

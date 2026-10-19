@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
+import { cpSync } from 'fs';
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 
 // Export the configuration using default export
@@ -18,7 +19,22 @@ export default defineConfig({
     host: 'localhost',
   },
 
-  plugins: [react(), nxViteTsPaths()],
+  plugins: [
+    react(),
+    nxViteTsPaths(),
+    {
+      // The wasm core's browser pkg must sit next to the chunk that
+      // dynamic-imports it (assets/). See libs/llm-service loader.
+      name: 'copy-wasm-pkg',
+      closeBundle() {
+        cpSync(
+          resolve(__dirname, '../../libs/llm-service/src/wasm-pkg-web'),
+          resolve(__dirname, '../../dist/apps/extension/assets/wasm-pkg-web'),
+          { recursive: true },
+        );
+      },
+    },
+  ],
 
   resolve: {
     alias: {
