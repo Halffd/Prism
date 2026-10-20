@@ -176,6 +176,18 @@ implementation in the monorepo.
 - Budget gates in CI: extension wasm bundle <= 1.5 MB gzipped; core
   cold-init <= 100 ms in browser.
 
+## Service-worker note (extension)
+
+The MV3 background service worker imports the core (it relays
+`sendMessage` from pages) — request/response only, never a long-lived
+stream. Stream state always lives in page contexts (popup/iframe/chat
+tab), so the "SW killed mid-stream" failure mode does not apply. The
+wasm core is stateless per call (decoders are fed byte chunks and
+discarded), so an SW kill/restart just re-instantiates on next use.
+Manifest has `"type": "module"` (ESM dynamic import works) and
+`wasm-unsafe-eval` CSP; the pkg is copied to both the dist root (SW
+chunk) and `assets/` (hashed page chunks) by the vite build.
+
 ## Environment realities
 
 - This dev box is headless: verification bar is compile + tests

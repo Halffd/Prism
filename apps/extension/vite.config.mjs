@@ -27,9 +27,19 @@ export default defineConfig({
       // dynamic-imports it (assets/). See libs/llm-service loader.
       name: 'copy-wasm-pkg',
       closeBundle() {
+        // assets/: for hashed page chunks (popup/chat/settings).
+        // root: for background.js — the service worker resolves
+        // './wasm-pkg-web/' relative to itself. SW usage is
+        // request/response only (sendMessage relay); no stream state
+        // ever lives in the service worker.
         cpSync(
           resolve(__dirname, '../../libs/llm-service/src/wasm-pkg-web'),
           resolve(__dirname, '../../dist/apps/extension/assets/wasm-pkg-web'),
+          { recursive: true },
+        );
+        cpSync(
+          resolve(__dirname, '../../libs/llm-service/src/wasm-pkg-web'),
+          resolve(__dirname, '../../dist/apps/extension/wasm-pkg-web'),
           { recursive: true },
         );
       },
