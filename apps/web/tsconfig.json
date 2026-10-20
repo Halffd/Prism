@@ -6,7 +6,11 @@
     "emitDeclarationOnly": false,
     "esModuleInterop": true,
     "resolveJsonModule": true,
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
     "allowJs": true,
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
@@ -17,12 +21,41 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": [
+        "./src/*"
+      ],
+      "@prism/api-client": [
+        "../../libs/api-client/src/index.ts"
+      ],
+      "@prism/shared-db": [
+        "../../libs/shared-db/src/index.ts"
+      ],
+      "@prism/image-gen": [
+        "../../libs/image-gen/src/index.ts"
+      ],
+      "@prism/ui-components": [
+        "../../libs/ui-components/src/index.ts"
+      ],
+      "@prism/redux-store": [
+        "../../libs/redux-store/src/index.ts"
+      ],
+      "@prism/llm-service": [
+        "../../libs/llm-service/src/index.ts"
+      ],
+      "@prism/ai-adapters": [
+        "../../libs/ai-adapters/src/index.ts"
+      ],
+      "@prism/llm": [
+        "../../libs/llm/src/index.ts"
+      ]
     },
-    "types": ["jest", "node"],
+    "types": [
+      "jest",
+      "node"
+    ],
     "outDir": "dist",
-    "rootDir": "src",
-    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo",
+    "baseUrl": "."
   },
   "include": [
     "../../apps/web/.next/types/**/*.ts",

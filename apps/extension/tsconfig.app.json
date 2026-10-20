@@ -35,16 +35,19 @@
   "include": ["src/**/*.js", "src/**/*.jsx", "src/**/*.ts", "src/**/*.tsx"],
   "references": [
     {
-      "path": "../../libs/image-gen/tsconfig.lib.json"
+      "path": "../../libs/logging/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/logging/tsconfig.lib.json"
+      "path": "../../libs/image-gen/tsconfig.lib.json"
     },
     {
       "path": "../../libs/context-manager/tsconfig.lib.json"
     },
     {
       "path": "../../libs/redux-store/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/ai-adapters/tsconfig.lib.json"
     },
     {
       "path": "../../libs/ui-components/tsconfig.lib.json"

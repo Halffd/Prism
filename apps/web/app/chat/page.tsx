@@ -31,8 +31,8 @@ import {
   setAIConfig,
   updateAIConfig,
   RootState
-} from '../../../libs/redux-store/src/store';
-import { useAuth } from '@/src/auth-provider';
+} from '@prism/redux-store';
+import { useAuth } from '@/auth-provider';
 import { networkStatusService } from '@prism/api-client';
 
 // Initialize with default settings - will be overridden by stored settings

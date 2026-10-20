@@ -10,6 +10,18 @@ const nextConfig = {
   // Use this to set Nx-specific options
   // See: https://nx.dev/recipes/next/next-config-setup
   nx: {},
+  // node16-style TS (explicit .js imports in lib sources) under webpack.
+  webpack: (config) => {
+    config.resolve.extensionAlias = {
+      '.js': ['.ts', '.tsx', '.js'],
+    };
+    return config;
+  },
+  // Pin Next's project-root inference to this app inside the monorepo.
+  outputFileTracingRoot: __dirname,
+  turbopack: {
+    root: __dirname,
+  },
 };
 
 const plugins = [

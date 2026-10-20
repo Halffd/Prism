@@ -4,5 +4,13 @@
     "module": "esnext",
     "moduleResolution": "bundler"
   },
-  "include": []
+  "include": [],
+  "references": [
+    {
+      "path": "../web-search"
+    },
+    {
+      "path": "../shared-types"
+    }
+  ]
 }

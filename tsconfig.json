@@ -74,6 +74,12 @@
     },
     {
       "path": "./apps/tui"
+    },
+    {
+      "path": "./libs/deepsearch"
+    },
+    {
+      "path": "./libs/web-search"
     }
   ]
 }

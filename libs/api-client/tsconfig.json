@@ -4,6 +4,12 @@
   "include": [],
   "references": [
     {
+      "path": "../deepsearch"
+    },
+    {
+      "path": "../web-search"
+    },
+    {
       "path": "../audio-gen"
     },
     {

@@ -4,5 +4,10 @@
     "module": "esnext",
     "moduleResolution": "bundler"
   },
-  "include": []
+  "include": [],
+  "references": [
+    {
+      "path": "../shared-types"
+    }
+  ]
 }

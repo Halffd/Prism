@@ -45,19 +45,19 @@
   "include": ["src/**/*.ts", "src/**/*.tsx"],
   "references": [
     {
-      "path": "../../libs/ai-adapters/tsconfig.lib.json"
-    },
-    {
-      "path": "../../libs/shared-types/tsconfig.lib.json"
-    },
-    {
       "path": "../../libs/rag/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/logging/tsconfig.lib.json"
+      "path": "../../libs/ai-adapters/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/redux-store/tsconfig.lib.json"
+      "path": "../../libs/llm/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/agent/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/shared-types/tsconfig.lib.json"
     }
   ]
 }

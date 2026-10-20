@@ -34,7 +34,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const initializeUser = async () => {
       const sessionResult = await supabaseAuthService.getCurrentSession();
       if (sessionResult) {
-        const currentUser = supabaseAuthService.getCurrentUser();
+        const currentUser = await supabaseAuthService.getCurrentUser();
         if (currentUser) {
           setUser(currentUser);
         }
