@@ -1,0 +1,19 @@
+[package]
+name = "prism-cli"
+version = "0.1.0"
+edition = "2021"
+description = "Prism native terminal harness (ratatui) over prism-core"
+
+[[bin]]
+name = "prism"
+path = "src/main.rs"
+
+[dependencies]
+prism-core = { path = "../../crates/prism-core", features = ["native-transport"] }
+anyhow.workspace = true
+serde_json.workspace = true
+ratatui = "0.29"
+crossterm = "0.28"
+
+[dev-dependencies]
+tempfile.workspace = true
