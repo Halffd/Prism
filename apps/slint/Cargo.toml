@@ -4,9 +4,13 @@ version = "0.1.0"
 edition = "2021"
 description = "Prism desktop/mobile UI built with Slint — thin host over prism-core"
 
+
+[lib]
+crate-type = ["cdylib"]
+
 [dependencies]
 prism-core = { path = "../../crates/prism-core" }
-slint = "1"
+slint = { version = "1", features = ["backend-android-activity-06"] }
 
 [build-dependencies]
 slint-build = "1"

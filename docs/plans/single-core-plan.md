@@ -112,7 +112,7 @@ doc-first-suite-later (the documented drift trap).
    (`wasm-pack test --node crates/prism-wasm`) — 7 passed, 0 failed.
    Fetch-based Transport intentionally deferred to the host swaps
    (decoder-first contract: hosts drive HTTP, core parses).
-4. Android via Slint.
+4. ~~Android via Slint.~~ **DONE** — `cargo apk build --target aarch64-linux-android` produces a signed APK (`target/debug/apk/prism-slint.apk`) with `lib/arm64-v8a/libprism_slint.so` and `com.prism.slint.MainActivity`. Slint `backend-android-activity-06` feature, `#[no_mangle] fn android_main` in `lib.rs` calling `slint::android::init(app)` then `shared::run_ui()`. Desktop `main.rs` delegates to `shared::run_ui()` for a single UI code path.
 5. ~~apps/api swaps onto wasm-in-node; gains SSE endpoint
    `/api/chat/stream` proxying the core.~~ **DONE** — request-body
    builders (`stream_request_body`/`ollama_chat_body`/`api_chat_body`)
