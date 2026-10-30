@@ -56,16 +56,25 @@ hardware modes, agent memories. See TUI.
 | Feature                                | Status  | Notes                                                                                          |
 | -------------------------------------- | ------- | ---------------------------------------------------------------------------------------------- |
 | egui dev harness                       | done    | Thin host over prism-core (bridge.rs); no own tests, logic lives in the core                   |
-| Slint UI at egui feature parity        | done    | Streaming, chats sidebar w/ two-step delete, settings (keys/models/sampling/thinking/hardware) |
+| Slint UI at egui feature parity        | done    | Streaming, chats sidebar w/ two-step delete, settings (keys/models/sampling/thinking/hardware); shared logic in `apps/slint/src/shared.rs` used by desktop + Android entry points |
 | GUI runtime verification               | pending | Headless box — slint parity check on a display gates egui deletion (plan item 2)               |
 | Agent features (tools/permissions/RAG) | planned | Stays per-surface until core proven (single-core plan scope)                                   |
 
-## Mobile (planned — Slint, single-core plan item 4)
+## CLI (apps/cli)
 
-| Feature  | Status  | Notes                                           |
-| -------- | ------- | ----------------------------------------------- |
-| Android  | planned | Slint 1.15+ supports Android; builds from Linux |
-| iOS      | planned | Requires a Mac                                  |
+| Feature                                | Status  | Notes                                                                                          |
+| -------------------------------------- | ------- | ---------------------------------------------------------------------------------------------- |
+| Ratatui terminal harness               | done    | Event-driven input + chat jobs over prism-core; conversations persisted to disk via core storage |
+| Chat + streaming + queue               | done    | Inline streaming, abort, queue drains on done, error pauses queue                              |
+| Settings persistence                   | done    | Commands update + persist settings; restores most recent conversation on restart               |
+| Behavior tests                         | done    | 9 tests covering stream/drain/abort/error/queue/commands/credentials/search/persistence         |
+
+## Mobile (Slint, single-core plan item 4)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Android | done | `cargo apk build --target aarch64-linux-android` produces signed APK at `target/debug/apk/prism-slint.apk` with `lib/arm64-v8a/libprism_slint.so` and `com.prism.slint.MainActivity`. Slint `backend-android-activity-06` feature, `#[no_mangle] fn android_main` in `apps/slint/src/lib.rs` calling `slint::android::init(app)` then `shared::run_ui()`. Single UI code path shared with desktop via `shared.rs`. |
+| iOS | planned | Requires a Mac |
 
 Expo RN app `apps/Prism` deleted (plan item 7).
 
