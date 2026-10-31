@@ -97,7 +97,8 @@ export function parse_api_response(body: string): string;
 export function parse_models_response(body: string): string;
 
 /**
- * The provider table: id, label, base_url, default_model, needs_key.
+ * The provider table: id, label, base_url, default_model, needs_key,
+ * env (env-var names that may carry the key).
  */
 export function providers_json(): string;
 

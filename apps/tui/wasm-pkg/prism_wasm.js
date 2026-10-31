@@ -375,7 +375,8 @@ function parse_models_response(body) {
 exports.parse_models_response = parse_models_response;
 
 /**
- * The provider table: id, label, base_url, default_model, needs_key.
+ * The provider table: id, label, base_url, default_model, needs_key,
+ * env (env-var names that may carry the key).
  * @returns {string}
  */
 function providers_json() {

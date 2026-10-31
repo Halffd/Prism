@@ -63,6 +63,8 @@ export component AppWindow inherits Window {
 
     // ---- callbacks ----
     callback send(string);
+    callback history-back();
+    callback history-forward();
     callback scroll-to-end();
     callback new-chat();
     callback open-chat(string);
@@ -92,7 +94,7 @@ export component AppWindow inherits Window {
     changed temperature => { temperature-edited(self.temperature); }
 
     scroll-to-end => {
-        list.content-y = list.height - list.content-height;
+        list.viewport-y = list.height - list.viewport-height;
     }
 
     HorizontalLayout {
@@ -246,14 +248,32 @@ export component AppWindow inherits Window {
                         input-text = "";
                     }
                 }
-                LineEdit {
+                input-focus := FocusScope {
                     horizontal-stretch: 1;
-                    text <=> input-text;
-                    placeholder-text: "Type a message… (Enter to send)";
-                    enabled: !streaming;
-                    accepted(t) => {
-                        send(t);
-                        input-text = "";
+                    key-pressed(event) => {
+                        if event.text == Key.UpArrow {
+                            history-back();
+                            return accept;
+                        } else if event.text == Key.DownArrow {
+                            history-forward();
+                            return accept;
+                        } else if event.text == Key.Return && input-text != "" && !streaming {
+                            send(input-text);
+                            input-text = "";
+                            return accept;
+                        }
+                        return reject;
+                    }
+                    VerticalLayout {
+                        LineEdit {
+                            text <=> input-text;
+                            placeholder-text: "Type a message… (Enter to send, ↑/↓ history)";
+                            enabled: !streaming;
+                            accepted(t) => {
+                                send(t);
+                                input-text = "";
+                            }
+                        }
                     }
                 }
             }

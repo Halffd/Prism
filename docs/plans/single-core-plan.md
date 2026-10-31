@@ -176,6 +176,23 @@ implementation in the monorepo.
 - Budget gates in CI: extension wasm bundle <= 1.5 MB gzipped; core
   cold-init <= 100 ms in browser.
 
+## Env-var keys + prompt history (2026-10-31)
+
+Adopted from the opencode survey (features #1 of the ranked list):
+
+- **Env-var API keys**: `providers::ProviderDef.env` lists each remote
+  provider's env-var names (e.g. openai → `OPENAI_API_KEY`, gemini →
+  `GEMINI_API_KEY` then `GOOGLE_API_KEY`). `providers::resolve_key`:
+  stored settings key wins, else first non-empty env var.
+  `Settings::key_for` applies it, so Slint/CLI inherit automatically;
+  the TUI mirrors the table in `apps/tui/src/lib/provider-env.ts`
+  (wasm surface passes through `env` in `providers_json`).
+- **Prompt history**: `prism_core::prompt_history` — JSONL at
+  `<config>/history.jsonl`, cap 50, dedupe-on-resend (moves to tail),
+  line-level corruption recovery (bad lines dropped, file healed on
+  next write). Host glue `host::record_prompt` / `load_prompt_history`.
+  Slint: ↑/↓ cycles history, forward-past-newest restores the draft.
+
 ## Service-worker note (extension)
 
 The MV3 background service worker imports the core (it relays

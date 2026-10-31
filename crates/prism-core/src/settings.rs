@@ -119,11 +119,18 @@ impl Default for Settings {
 impl Settings {
     /// Key for the given provider (per-provider map; legacy `api_key`
     /// applies when the map has no entry — e.g. just after migration).
+    /// Falls back to the provider's environment variables when the user
+    /// has not stored a key (see `providers::resolve_key`).
     pub fn key_for(&self, provider: &str) -> String {
-        self.provider_keys
+        let stored = self
+            .provider_keys
             .get(provider)
             .cloned()
-            .unwrap_or_else(|| self.api_key.clone())
+            .unwrap_or_else(|| self.api_key.clone());
+        match crate::providers::find(provider) {
+            Some(def) => crate::providers::resolve_key(&stored, def),
+            None => stored,
+        }
     }
 }
 

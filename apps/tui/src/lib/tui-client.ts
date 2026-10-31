@@ -27,6 +27,7 @@ import type {
 } from '@prism/shared-types';
 import { AdapterRouter } from '@prism/ai-adapters';
 import { coreChat, type CoreConnection } from './core-llm';
+import { providerEnvKey } from './provider-env';
 import { nanoid } from 'nanoid';
 
 export interface TUIClientConfig {
@@ -62,8 +63,10 @@ export class TUIClient {
     this.prismApiKey = config.prismApiKey;
 
     const serviceConfig: ServiceConfig = {
-      apiKey:
-        (config.aiConfig.providerKeys ?? {})[config.aiConfig.provider] ?? '',
+      apiKey: resolveProviderKey(
+        (config.aiConfig.providerKeys ?? {})[config.aiConfig.provider],
+        config.aiConfig.provider,
+      ),
       apiUrl: config.aiConfig.apiUrl,
       model: config.aiConfig.model,
       provider: config.aiConfig.provider,
@@ -102,10 +105,11 @@ export class TUIClient {
       fullContent = await coreChat({
         connection,
         provider: this.aiConfig.provider,
-        apiKey:
+        apiKey: resolveProviderKey(
           (this.aiConfig.providerKeys ?? {})[this.aiConfig.provider] ??
-          this.aiConfig.apiKey ??
-          '',
+            this.aiConfig.apiKey,
+          this.aiConfig.provider,
+        ),
         model: this.aiConfig.model || 'gpt-3.5-turbo',
         temperature: this.aiConfig.temperature ?? 0.7,
         maxTokens: this.aiConfig.maxTokens ?? 2048,

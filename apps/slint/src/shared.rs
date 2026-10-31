@@ -90,6 +90,13 @@ pub struct State {
     pub rx_models: Option<Receiver<ModelsEvent>>,
     pub gpu_idx: usize,
     pub ctx_idx: usize,
+    /// Position in the sent-prompt history while cycling with Up/Down:
+    /// None = not cycling (editing fresh text); Some(i) = viewing
+    /// `history[history.len() - 1 - i]`. New chat / send resets it.
+    pub history_idx: Option<usize>,
+    /// Input text saved when Up/Down cycling starts; restored when the
+    /// user cycles forward past the newest entry.
+    pub history_draft: Option<String>,
 }
 
 impl State {
@@ -115,6 +122,8 @@ impl State {
             rx_models: None,
             gpu_idx,
             ctx_idx,
+            history_idx: None,
+            history_draft: None,
         }
     }
 }
@@ -425,6 +434,8 @@ pub fn send(
     if st.streaming {
         return;
     }
+    host::record_prompt(&content);
+    st.history_idx = None;
 
     // Build the request from history BEFORE appending the new user
     // message and the assistant placeholder.
@@ -558,6 +569,57 @@ pub fn send(
     ui.invoke_scroll_to_end();
     persist_current(ui, state, lines_model);
 }
+
+/// Cycle sent-prompt history with Up/Down while the input is focused.
+/// `back = true` (Up) walks older prompts; at the oldest entry the call
+/// is a no-op so the user cannot fall off the end. Forward past the
+/// newest entry restores the draft that was being edited when cycling
+/// started. Does nothing while streaming (input is disabled anyway).
+pub fn history_recall(
+    ui: &AppWindow,
+    state: &Rc<RefCell<State>>,
+    back: bool,
+) {
+    if state.borrow().streaming {
+        return;
+    }
+    let history = host::load_prompt_history();
+    if history.is_empty() {
+        return;
+    }
+    let mut st = state.borrow_mut();
+    let draft = match &st.history_idx {
+        None => {
+            // Entering cycle mode: remember the current input as draft.
+            let d = ui.get_input_text().to_string();
+            st.history_draft = Some(d);
+            0usize
+        }
+        Some(i) => *i,
+    };
+    let last = history.len() - 1;
+    let next = if back {
+        if draft >= last {
+            draft // already at oldest; stay
+        } else {
+            draft + 1
+        }
+    } else {
+        if draft == 0 {
+            // Forward past newest: leave cycle mode, restore draft.
+            st.history_idx = None;
+            let text = st.history_draft.clone().unwrap_or_default();
+            drop(st);
+            ui.set_input_text(text.into());
+            return;
+        }
+        draft - 1
+    };
+    let text = history[history.len() - 1 - next].text.clone();
+    st.history_idx = Some(next);
+    drop(st);
+    ui.set_input_text(text.into());
+}
 /// Run the Slint UI: build the window, wire callbacks, start the timer pump,
 /// and enter the event loop. Shared by desktop main() and Android android_main.
 pub fn run_ui() {
@@ -654,6 +716,22 @@ pub fn run_ui() {
     {
         let ui_w = ui.as_weak();
         let state_c = state.clone();
+        ui.on_history_back(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            history_recall(&ui, &state_c, true);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_history_forward(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            history_recall(&ui, &state_c, false);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
         let lines_c = lines_model.clone();
         ui.on_new_chat(move || {
             let Some(ui) = ui_w.upgrade() else { return };
@@ -667,6 +745,8 @@ pub fn run_ui() {
                 st.current_id = None;
                 st.current_created = 0;
                 st.confirm_delete = None;
+                st.history_idx = None;
+                st.history_draft = None;
                 st.chats = host::list_conversations();
             }
             refresh_transcript(&ui, &lines_c, &[]);

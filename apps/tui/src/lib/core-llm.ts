@@ -73,6 +73,9 @@ type StreamEvent = { Chunk: string } | 'Done' | { Error: string };
 interface ProviderDef {
   id: string;
   base_url: string;
+  needs_key?: boolean;
+  /** Env-var names that may carry the key (matches core ProviderDef.env). */
+  env?: string[];
 }
 
 let providerTable: ProviderDef[] | null = null;

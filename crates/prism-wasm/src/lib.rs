@@ -124,7 +124,8 @@ pub fn apply_thinking(messages_json: &str) -> String {
     }
 }
 
-/// The provider table: id, label, base_url, default_model, needs_key.
+/// The provider table: id, label, base_url, default_model, needs_key,
+/// env (env-var names that may carry the key).
 #[wasm_bindgen]
 pub fn providers_json() -> String {
     serde_json::json!(PROVIDERS
@@ -135,6 +136,7 @@ pub fn providers_json() -> String {
             "base_url": p.base_url,
             "default_model": p.default_model,
             "needs_key": p.needs_key,
+            "env": p.env,
         }))
         .collect::<Vec<_>>())
     .to_string()

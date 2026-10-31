@@ -51,6 +51,36 @@ pub fn settings_path() -> Option<PathBuf> {
     config_dir().map(|d| d.join("settings.json"))
 }
 
+/// Prompt input history file (`history.jsonl` in the config root).
+pub fn prompt_history_path() -> Option<PathBuf> {
+    config_dir().map(|d| d.join("history.jsonl"))
+}
+
+/// Load sent-prompt history, oldest first (callers index from the end).
+pub fn load_prompt_history() -> Vec<crate::prompt_history::PromptEntry> {
+    match prompt_history_path() {
+        Some(path) => crate::prompt_history::load_history(storage(), &path),
+        None => Vec::new(),
+    }
+}
+
+/// Remember a sent prompt (dedupe + cap 50, self-healing rewrite).
+pub fn record_prompt(text: &str) {
+    if let Some(path) = prompt_history_path() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let _ = crate::prompt_history::record_prompt(
+            storage(),
+            &path,
+            text,
+            now,
+            crate::prompt_history::MAX_HISTORY_ENTRIES,
+        );
+    }
+}
+
 /// Conversation storage dir; `$PRISM_CONVERSATIONS_DIR` overrides.
 pub fn conversations_dir() -> Option<PathBuf> {
     if let Ok(dir) = std::env::var("PRISM_CONVERSATIONS_DIR") {

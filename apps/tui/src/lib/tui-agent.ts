@@ -8,6 +8,7 @@ import type {
 import { ReActAgentService, PermissionAwareToolExecutor } from '@prism/agent';
 import { OpenAILLMService } from '@prism/llm';
 import { NodeToolExecutor } from './node-tool-executor';
+import { resolveProviderKey } from './provider-env';
 
 /** Ask handler shape the Ink UI supplies (renders a y/n prompt). */
 export type AskHandler = (toolName: string, input: string) => Promise<boolean>;
@@ -37,8 +38,10 @@ export async function runTUIAgent(
 ): Promise<Result<AgentResult>> {
   const llm = new OpenAILLMService({
     provider: options.aiConfig.provider,
-    apiKey:
-      (options.aiConfig.providerKeys ?? {})[options.aiConfig.provider] ?? '',
+    apiKey: resolveProviderKey(
+      (options.aiConfig.providerKeys ?? {})[options.aiConfig.provider],
+      options.aiConfig.provider,
+    ),
     apiUrl: options.aiConfig.apiUrl,
     model: options.aiConfig.model,
   });

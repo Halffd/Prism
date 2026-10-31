@@ -58,6 +58,8 @@ hardware modes, agent memories. See TUI.
 | egui dev harness                       | done    | Thin host over prism-core (bridge.rs); no own tests, logic lives in the core                   |
 | Slint UI at egui feature parity        | done    | Streaming, chats sidebar w/ two-step delete, settings (keys/models/sampling/thinking/hardware); shared logic in `apps/slint/src/shared.rs` used by desktop + Android entry points |
 | GUI runtime verification               | pending | Headless box — slint parity check on a display gates egui deletion (plan item 2)               |
+| Env-var API keys                       | done    | `ProviderDef.env` (13 remote providers); stored key wins, else env vars in preference order; `Settings::key_for` resolves; TUI mirrors via `apps/tui/src/lib/provider-env.ts`; wasm `providers_json` exports `env` |
+| Prompt history (up/down recall)        | done    | core `prompt_history` JSONL store (cap 50, dedupe, corrupt-line heal) + `host::record_prompt/load_prompt_history`; Slint ↑/↓ cycling with draft restore |
 | Agent features (tools/permissions/RAG) | planned | Stays per-surface until core proven (single-core plan scope)                                   |
 
 ## CLI (apps/cli)
