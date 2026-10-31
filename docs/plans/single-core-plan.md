@@ -193,6 +193,27 @@ Adopted from the opencode survey (features #1 of the ranked list):
   next write). Host glue `host::record_prompt` / `load_prompt_history`.
   Slint: ↑/↓ cycles history, forward-past-newest restores the draft.
 
+## Model catalog (2026-10-31, opencode survey #2)
+
+- **Bundled snapshot**: `crates/prism-core/src/catalog_snapshot.json` —
+  12 OpenAI-compatible providers mapped onto Prism ids (google→gemini,
+  xai→grok, nvidia→nvidia-nim, togetherai→together, fireworks-ai→
+  fireworks), ~650 models with `reasoning`/`tool_call`/`attachment`
+  flags, context/output limits, per-Mtok pricing, modalities, status.
+  ~200 KB (trimmed from the 6 MB full catalog; non-chat providers like
+  bedrock/vertex excluded — Prism's transport is OpenAI-compat only).
+- **API**: `prism_core::catalog` — `Catalog::model(provider, model)`,
+  `models_for(provider)` (newest-first, deprecated-last),
+  `CatalogProvider::default_model()` (newest non-deprecated).
+  Corrupt/partial snapshots degrade to empty metadata, never fail.
+- **Slint surface**: picker falls back to catalog models when the
+  per-provider cache is empty (live /models fetch stays authoritative);
+  empty-model-field hint shows "name · 128k ctx · tools/reasoning".
+- **Regen**: `python3 script/update-catalog.py` (stdlib-only fetcher).
+- Deferred from opencode's design: live refresh with TTL cache
+  (snapshot is regenerated manually for now — one command, no daemon);
+  reasoning-effort variants; context-tiered pricing.
+
 ## Service-worker note (extension)
 
 The MV3 background service worker imports the core (it relays

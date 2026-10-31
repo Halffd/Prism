@@ -20,6 +20,7 @@
 //! Wire contract: see `docs/plans/single-core-plan.md` — fixtures are
 //! the spec.
 
+pub mod catalog;
 pub mod client;
 pub mod conversations;
 #[cfg(feature = "native-transport")]

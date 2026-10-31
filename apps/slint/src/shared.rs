@@ -3,6 +3,7 @@
 slint::include_modules!();
 
 // Re-export all public types and functions from dependencies
+pub use prism_core::catalog;
 pub use prism_core::client::{
     ApiChatRequest, ChatMessage, ModelsEvent, ModelsRequest, OllamaChatRequest, StreamEvent,
     StreamRequest,
@@ -140,20 +141,85 @@ pub fn effective_model(settings: &Settings) -> String {
     }
 }
 
+/// Hint for the model field when empty: the provider's default model
+/// enriched with catalog metadata (context window, capabilities) when
+/// the catalog knows the model.
 pub fn model_hint(settings: &Settings) -> SharedString {
-    if settings.model.trim().is_empty() {
-        effective_model(settings).into()
-    } else {
-        "".into()
+    if !settings.model.trim().is_empty() {
+        return "".into();
+    }
+    let model = effective_model(settings);
+    if model.is_empty() {
+        return "".into();
+    }
+    match catalog::snapshot().model(&settings.provider, &model) {
+        Some(info) => model_info_hint(info).into(),
+        None => model.into(),
     }
 }
 
+/// "name · 128k ctx · tools/reasoning" one-liner for a catalog model.
+fn model_info_hint(info: &catalog::ModelInfo) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if !info.name.is_empty() {
+        parts.push(info.name.clone());
+    }
+    if let Some(ctx) = info.limit_context {
+        parts.push(format!(
+            "{}k ctx",
+            if ctx >= 1000 { ctx / 1000 } else { ctx }
+        ));
+    }
+    let mut caps: Vec<&str> = Vec::new();
+    if info.tool_call {
+        caps.push("tools");
+    }
+    if info.reasoning {
+        caps.push("reasoning");
+    }
+    if info.attachment {
+        caps.push("attachments");
+    }
+    if !caps.is_empty() {
+        parts.push(caps.join("/"));
+    }
+    if info.deprecated() {
+        parts.push("deprecated".into());
+    }
+    if parts.is_empty() {
+        info.id.clone()
+    } else {
+        parts.join(" · ")
+    }
+}
+
+/// Models for the picker: per-provider cache (live /models fetch)
+/// first, catalog models second (when the cache has no entry). Sorted
+/// newest-first with deprecated at the end (catalog ordering).
 pub fn cached_models(settings: &Settings) -> Vec<SharedString> {
-    settings
-        .model_cache
-        .get(&settings.provider)
-        .map(|v| v.iter().map(|m| SharedString::from(m.clone())).collect())
-        .unwrap_or_default()
+    if let Some(v) = settings.model_cache.get(&settings.provider) {
+        if !v.is_empty() {
+            return v.iter().map(|m| SharedString::from(m.clone())).collect();
+        }
+    }
+    catalog::snapshot()
+        .models_for(&settings.provider)
+        .into_iter()
+        .map(|m| SharedString::from(m.id.clone()))
+        .collect()
+}
+
+/// Catalog metadata for the currently effective model, if known.
+/// Surfaces use this for capability-aware UI (e.g. hide thinking
+/// toggle on non-reasoning providers).
+pub fn current_model_info(settings: &Settings) -> Option<catalog::ModelInfo> {
+    let model = effective_model(settings);
+    if model.is_empty() {
+        return None;
+    }
+    catalog::snapshot()
+        .model(&settings.provider, &model)
+        .cloned()
 }
 
 pub fn key_rows(settings: &Settings) -> Vec<KeyRow> {
