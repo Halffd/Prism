@@ -22,6 +22,7 @@
 
 pub mod catalog;
 pub mod client;
+pub mod commands;
 pub mod conversations;
 #[cfg(feature = "native-transport")]
 pub mod host;

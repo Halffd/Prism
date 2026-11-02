@@ -214,6 +214,28 @@ Adopted from the opencode survey (features #1 of the ranked list):
   (snapshot is regenerated manually for now — one command, no daemon);
   reasoning-effort variants; context-tiered pricing.
 
+## Command registry + Slint palette (2026-11-02, opencode survey #3)
+
+- **Core registry**: `prism_core::commands` — static `COMMANDS` table
+  (21 commands, 5 groups: Chat/Models/Settings/Hardware/View) of
+  `CommandDef { id, title, group, takes_arg, while_streaming }` with
+  namespaced ids (`chat.new`, `models.pick`, …). `find_command` +
+  `filter_commands` (case-insensitive substring over id/title/group).
+  Core owns the table so TUI/CLI can reuse it for slash menus.
+- **Slint palette**: Ctrl+K-style popup (`palette-toggle` callback,
+  opened by the palette button; Esc closes, ↑/↓ move, Enter runs,
+  click runs). `palette_refresh` rebuilds results from the query —
+  registry commands plus `model:<id>` rows from the cached/catalog
+  models, so the palette doubles as the model switcher.
+  `palette_execute` dispatches ids onto the existing callbacks (new
+  chat, connection switch, save, thinking toggle, hardware cycles +
+  compute presets, view toggles, scroll, history recall, models
+  fetch) — no logic duplicated, the registry describes, shared.rs
+  dispatches.
+- Deferred: user-defined commands from a config dir (needs a config
+  schema decision), keybinding remaps, fuzzy scoring (substring is
+  enough at 21 entries).
+
 ## Service-worker note (extension)
 
 The MV3 background service worker imports the core (it relays

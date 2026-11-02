@@ -222,6 +222,190 @@ pub fn current_model_info(settings: &Settings) -> Option<catalog::ModelInfo> {
         .cloned()
 }
 
+/// Kick off a live /models fetch for the current provider. Shared by
+/// the settings button and the palette command.
+pub fn fetch_models(ui: &AppWindow, state: &Rc<RefCell<State>>) {
+    let (base_url, api_key, status) = {
+        let st = state.borrow_mut();
+        if st.rx_models.is_some() {
+            return;
+        }
+        let provider = st.settings.provider.clone();
+        let key = st.settings.key_for(&provider);
+        let base_url = if provider == "ollama" {
+            st.settings.local_base_url.trim().to_string()
+        } else {
+            providers::find(&provider)
+                .map(|p| p.base_url.to_string())
+                .unwrap_or_default()
+        };
+        let needs_key = providers::find(&provider)
+            .map(|p| p.needs_key)
+            .unwrap_or(false);
+        if base_url.is_empty() || (needs_key && key.trim().is_empty()) {
+            (
+                String::new(),
+                String::new(),
+                "set an API key first".to_string(),
+            )
+        } else {
+            (base_url, key, "fetching…".to_string())
+        }
+    };
+    if base_url.is_empty() {
+        ui.set_models_status(status.into());
+        return;
+    }
+    let (tx, rx) = mpsc::channel();
+    state.borrow_mut().rx_models = Some(rx);
+    ui.set_models_status(status.into());
+    host::spawn_models_fetch(
+        ModelsRequest {
+            base_url,
+            api_key: api_key.trim().to_string(),
+        },
+        tx,
+    );
+}
+
+// ---- command palette ----
+
+/// Rebuild the palette result list from the current query. Registry
+/// commands plus one "model:<id>" row per catalog/cached model so the
+/// palette doubles as the model switcher.
+pub fn palette_refresh(ui: &AppWindow, state: &Rc<RefCell<State>>, query: &str) {
+    let mut rows: Vec<PaletteRow> = prism_core::commands::filter_commands(query)
+        .into_iter()
+        .map(|c| PaletteRow {
+            id: c.id.into(),
+            title: c.title.into(),
+            group: c.group.label().into(),
+        })
+        .collect();
+    let q = query.trim().to_lowercase();
+    if q.is_empty() || "model".contains(&q) || q.contains("switch") {
+        for m in cached_models(&state.borrow().settings) {
+            let id = m.to_string();
+            rows.push(PaletteRow {
+                id: format!("model:{id}").into(),
+                title: format!("Switch to {id}").into(),
+                group: "Models".into(),
+            });
+        }
+    }
+    ui.set_palette_results(ModelRc::from(Rc::new(VecModel::from(rows))));
+    ui.set_palette_idx(0);
+}
+
+/// Execute a palette row. `id` is either a registry command id or
+/// "model:<model-id>" for the model switcher.
+pub fn palette_execute(
+    ui: &AppWindow,
+    state: &Rc<RefCell<State>>,
+    lines_model: &Rc<VecModel<ChatLine>>,
+    id: &str,
+) {
+    ui.set_palette_open(false);
+    ui.set_palette_query("".into());
+    if let Some(model) = id.strip_prefix("model:") {
+        state.borrow_mut().settings.model = model.to_string();
+        ui.set_model(model.into());
+        ui.set_model_hint("".into());
+        return;
+    }
+    match id {
+        "chat.new" => {
+            if !require_idle(ui, state, lines_model) {
+                return;
+            }
+            persist_current(ui, state, lines_model);
+            {
+                let mut st = state.borrow_mut();
+                st.lines.clear();
+                st.current_id = None;
+                st.current_created = 0;
+                st.confirm_delete = None;
+                st.history_idx = None;
+                st.history_draft = None;
+                st.chats = host::list_conversations();
+            }
+            refresh_transcript(ui, lines_model, &[]);
+            refresh_chats(ui, state);
+        }
+        "chat.history.back" => history_recall(ui, state, true),
+        "chat.history.forward" => history_recall(ui, state, false),
+        "models.fetch" | "models.refresh_catalog" => fetch_models(ui, state),
+        "settings.connection.direct" => {
+            state.borrow_mut().settings.connection = Connection::Direct;
+            ui.set_connection_idx(0);
+        }
+        "settings.connection.api" => {
+            state.borrow_mut().settings.connection = Connection::PrismApi;
+            ui.set_connection_idx(1);
+        }
+        "settings.save" => {
+            let status = match host::save_settings(&state.borrow().settings) {
+                Ok(()) => match host::settings_path() {
+                    Some(path) => format!("saved to {}", path.display()),
+                    None => "saved".into(),
+                },
+                Err(e) => format!("save failed: {e}"),
+            };
+            ui.set_settings_status(status.into());
+        }
+        "settings.thinking.toggle" => {
+            let next = !state.borrow().settings.thinking_enabled;
+            state.borrow_mut().settings.thinking_enabled = next;
+            ui.set_thinking_enabled(next);
+        }
+        "hardware.cycle_gpu" => {
+            let label = {
+                let mut st = state.borrow_mut();
+                st.gpu_idx = (st.gpu_idx + 1) % GPU_LAYER_CYCLE.len();
+                st.settings.hardware.gpu_layers_override = GPU_LAYER_CYCLE[st.gpu_idx];
+                gpu_label(st.gpu_idx)
+            };
+            ui.set_gpu_label(label);
+        }
+        "hardware.cycle_ctx" => {
+            let label = {
+                let mut st = state.borrow_mut();
+                st.ctx_idx = (st.ctx_idx + 1) % CONTEXT_TOKEN_CYCLE.len();
+                st.settings.hardware.context_tokens = CONTEXT_TOKEN_CYCLE[st.ctx_idx];
+                ctx_label(st.ctx_idx)
+            };
+            ui.set_ctx_label(label);
+        }
+        "hardware.compute.cpu"
+        | "hardware.compute.auto"
+        | "hardware.compute.gpu"
+        | "hardware.compute.gpu_nvidia"
+        | "hardware.compute.gpu_amd"
+        | "hardware.compute.gpu_intel" => {
+            let compute = id.rsplit('.').next().unwrap_or("auto");
+            let mapped = match compute {
+                "cpu" => "cpu-only",
+                "gpu" => "gpu-auto",
+                other => other,
+            };
+            if let Some(i) = COMPUTE_LEVELS.iter().position(|c| *c == mapped) {
+                state.borrow_mut().settings.hardware.preferred_compute = mapped.to_string();
+                ui.set_compute_idx(i as i32);
+            }
+        }
+        "view.toggle_chats" => {
+            let next = !ui.get_show_chats();
+            ui.set_show_chats(next);
+        }
+        "view.toggle_settings" => {
+            let next = !ui.get_show_settings();
+            ui.set_show_settings(next);
+        }
+        "view.scroll_end" => ui.invoke_scroll_to_end(),
+        other => push_system(ui, state, lines_model, format!("unknown command: {other}")),
+    }
+}
+
 pub fn key_rows(settings: &Settings) -> Vec<KeyRow> {
     PROVIDERS
         .iter()
@@ -793,6 +977,49 @@ pub fn run_ui() {
         ui.on_history_forward(move || {
             let Some(ui) = ui_w.upgrade() else { return };
             history_recall(&ui, &state_c, false);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_palette_toggle(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            let open = !ui.get_palette_open();
+            ui.set_palette_open(open);
+            if open {
+                ui.set_palette_query("".into());
+                palette_refresh(&ui, &state_c, "");
+            }
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_palette_query_changed(move |q| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            palette_refresh(&ui, &state_c, &q.to_string());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        let lines_c = lines_model.clone();
+        ui.on_palette_execute(move |id| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            palette_execute(&ui, &state_c, &lines_c, &id.to_string());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        ui.on_palette_move(move |delta| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            let n = slint::Model::row_count(&ui.get_palette_results()) as i32;
+            if n == 0 {
+                return;
+            }
+            let cur = ui.get_palette_idx();
+            let next = (cur + delta).rem_euclid(n);
+            ui.set_palette_idx(next);
         });
     }
     {

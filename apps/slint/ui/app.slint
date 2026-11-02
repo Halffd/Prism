@@ -21,6 +21,12 @@ export struct KeyRow {
     key: string,
 }
 
+export struct PaletteRow {
+    id: string,       // dispatch id ("chat.new") or "model:<id>"
+    title: string,    // display text
+    group: string,    // section label
+}
+
 export component AppWindow inherits Window {
     title: "Prism";
     preferred-width: 1150px;
@@ -60,12 +66,21 @@ export component AppWindow inherits Window {
     in property <string> gpu-label;
     in property <string> ctx-label;
     in-out property <string> input-text;
+    // ---- command palette ----
+    in-out property <bool> palette-open: false;
+    in-out property <string> palette-query;
+    in property <[PaletteRow]> palette-results;
+    in-out property <int> palette-idx: 0;
 
     // ---- callbacks ----
     callback send(string);
     callback history-back();
     callback history-forward();
     callback scroll-to-end();
+    callback palette-toggle();
+    callback palette-query-changed(string);
+    callback palette-execute(string); // arg: PaletteRow.id
+    callback palette-move(int);       // arg: index delta (+1/-1)
     callback new-chat();
     callback open-chat(string);
     callback request-delete(string);
@@ -252,12 +267,23 @@ export component AppWindow inherits Window {
                     horizontal-stretch: 1;
                     key-pressed(event) => {
                         if event.text == Key.UpArrow {
+                            if palette-open {
+                                palette-move(-1);
+                                return accept;
+                            }
                             history-back();
                             return accept;
                         } else if event.text == Key.DownArrow {
+                            if palette-open {
+                                palette-move(1);
+                                return accept;
+                            }
                             history-forward();
                             return accept;
-                        } else if event.text == Key.Return && input-text != "" && !streaming {
+                        } else if event.text == Key.Escape && palette-open {
+                            palette-toggle();
+                            return accept;
+                        } else if event.text == Key.Return && input-text != "" && !streaming && !palette-open {
                             send(input-text);
                             input-text = "";
                             return accept;
@@ -436,6 +462,80 @@ export component AppWindow inherits Window {
                         Button { text: "Save settings"; clicked => { save-settings(); } }
                         Text { text: settings-status; color: #8b95a1; font-size: 11px; vertical-alignment: center; }
                     }
+                }
+            }
+        }
+    }
+
+    // ---- command palette (Ctrl+K) ----
+    if palette-open : Rectangle {
+        background: #00000066;
+        TouchArea {
+            clicked => { palette-toggle(); }
+        }
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: 60px;
+            width: 520px;
+            height: 420px;
+            background: #161b21;
+            border-width: 1px;
+            border-color: #2a3440;
+            drop-shadow-blur: 16px;
+            drop-shadow-color: #00000088;
+            VerticalLayout {
+                padding: 8px;
+                spacing: 8px;
+                LineEdit {
+                    text <=> palette-query;
+                    placeholder-text: "Type a command… (Ctrl+K)";
+                    edited(t) => {
+                        palette-query-changed(t);
+                        palette-idx = 0;
+                    }
+                    accepted(t) => {
+                        if palette-results.length > 0 && palette-idx < palette-results.length {
+                            palette-execute(palette-results[palette-idx].id);
+                        }
+                    }
+                }
+                Rectangle {
+                    height: 1px;
+                    background: #232a31;
+                }
+                palette-list := ListView {
+                    vertical-stretch: 1;
+                    for r[i] in palette-results : Rectangle {
+                        height: 28px;
+                        background: i == palette-idx ? #223040 : transparent;
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            spacing: 8px;
+                            TouchArea {
+                                clicked => { palette-execute(r.id); }
+                                mouse-cursor: pointer;
+                            }
+                            Text {
+                                text: r.title;
+                                color: i == palette-idx ? #ffffff : #cfd8dc;
+                                vertical-alignment: center;
+                                overflow: elide;
+                                horizontal-stretch: 1;
+                            }
+                            Text {
+                                text: r.group;
+                                color: #66707a;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+                Text {
+                    text: "Enter run · Esc close · ↑/↓ select";
+                    color: #55606a;
+                    font-size: 10px;
                 }
             }
         }
