@@ -62,6 +62,7 @@ hardware modes, agent memories. See TUI.
 | Prompt history (up/down recall)        | done    | core `prompt_history` JSONL store (cap 50, dedupe, corrupt-line heal) + `host::record_prompt/load_prompt_history`; Slint ↑/↓ cycling with draft restore |
 | Model catalog (models.dev)             | done    | Bundled snapshot (`catalog_snapshot.json`, 12 OpenAI-compat providers, ~650 models) with capabilities/limits/pricing; `prism_core::catalog` (newest non-deprecated default, deprecated-last sorting); Slint picker falls back to catalog when cache empty; model hint shows "name · 128k ctx · tools/reasoning"; regen via `script/update-catalog.py` |
 | Command palette (Ctrl+K)               | done    | core `commands` registry (21 commands, 5 groups, namespaced ids, filter fn); Slint palette popup with live filter, ↑/↓ + Enter, click-to-run; doubles as model switcher (`model:<id>` rows); dispatch maps ids onto existing callbacks |
+| Custom providers (config-driven)       | done    | `Settings.custom_providers` — canonical alias (clone built-in defaults, override base URL) or bare OpenAI-compat endpoint; `resolve_provider` unifies built-in/alias/bare for base URL, needs-key, label, env; key precedence stored > custom env > canonical env; Slint add/remove UI + combined dropdown; 6 settings tests |
 | Agent features (tools/permissions/RAG) | planned | Stays per-surface until core proven (single-core plan scope)                                   |
 
 ## CLI (apps/cli)

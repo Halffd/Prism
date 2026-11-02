@@ -53,6 +53,50 @@ impl HardwareSettings {
     }
 }
 
+/// User-defined provider (opencode `ConfigProvider` pattern, trimmed
+/// to what the OpenAI-compat transport needs). Two shapes:
+///
+/// - **Canonical alias**: `canonical` names a built-in provider; the
+///   custom entry clones its defaults (label, default model) and only
+///   overrides the base URL / headers. Good for "my OpenRouter proxy".
+/// - **Bare endpoint**: no canonical; `label` + `base_url` describe a
+///   generic OpenAI-compatible server (LM Studio, vLLM, a gateway).
+///
+/// `models` overlays per-model metadata (currently default-model hint
+/// list); unknown ids are ignored.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ConfigProvider {
+    /// Built-in provider id this entry is an alias of (empty = bare).
+    pub canonical: String,
+    /// Display label (palette/dropdown). Empty for aliases = reuse
+    /// the canonical provider's label + " (custom)".
+    pub label: String,
+    /// OpenAI-compatible base URL (no trailing slash).
+    pub base_url: String,
+    /// Static headers merged into every request to this provider.
+    pub headers: HashMap<String, String>,
+    /// Env-var names that may carry the key (checked in order when no
+    /// stored key). Empty = none.
+    pub env: Vec<String>,
+    /// Per-model display-name overrides / hints. Not yet dispatched
+    /// into requests; reserved so the schema is stable.
+    pub models: HashMap<String, String>,
+}
+
+impl Default for ConfigProvider {
+    fn default() -> Self {
+        ConfigProvider {
+            canonical: String::new(),
+            label: String::new(),
+            base_url: String::new(),
+            headers: HashMap::new(),
+            env: Vec::new(),
+            models: HashMap::new(),
+        }
+    }
+}
+
 /// Full application settings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -90,6 +134,10 @@ pub struct Settings {
     pub prism_api_url: String,
     /// Bearer JWT for the Prism API server (server mode).
     pub prism_api_token: String,
+    /// User-defined providers (opencode `canonical` pattern): alias a
+    /// built-in provider onto a custom base URL, or add a bare
+    /// OpenAI-compatible endpoint. Keyed by provider id.
+    pub custom_providers: HashMap<String, ConfigProvider>,
 }
 
 impl Default for Settings {
@@ -112,6 +160,7 @@ impl Default for Settings {
             local_base_url: "http://localhost:11434/v1".into(),
             prism_api_url: "http://localhost:3000".into(),
             prism_api_token: String::new(),
+            custom_providers: HashMap::new(),
         }
     }
 }
@@ -120,18 +169,114 @@ impl Settings {
     /// Key for the given provider (per-provider map; legacy `api_key`
     /// applies when the map has no entry — e.g. just after migration).
     /// Falls back to the provider's environment variables when the user
-    /// has not stored a key (see `providers::resolve_key`).
+    /// has not stored a key. Works for built-in AND custom providers
+    /// (custom `env` list consulted through the resolver).
     pub fn key_for(&self, provider: &str) -> String {
         let stored = self
             .provider_keys
             .get(provider)
             .cloned()
             .unwrap_or_else(|| self.api_key.clone());
+        if let Some(custom) = self.custom_providers.get(provider) {
+            // Custom: stored key wins, then custom env vars in declared
+            // order, then the canonical provider's env vars.
+            let stored = stored.trim().to_string();
+            if !stored.is_empty() {
+                return stored;
+            }
+            for name in &custom.env {
+                if let Ok(v) = std::env::var(name) {
+                    let v = v.trim();
+                    if !v.is_empty() {
+                        return v.to_string();
+                    }
+                }
+            }
+            if !custom.canonical.is_empty() {
+                if let Some(def) = crate::providers::find(&custom.canonical) {
+                    return crate::providers::env_key(def).unwrap_or_default();
+                }
+            }
+            return String::new();
+        }
         match crate::providers::find(provider) {
             Some(def) => crate::providers::resolve_key(&stored, def),
             None => stored,
         }
     }
+
+    /// Resolve any provider id into a concrete connection spec:
+    /// built-in table entry, custom alias (canonical defaults + own
+    /// base URL/headers), or bare custom endpoint. `None` = unknown id.
+    pub fn resolve_provider(&self, id: &str) -> Option<ResolvedProvider> {
+        if let Some(custom) = self.custom_providers.get(id) {
+            let (label, default_model, needs_key, env_key) = match
+                crate::providers::find(&custom.canonical)
+            {
+                Some(def) => (
+                    if custom.label.is_empty() {
+                        format!("{} (custom)", def.label)
+                    } else {
+                        custom.label.clone()
+                    },
+                    def.default_model.to_string(),
+                    def.needs_key,
+                    def.env.to_vec(),
+                ),
+                None => (
+                    if custom.label.is_empty() { id.to_string() } else { custom.label.clone() },
+                    String::new(),
+                    true,
+                    Vec::new(),
+                ),
+            };
+            return Some(ResolvedProvider {
+                id: id.to_string(),
+                label,
+                base_url: custom.base_url.trim_end_matches('/').to_string(),
+                default_model,
+                needs_key,
+                env: env_key.into_iter().map(String::from).collect(),
+                headers: custom.headers.clone(),
+            });
+        }
+        crate::providers::find(id).map(|def| ResolvedProvider {
+            id: def.id.to_string(),
+            label: def.label.to_string(),
+            base_url: def.base_url.to_string(),
+            default_model: def.default_model.to_string(),
+            needs_key: def.needs_key,
+            env: def.env.iter().map(|s| s.to_string()).collect(),
+            headers: HashMap::new(),
+        })
+    }
+
+    /// All selectable provider ids: built-ins first, then custom ids.
+    pub fn all_provider_ids(&self) -> Vec<String> {
+        let mut v: Vec<String> = crate::providers::PROVIDERS
+            .iter()
+            .map(|p| p.id.to_string())
+            .collect();
+        v.extend(self.custom_providers.keys().cloned());
+        v
+    }
+}
+
+/// Fully-resolved provider: what a request needs, regardless of whether
+/// the id came from the static table or `settings.custom_providers`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedProvider {
+    pub id: String,
+    pub label: String,
+    /// OpenAI-compatible base URL, no trailing slash.
+    pub base_url: String,
+    /// Default model id (empty = server decides, e.g. llama.cpp).
+    pub default_model: String,
+    pub needs_key: bool,
+    /// Env-var names that may carry the key, in preference order.
+    pub env: Vec<String>,
+    /// Static headers merged into every request.
+    pub headers: HashMap<String, String>,
 }
 
 /// Migrate legacy settings: a non-empty top-level `api_key` moves into
@@ -322,4 +467,104 @@ mod tests {
         hw.context_tokens = Some(4096);
         assert!(hw.has_overrides());
     }
+    #[test]
+    fn custom_alias_clones_canonical_defaults() {
+        let mut s = Settings::default();
+        s.custom_providers.insert(
+            "my-proxy".into(),
+            ConfigProvider {
+                canonical: "openrouter".into(),
+                base_url: "https://myproxy.example/v1".into(),
+                ..Default::default()
+            },
+        );
+        let r = s.resolve_provider("my-proxy").unwrap();
+        assert_eq!(r.id, "my-proxy");
+        assert_eq!(r.base_url, "https://myproxy.example/v1");
+        assert_eq!(r.default_model, "openai/gpt-4o-mini");
+        assert!(r.needs_key);
+        assert_eq!(r.label, "OpenRouter (custom)");
+        assert!(r.headers.is_empty());
+    }
+
+    #[test]
+    fn custom_bare_endpoint_is_openai_generic() {
+        let mut s = Settings::default();
+        s.custom_providers.insert(
+            "lmstudio".into(),
+            ConfigProvider {
+                label: "LM Studio".into(),
+                base_url: "http://localhost:1234/v1/".into(),
+                ..Default::default()
+            },
+        );
+        let r = s.resolve_provider("lmstudio").unwrap();
+        assert_eq!(r.base_url, "http://localhost:1234/v1");
+        assert_eq!(r.default_model, "");
+        assert_eq!(r.label, "LM Studio");
+    }
+
+    #[test]
+    fn custom_env_and_stored_key_precedence() {
+        let mut s = Settings::default();
+        s.custom_providers.insert(
+            "gw".into(),
+            ConfigProvider {
+                base_url: "https://gw.test/v1".into(),
+                env: vec!["PRISM_TEST_GW_KEY".into()],
+                canonical: "openai".into(),
+                ..Default::default()
+            },
+        );
+        std::env::set_var("PRISM_TEST_GW_KEY", "gw-env");
+        assert_eq!(s.key_for("gw"), "gw-env");
+        s.provider_keys.insert("gw".into(), "stored".into());
+        assert_eq!(s.key_for("gw"), "stored");
+        std::env::remove_var("PRISM_TEST_GW_KEY");
+        assert_eq!(s.key_for("gw"), "stored");
+    }
+
+    #[test]
+    fn builtin_resolution_unchanged() {
+        let s = Settings::default();
+        let r = s.resolve_provider("openai").unwrap();
+        assert_eq!(r.base_url, "https://api.openai.com/v1");
+        assert!(r.headers.is_empty());
+        assert!(s.resolve_provider("nope").is_none());
+    }
+
+    #[test]
+    fn custom_providers_roundtrip_settings_json() {
+        let mut s = Settings::default();
+        s.custom_providers.insert(
+            "vllm".into(),
+            ConfigProvider {
+                label: "vLLM".into(),
+                base_url: "http://10.0.0.5:8000/v1".into(),
+                headers: [("X-Tenant".to_string(), "a".to_string())]
+                    .into_iter()
+                    .collect(),
+                env: vec!["VLLM_KEY".into()],
+                ..Default::default()
+            },
+        );
+        let json = serde_json::to_string(&s).unwrap();
+        let back: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.custom_providers["vllm"].base_url, "http://10.0.0.5:8000/v1");
+        assert_eq!(back.custom_providers["vllm"].headers["X-Tenant"], "a");
+    }
+
+    #[test]
+    fn all_provider_ids_includes_custom() {
+        let mut s = Settings::default();
+        s.custom_providers.insert(
+            "gw2".into(),
+            ConfigProvider { base_url: "https://x/v1".into(), ..Default::default() },
+        );
+        let ids = s.all_provider_ids();
+        assert!(ids.contains(&"openai".to_string()));
+        assert!(ids.contains(&"gw2".to_string()));
+        assert_eq!(ids.last().unwrap(), "gw2");
+    }
+
 }

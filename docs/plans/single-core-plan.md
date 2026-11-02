@@ -236,6 +236,26 @@ Adopted from the opencode survey (features #1 of the ranked list):
   schema decision), keybinding remaps, fuzzy scoring (substring is
   enough at 21 entries).
 
+## Custom providers (2026-11-02, opencode survey #4)
+
+- **Schema**: `Settings.custom_providers: HashMap<String,
+  ConfigProvider>` with `ConfigProvider { canonical, label, base_url,
+  headers, env, models }` (serde-defaulted, roundtrip-tested). Two
+  shapes: canonical alias (clone a built-in's defaults, override the
+  base URL — "my OpenRouter proxy") or bare endpoint (LM Studio, vLLM,
+  a gateway — label required or the id is used).
+- **Resolution**: `Settings::resolve_provider(id) -> ResolvedProvider`
+  unifies built-in / alias / bare into one spec (base_url, label,
+  default_model, needs_key, env, headers). `send()`, `fetch_models`,
+  provider dropdown all go through it. Key precedence: stored key >
+  custom `env[]` > canonical provider's env.
+- **Slint UI**: settings panel "Custom providers" — id + canonical
+  dropdown ("(bare endpoint)" or a built-in) + base URL, add/remove,
+  combined provider dropdown refreshed live.
+- Deferred: per-model request-body/limit overrides (schema field
+  `models` reserved), headers UI (schema-supported, no input yet),
+  editing existing entries (remove + re-add).
+
 ## Service-worker note (extension)
 
 The MV3 background service worker imports the core (it relays

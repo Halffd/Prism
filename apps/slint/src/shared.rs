@@ -129,15 +129,63 @@ impl State {
     }
 }
 
+impl State {
+    /// Dropdown labels: built-ins then custom ("Label (custom)").
+    pub fn provider_labels(&self) -> Vec<SharedString> {
+        let mut v: Vec<SharedString> = PROVIDERS
+            .iter()
+            .map(|p| SharedString::from(p.label))
+            .collect();
+        for (id, cp) in &self.settings.custom_providers {
+            let label = if cp.label.is_empty() {
+                match prism_core::providers::find(&cp.canonical) {
+                    Some(def) => format!("{} (custom)", def.label),
+                    None => id.clone(),
+                }
+            } else {
+                cp.label.clone()
+            };
+            v.push(SharedString::from(label));
+        }
+        v
+    }
+
+    /// Provider id at a dropdown index (mirrors `provider_labels`).
+    pub fn provider_id_at(&self, idx: usize) -> Option<String> {
+        if idx < PROVIDERS.len() {
+            return Some(PROVIDERS[idx].id.to_string());
+        }
+        self.settings
+            .custom_providers
+            .keys()
+            .nth(idx - PROVIDERS.len())
+            .cloned()
+    }
+}
+
 // All the functions previously in main.rs, shared by desktop and Android.
 
 pub fn effective_model(settings: &Settings) -> String {
     if !settings.model.trim().is_empty() {
-        settings.model.trim().to_string()
-    } else {
-        providers::find(&settings.provider)
+        return settings.model.trim().to_string();
+    }
+    match settings.resolve_provider(&settings.provider) {
+        Some(r) => {
+            if !r.default_model.is_empty() {
+                return r.default_model;
+            }
+            // Bare custom endpoint without a default: newest non-deprecated
+            // catalog entry when the id happens to be known, else empty.
+            catalog::snapshot()
+                .providers
+                .get(&settings.provider)
+                .and_then(|p| p.default_model())
+                .unwrap_or("")
+                .to_string()
+        }
+        None => providers::find(&settings.provider)
             .map(|p| p.default_model.to_string())
-            .unwrap_or_default()
+            .unwrap_or_default(),
     }
 }
 
@@ -235,12 +283,15 @@ pub fn fetch_models(ui: &AppWindow, state: &Rc<RefCell<State>>) {
         let base_url = if provider == "ollama" {
             st.settings.local_base_url.trim().to_string()
         } else {
-            providers::find(&provider)
-                .map(|p| p.base_url.to_string())
+            st.settings
+                .resolve_provider(&provider)
+                .map(|r| r.base_url)
                 .unwrap_or_default()
         };
-        let needs_key = providers::find(&provider)
-            .map(|p| p.needs_key)
+        let needs_key = st
+            .settings
+            .resolve_provider(&provider)
+            .map(|r| r.needs_key)
             .unwrap_or(false);
         if base_url.is_empty() || (needs_key && key.trim().is_empty()) {
             (
@@ -266,6 +317,96 @@ pub fn fetch_models(ui: &AppWindow, state: &Rc<RefCell<State>>) {
         },
         tx,
     );
+}
+
+// ---- custom providers ----
+
+fn refresh_custom_provider_rows(ui: &AppWindow, settings: &Settings) {
+    let rows: Vec<ProviderRow> = settings
+        .custom_providers
+        .iter()
+        .map(|(id, cp)| {
+            let label = if cp.label.is_empty() {
+                match prism_core::providers::find(&cp.canonical) {
+                    Some(def) => format!("{} (custom)", def.label),
+                    None => id.clone(),
+                }
+            } else {
+                cp.label.clone()
+            };
+            ProviderRow { id: id.into(), label: label.into() }
+        })
+        .collect();
+    ui.set_custom_provider_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
+}
+
+fn add_custom_provider(ui: &AppWindow, state: &Rc<RefCell<State>>) {
+    let id = ui.get_new_provider_id().trim().to_string();
+    let url = ui.get_new_provider_url().trim().trim_end_matches('/').to_string();
+    if id.is_empty() || url.is_empty() {
+        ui.set_settings_status("provider id and base URL required".into());
+        return;
+    }
+    if prism_core::providers::find(&id).is_some() {
+        ui.set_settings_status(format!("'{id}' is a built-in provider").into());
+        return;
+    }
+    let canonical_idx = ui.get_new_provider_canonical_idx();
+    let canonical = if canonical_idx <= 0 {
+        String::new()
+    } else {
+        prism_core::providers::PROVIDERS
+            .get(canonical_idx as usize - 1)
+            .map(|p| p.id.to_string())
+            .unwrap_or_default()
+    };
+    {
+        let mut st = state.borrow_mut();
+        st.settings.custom_providers.insert(
+            id.clone(),
+            prism_core::settings::ConfigProvider {
+                canonical,
+                base_url: url,
+                ..Default::default()
+            },
+        );
+        let labels = st.provider_labels();
+        let total = prism_core::providers::PROVIDERS.len() + st.settings.custom_providers.len();
+        let pos = (0..total)
+            .find(|&i| st.provider_id_at(i).as_deref() == Some(id.as_str()))
+            .unwrap_or(0);
+        drop(st);
+        refresh_custom_provider_rows(ui, &state.borrow().settings);
+        ui.set_provider_labels(ModelRc::from(Rc::new(VecModel::from(labels))));
+        ui.set_provider_idx(pos as i32);
+        ui.set_new_provider_id("".into());
+        ui.set_new_provider_url("".into());
+        ui.set_settings_status(format!("provider '{id}' added").into());
+    }
+}
+
+fn remove_custom_provider(ui: &AppWindow, state: &Rc<RefCell<State>>, id: &str) {
+    {
+        let mut st = state.borrow_mut();
+        st.settings.custom_providers.remove(id);
+        let labels = st.provider_labels();
+        let was_current = st.settings.provider == id;
+        if was_current {
+            st.settings.provider = "openai".into();
+        }
+        let total = prism_core::providers::PROVIDERS.len() + st.settings.custom_providers.len();
+        let pos = (0..total)
+            .find(|&i| st.provider_id_at(i).as_deref() == Some(st.settings.provider.as_str()))
+            .unwrap_or(0);
+        drop(st);
+        refresh_custom_provider_rows(ui, &state.borrow().settings);
+        ui.set_provider_labels(ModelRc::from(Rc::new(VecModel::from(labels))));
+        ui.set_provider_idx(pos as i32);
+        if was_current {
+            ui.set_provider("openai".into());
+        }
+        ui.set_settings_status(format!("provider '{id}' removed").into());
+    }
 }
 
 // ---- command palette ----
@@ -718,11 +859,14 @@ pub fn send(
 
     match st.settings.connection {
         Connection::Direct => {
-            let def = providers::find(&st.settings.provider);
-            let needs_key = def.map(|d| d.needs_key).unwrap_or(false);
+            let resolved = st.settings.resolve_provider(&st.settings.provider);
+            let needs_key = resolved.as_ref().map(|r| r.needs_key).unwrap_or(false);
             let key = st.settings.key_for(&st.settings.provider);
             if needs_key && key.trim().is_empty() {
-                let label = def.map(|d| d.label).unwrap_or("provider").to_string();
+                let label = resolved
+                    .as_ref()
+                    .map(|r| r.label.clone())
+                    .unwrap_or_else(|| "provider".into());
                 drop(st);
                 push_system(
                     ui,
@@ -769,7 +913,7 @@ pub fn send(
                 drop(st);
                 host::spawn_ollama_chat(req, tx);
             } else {
-                let base_url = def.map(|d| d.base_url.to_string()).unwrap_or_default();
+                let base_url = resolved.map(|r| r.base_url).unwrap_or_default();
                 let req = StreamRequest {
                     base_url,
                     api_key: key.trim().to_string(),
@@ -884,18 +1028,23 @@ pub fn run_ui() {
     {
         let st = state.borrow();
         ui.set_provider_labels(ModelRc::from(Rc::new(VecModel::from(
-            PROVIDERS.iter().map(|p| SharedString::from(p.label)).collect::<Vec<_>>(),
+            st.provider_labels(),
         ))));
         ui.set_compute_labels(ModelRc::from(Rc::new(VecModel::from(
             COMPUTE_LEVELS.iter().map(|c| SharedString::from(*c)).collect::<Vec<_>>(),
         ))));
+        ui.set_canonical_labels(ModelRc::from(Rc::new(VecModel::from(
+            std::iter::once(SharedString::from("(bare endpoint)"))
+                .chain(PROVIDERS.iter().map(|p| SharedString::from(p.label)))
+                .collect::<Vec<_>>(),
+        ))));
+        refresh_custom_provider_rows(&ui, &st.settings);
         ui.set_provider(st.settings.provider.as_str().into());
-        ui.set_provider_idx(
-            PROVIDERS
-                .iter()
-                .position(|p| p.id == st.settings.provider)
-                .unwrap_or(0) as i32,
-        );
+        let total = PROVIDERS.len() + st.settings.custom_providers.len();
+        let pos = (0..total)
+            .find(|&i| st.provider_id_at(i).as_deref() == Some(st.settings.provider.as_str()))
+            .unwrap_or(0);
+        ui.set_provider_idx(pos as i32);
         ui.set_connection_idx(match st.settings.connection {
             Connection::Direct => 0,
             Connection::PrismApi => 1,
@@ -1007,6 +1156,22 @@ pub fn run_ui() {
         ui.on_palette_execute(move |id| {
             let Some(ui) = ui_w.upgrade() else { return };
             palette_execute(&ui, &state_c, &lines_c, &id.to_string());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_custom_provider_add(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            add_custom_provider(&ui, &state_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_custom_provider_remove(move |id| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            remove_custom_provider(&ui, &state_c, &id.to_string());
         });
     }
     {
@@ -1139,8 +1304,8 @@ pub fn run_ui() {
         ui.on_set_provider(move |i| {
             let Some(ui) = ui_w.upgrade() else { return };
             let mut st = state_c.borrow_mut();
-            if let Some(p) = PROVIDERS.get(i as usize) {
-                st.settings.provider = p.id.to_string();
+            if let Some(pid) = st.provider_id_at(i as usize) {
+                st.settings.provider = pid;
             }
             let (pid, hint, cm, local) = (
                 st.settings.provider.clone(),

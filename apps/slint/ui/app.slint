@@ -21,6 +21,11 @@ export struct KeyRow {
     key: string,
 }
 
+export struct ProviderRow {
+    id: string,
+    label: string,
+}
+
 export struct PaletteRow {
     id: string,       // dispatch id ("chat.new") or "model:<id>"
     title: string,    // display text
@@ -66,6 +71,12 @@ export component AppWindow inherits Window {
     in property <string> gpu-label;
     in property <string> ctx-label;
     in-out property <string> input-text;
+    // ---- custom providers ----
+    in-out property <string> new-provider-id;
+    in-out property <int> new-provider-canonical-idx: 0;
+    in-out property <string> new-provider-url;
+    in property <[string]> canonical-labels;
+    in property <[ProviderRow]> custom-provider-rows;
     // ---- command palette ----
     in-out property <bool> palette-open: false;
     in-out property <string> palette-query;
@@ -81,6 +92,8 @@ export component AppWindow inherits Window {
     callback palette-query-changed(string);
     callback palette-execute(string); // arg: PaletteRow.id
     callback palette-move(int);       // arg: index delta (+1/-1)
+    callback custom-provider-add();
+    callback custom-provider-remove(string);
     callback new-chat();
     callback open-chat(string);
     callback request-delete(string);
@@ -461,6 +474,39 @@ export component AppWindow inherits Window {
                         spacing: 8px;
                         Button { text: "Save settings"; clicked => { save-settings(); } }
                         Text { text: settings-status; color: #8b95a1; font-size: 11px; vertical-alignment: center; }
+                    }
+
+                    Text { text: "Custom providers"; color: #9fb0bd; font-weight: 700; }
+                    VerticalLayout {
+                        spacing: 4px;
+                        Text { text: "Add (id, alias, base URL)"; color: #8b95a1; font-size: 12px; }
+                        LineEdit {
+                            text <=> new-provider-id;
+                            placeholder-text: "id (e.g. my-proxy)";
+                        }
+                        ComboBox {
+                            model: canonical-labels;
+                            current-index <=> new-provider-canonical-idx;
+                        }
+                        LineEdit {
+                            text <=> new-provider-url;
+                            placeholder-text: "https://host/v1";
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Button {
+                                text: "Add provider";
+                                clicked => { custom-provider-add(); }
+                            }
+                        }
+                        for kv in custom-provider-rows : Rectangle {
+                            height: 30px;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text { text: kv.label; color: #cfd8dc; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                                Button { text: "x"; clicked => { custom-provider-remove(kv.id); } }
+                            }
+                        }
                     }
                 }
             }
