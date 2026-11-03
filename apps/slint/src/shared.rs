@@ -98,6 +98,10 @@ pub struct State {
     /// Input text saved when Up/Down cycling starts; restored when the
     /// user cycles forward past the newest entry.
     pub history_draft: Option<String>,
+    /// Prompts queued while streaming. Each is the prompt text.
+    pub prompt_queue: Vec<String>,
+    /// Whether a queued prompt is currently being processed (steered).
+    pub queue_processing: bool,
 }
 
 impl State {
@@ -125,6 +129,8 @@ impl State {
             ctx_idx,
             history_idx: None,
             history_draft: None,
+            prompt_queue: Vec::new(),
+            queue_processing: false,
         }
     }
 }
@@ -765,6 +771,14 @@ pub fn drain_events(
     }
     if finished {
         finalize_thinking(&mut st);
+        // If there are queued prompts, steer the next one immediately.
+        if !st.prompt_queue.is_empty() && !st.queue_processing {
+            st.queue_processing = true;
+            let next = st.prompt_queue.remove(0);
+            drop(st);
+            send(ui, state, lines_model, next);
+            return;
+        }
     }
     let (lines, streaming) = (st.lines.clone(), st.streaming);
     drop(st);
@@ -822,11 +836,20 @@ pub fn send(
         return;
     }
     let mut st = state.borrow_mut();
-    if st.streaming {
-        return;
-    }
     host::record_prompt(&content);
     st.history_idx = None;
+
+    if st.streaming {
+        // Queue instead of dropping — the user can keep typing.
+        st.prompt_queue.push(content);
+        push_system(
+            ui,
+            state,
+            lines_model,
+            "Queued (response in progress)".into(),
+        );
+        return;
+    }
 
     // Build the request from history BEFORE appending the new user
     // message and the assistant placeholder.

@@ -4,6 +4,49 @@ import { createContextProcessor } from '../services/context.service';
 import { LLMCoreService } from '../services/llm-core.service';
 import { AuthenticatedRequest } from '../middleware/auth';
 
+// SSE backpressure queue (opencode pattern: dropping queue, cap 4096)
+const MAX_QUEUE_SIZE = 4096;
+interface QueueEntry {
+  data: string;
+  resolve: () => void;
+  reject: (err: Error) => void;
+}
+const eventQueue: QueueEntry[] = [];
+let isProcessing = false;
+
+async function processQueue() {
+  if (isProcessing || eventQueue.length === 0) return;
+  isProcessing = true;
+  while (eventQueue.length > 0) {
+    const entry = eventQueue.shift()!;
+    try {
+      entry.resolve();
+    } catch {
+      entry.reject(new Error('Write failed'));
+    }
+  }
+  isProcessing = false;
+}
+
+function enqueueWrite(res: Response, data: string): Promise<void> {
+  if (eventQueue.length >= MAX_QUEUE_SIZE) {
+    // Drop oldest non-error entry (opencode behavior)
+    const idx = eventQueue.findIndex(e => !e.data.includes('"error"'));
+    if (idx >= 0) eventQueue.splice(idx, 1);
+    else eventQueue.shift();
+    // Send overflow error frame
+    res.write(
+      `data: ${JSON.stringify({ error: 'Subscriber overflow; oldest frame dropped' })}
+
+`,
+    );
+  }
+  return new Promise((resolve, reject) => {
+    eventQueue.push({ data, resolve, reject });
+    processQueue();
+  }
+}
+
 // Initialize services
 const contextProcessor = createContextProcessor();
 // Initialize LLM service with configuration from environment.
