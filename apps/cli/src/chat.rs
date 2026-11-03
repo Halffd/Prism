@@ -24,11 +24,14 @@ pub fn start_job(
     let (stx, srx) = std::sync::mpsc::channel::<StreamEvent>();
     match settings.connection {
         Connection::Direct => {
-            let def = providers::find(&settings.provider);
-            let needs_key = def.map(|d| d.needs_key).unwrap_or(false);
+            let resolved = settings.resolve_provider(&settings.provider);
+            let needs_key = resolved.as_ref().map(|r| r.needs_key).unwrap_or(false);
             let key = settings.key_for(&settings.provider);
             if needs_key && key.trim().is_empty() {
-                let label = def.map(|d| d.label).unwrap_or("provider");
+                let label = resolved
+                    .as_ref()
+                    .map(|r| r.label.as_str())
+                    .unwrap_or("provider");
                 return Err(format!("API key required for {label} — /key <key>"));
             }
             if !settings.system_prompt.trim().is_empty() {
@@ -64,7 +67,10 @@ pub fn start_job(
                 };
                 host::spawn_ollama_chat(req, stx);
             } else {
-                let base_url = def.map(|d| d.base_url.to_string()).unwrap_or_default();
+                let base_url = resolved
+                    .as_ref()
+                    .map(|r| r.base_url.clone())
+                    .unwrap_or_default();
                 let req = StreamRequest {
                     base_url,
                     api_key: key.trim().to_string(),

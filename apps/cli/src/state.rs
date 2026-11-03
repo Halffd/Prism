@@ -11,7 +11,7 @@ use prism_core::client::StreamEvent;
 use prism_core::conversations::{self, Conversation, ConversationMeta, StoredMessage};
 use prism_core::host;
 use prism_core::providers;
-use prism_core::settings::Connection;
+use prism_core::settings::{self, Connection, Settings};
 use prism_core::thinking;
 use std::collections::VecDeque;
 use std::time::Instant;
@@ -107,6 +107,10 @@ impl App {
                 app.selected = 0;
             }
         }
+        let total = providers::PROVIDERS.len() + app.settings.custom_providers.len();
+        let pos = (0..total)
+            .find(|&i| app.provider_id_at(i).as_deref() == Some(app.settings.provider.as_str()))
+            .unwrap_or(0);
         app.status = format!(
             "ready · {} · {}",
             app.settings.provider,
@@ -115,13 +119,57 @@ impl App {
         app
     }
 
+/// Dropdown labels: built-ins then custom ("Label (custom)").
+    pub fn provider_labels(&self) -> Vec<String> {
+        let mut v: Vec<String> = providers::PROVIDERS
+            .iter()
+            .map(|p| p.label.to_string())
+            .collect();
+        for (id, cp) in &self.settings.custom_providers {
+            let label = if cp.label.is_empty() {
+                match prism_core::providers::find(&cp.canonical) {
+                    Some(def) => format!("{} (custom)", def.label),
+                    None => id.clone(),
+                }
+            } else {
+                cp.label.clone()
+            };
+            v.push(label);
+        }
+        v
+    }
+
+    /// Provider id at a dropdown index (mirrors `provider_labels`).
+    pub fn provider_id_at(&self, idx: usize) -> Option<String> {
+        if idx < providers::PROVIDERS.len() {
+            return Some(providers::PROVIDERS[idx].id.to_string());
+        }
+        self.settings
+            .custom_providers
+            .keys()
+            .nth(idx - providers::PROVIDERS.len())
+            .cloned()
+    }
+
     pub fn effective_model(&self) -> String {
         if !self.settings.model.trim().is_empty() {
-            self.settings.model.trim().to_string()
-        } else {
-            providers::find(&self.settings.provider)
+            return self.settings.model.trim().to_string();
+        }
+        match self.settings.resolve_provider(&self.settings.provider) {
+            Some(r) => {
+                if !r.default_model.is_empty() {
+                    return r.default_model;
+                }
+                prism_core::catalog::snapshot()
+                    .providers
+                    .get(&self.settings.provider)
+                    .and_then(|p| p.default_model())
+                    .unwrap_or("")
+                    .to_string()
+            }
+            None => providers::find(&self.settings.provider)
                 .map(|p| p.default_model.to_string())
-                .unwrap_or_default()
+                .unwrap_or_default(),
         }
     }
 
