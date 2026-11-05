@@ -1,5 +1,12 @@
 import { UnifiedAIClient } from '@prism/api-client';
-import type { Message, ContextData, AIConfig } from '@prism/shared-types';
+import type {
+  Message,
+  ContextData,
+  AIConfig,
+  BackgroundRequest,
+} from '@prism/shared-types';
+import { BadgeController } from './badge-state';
+import type { PrismBadgeState } from './badge-state';
 
 const defaultAIConfig: AIConfig = {
   provider: 'prism-api',
@@ -8,100 +15,116 @@ const defaultAIConfig: AIConfig = {
 
 let client = new UnifiedAIClient({ aiConfig: defaultAIConfig });
 
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.type === 'SEND_MESSAGE') {
-    handleSendMessage(request.data)
-      .then(sendResponse)
-      .catch((error) => sendResponse({ error: error.message }));
-    return true;
-  }
+/** Single owner of the action badge for the whole service worker. */
+const badge = new BadgeController();
 
-  if (request.type === 'GET_CONTEXT') {
-    handleGetContext(sender.tab?.id)
-      .then(sendResponse)
-      .catch((error) => sendResponse({ error: error.message }));
-    return true;
-  }
+chrome.runtime.onMessage.addListener(
+  (request: BackgroundRequest, sender, sendResponse): boolean | void => {
+    if (request.type === 'SEND_MESSAGE') {
+      handleSendMessage(request.data)
+        .then(sendResponse)
+        .catch((error) => sendResponse({ error: error.message }));
+      return true;
+    }
 
-  if (request.type === 'UPDATE_AI_CONFIG') {
-    updateAIConfig(request.data)
-      .then(sendResponse)
-      .catch((error) => sendResponse({ error: error.message }));
-    return true;
-  }
+    if (request.type === 'GET_CONTEXT') {
+      handleGetContext(sender.tab?.id)
+        .then(sendResponse)
+        .catch((error) => sendResponse({ error: error.message }));
+      return true;
+    }
 
-  if (request.type === 'GET_AI_CONFIG') {
-    getAIConfig()
-      .then(sendResponse)
-      .catch((error) => sendResponse({ error: error.message }));
-    return true;
-  }
+    if (request.type === 'UPDATE_AI_CONFIG') {
+      updateAIConfig(request.data)
+        .then(sendResponse)
+        .catch((error) => sendResponse({ error: error.message }));
+      return true;
+    }
 
-  if (request.type === 'OPEN_CHAT') {
-    chrome.storage.local
-      .get(['displaySettings'])
-      .then((result) => {
-        const settings = result.displaySettings;
-        const displayMode = settings?.popupDisplayMode || 'popup';
+    if (request.type === 'GET_AI_CONFIG') {
+      getAIConfig()
+        .then(sendResponse)
+        .catch((error) => sendResponse({ error: error.message }));
+      return true;
+    }
 
-        if (displayMode === 'iframe') {
-          chrome.tabs
-            .query({ active: true, currentWindow: true })
-            .then((tabs) => {
-              if (tabs[0]?.id) {
-                Promise.resolve(
-                  chrome.tabs.sendMessage(tabs[0].id, {
-                    type: 'INJECT_IFRAME_CHAT',
-                  }),
-                ).catch(() => {
+    if (request.type === 'OPEN_CHAT') {
+      chrome.storage.local
+        .get(['displaySettings'])
+        .then((result) => {
+          const settings = result.displaySettings;
+          const displayMode = settings?.popupDisplayMode || 'popup';
+
+          if (displayMode === 'iframe') {
+            chrome.tabs
+              .query({ active: true, currentWindow: true })
+              .then((tabs) => {
+                if (tabs[0]?.id) {
+                  Promise.resolve(
+                    chrome.tabs.sendMessage(tabs[0].id, {
+                      type: 'INJECT_IFRAME_CHAT',
+                    }),
+                  ).catch(() => {
+                    openChatInNewTab();
+                  });
+                } else {
                   openChatInNewTab();
-                });
-              } else {
-                openChatInNewTab();
-              }
-            });
-        } else if (displayMode === 'newtab') {
-          openChatInNewTab();
-        } else {
-          chrome.action.openPopup().catch(() => {
+                }
+              });
+          } else if (displayMode === 'newtab') {
             openChatInNewTab();
-          });
-        }
-      })
-      .catch(() => {
+          } else {
+            chrome.action.openPopup().catch(() => {
+              openChatInNewTab();
+            });
+          }
+        })
+        .catch(() => {
+          openChatInNewTab();
+        });
+      return false;
+    }
+
+    if (request.type === 'INSERT_PROMPT_SHORTCUT') {
+      Promise.resolve(
+        chrome.runtime.sendMessage({
+          type: 'INSERT_PROMPT_CONTENT',
+          content: request.content,
+        }),
+      ).catch(() => {
+        chrome.storage.local.set({ pendingPromptContent: request.content });
         openChatInNewTab();
       });
-    return false;
-  }
+      return false;
+    }
 
-  if (request.type === 'INSERT_PROMPT_SHORTCUT') {
-    Promise.resolve(
-      chrome.runtime.sendMessage({
-        type: 'INSERT_PROMPT_CONTENT',
-        content: request.content,
-      }),
-    ).catch(() => {
-      chrome.storage.local.set({ pendingPromptContent: request.content });
-      openChatInNewTab();
-    });
-    return false;
-  }
+    if (request.type === 'TOGGLE_MODE') {
+      const modeStateKey = `mode_${request.mode}`;
+      chrome.storage.local.set({ [modeStateKey]: request.value });
+      Promise.resolve(
+        chrome.runtime.sendMessage({
+          type: 'MODE_TOGGLED',
+          mode: request.mode,
+          value: request.value,
+        }),
+      ).catch(() => {});
+      return false;
+    }
 
-  if (request.type === 'TOGGLE_MODE') {
-    const modeStateKey = `mode_${request.mode}`;
-    chrome.storage.local.set({ [modeStateKey]: request.value });
-    Promise.resolve(
-      chrome.runtime.sendMessage({
-        type: 'MODE_TOGGLED',
-        mode: request.mode,
-        value: request.value,
-      }),
-    ).catch(() => {});
-    return false;
-  }
+    if (request.type === 'SET_BADGE_STATE') {
+      const state: PrismBadgeState = request.state;
+      if (state === 'busy') {
+        badge.setRunningCount(request.count ?? 1);
+      } else {
+        badge.setState(state);
+      }
+      sendResponse({ success: true });
+      return true;
+    }
 
-  return false;
-});
+    return false;
+  },
+);
 
 function openChatInNewTab(query?: string) {
   const chatUrl = query
@@ -189,6 +212,8 @@ async function getHistory(): Promise<Message[]> {
 }
 
 chrome.runtime.onInstalled.addListener(() => {
+  badge.setState('idle');
+
   chrome.contextMenus.create({
     id: 'prism-main',
     title: 'Prism AI Assistant',
@@ -300,6 +325,32 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 chrome.commands.onCommand.addListener(async (command) => {
   if (command === 'open-chat-tab') {
     openChatInNewTab();
+  }
+});
+
+/**
+ * A page is usable when a content script is reachable on it. The content
+ * script answers a PING message; when the message cannot be delivered the
+ * extension cannot operate there and the badge says so.
+ */
+async function refreshBadgeForTab(tabId: number): Promise<void> {
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: 'PING' });
+    badge.setState('idle');
+  } catch {
+    badge.setState('disabled', {
+      title: 'Prism cannot run on this page',
+    });
+  }
+}
+
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  void refreshBadgeForTab(tabId);
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === 'complete') {
+    void refreshBadgeForTab(tabId);
   }
 });
 

@@ -228,3 +228,139 @@ pub fn build_api_chat_body(req_json: &str) -> String {
         }),
     )
 }
+
+// ---- agent loop (extension system) ------------------------------------
+
+use prism_core::agent::{run_agent, AgentResult, Permission, StepMessage, ToolRegistry};
+use std::cell::RefCell;
+use std::rc::Rc;
+
+/// A JS-registered tool: the host supplies `execute(input) -> string`.
+/// This is the extension point — surfaces register domain tools (page
+/// context, snippets, editor state) and the core loop dispatches them.
+#[wasm_bindgen]
+pub struct JsTool {
+    name: String,
+    description: String,
+    #[wasm_bindgen(skip_typescript)]
+    execute: js_sys::Function,
+}
+
+#[wasm_bindgen]
+impl JsTool {
+    /// `execute` must be a JS function `(input: string) => string`.
+    #[wasm_bindgen(constructor)]
+    pub fn new(name: String, description: String, execute: js_sys::Function) -> JsTool {
+        JsTool { name, description, execute }
+    }
+}
+
+impl prism_core::agent::Tool for JsTool {
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn description(&self) -> &str {
+        &self.description
+    }
+    fn execute(&self, input: &str) -> String {
+        let this = wasm_bindgen::JsValue::NULL;
+        let arg = wasm_bindgen::JsValue::from_str(input);
+        match self.execute.call1(&this, &arg) {
+            Ok(v) => v.as_string().unwrap_or_else(|| String::from("[tool] non-string result")),
+            Err(e) => format!("[{}] Error: {}", self.name, e.as_string().unwrap_or_default()),
+        }
+    }
+}
+
+/// A registry instance the JS host drives across steps.
+#[wasm_bindgen]
+pub struct AgentRegistry {
+    inner: Rc<RefCell<ToolRegistry>>,
+}
+
+#[wasm_bindgen]
+impl AgentRegistry {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> AgentRegistry {
+        let reg = ToolRegistry::new();
+        // Built-ins: deterministic calculator always useful; web search
+        // stub replaced when the host registers a real one under the
+        // same name (register overwrites).
+        reg.register(std::sync::Arc::new(prism_core::agent::CalculatorTool));
+        reg.register(std::sync::Arc::new(prism_core::agent::WebSearchStubTool));
+        AgentRegistry { inner: Rc::new(RefCell::new(reg)) }
+    }
+
+    /// Register (or replace) a tool. Extension point.
+    pub fn register(&self, tool: JsTool) {
+        self.inner.borrow_mut().register(std::sync::Arc::new(tool));
+    }
+
+    /// Set a tool's permission: "allow" | "deny" | "ask".
+    pub fn set_permission(&self, name: &str, level: &str) {
+        let level = match level {
+            "deny" => Permission::Deny,
+            "ask" => Permission::Ask,
+            _ => Permission::Allow,
+        };
+        self.inner.borrow_mut().set_permission(name, level);
+    }
+
+    /// Execute a tool directly (permission-gated). `ask_fn` is a JS
+    /// function `(toolName, input) => bool`.
+    pub fn execute(&self, name: &str, input: &str, ask_fn: js_sys::Function) -> String {
+        let ask = |tool: &str, input: &str| -> bool {
+            let this = wasm_bindgen::JsValue::NULL;
+            let r = ask_fn.call2(
+                &this,
+                &wasm_bindgen::JsValue::from_str(tool),
+                &wasm_bindgen::JsValue::from_str(input),
+            );
+            matches!(r, Ok(v) if v.is_truthy())
+        };
+        self.inner.borrow().execute(name, input, &ask)
+    }
+}
+
+/// One complete agent run. `llm_step` is a JS function
+/// `(system: string, historyJson: string) => string` returning the raw
+/// model response (throw/reject to signal an error). Returns JSON
+/// `AgentResult` (`{answer, steps, completed, error}`).
+#[wasm_bindgen]
+pub fn agent_run(
+    task: &str,
+    registry: &AgentRegistry,
+    llm_step: js_sys::Function,
+    max_steps: usize,
+) -> String {
+    let result: std::result::Result<AgentResult, String> = (|| {
+        let history: RefCell<Vec<StepMessage>> = RefCell::new(Vec::new());
+        let mut step_fn = |_system: &str, hist: &[StepMessage]| -> Result<String, String> {
+            let hist_json = serde_json::to_string(hist).unwrap_or_else(|_| "[]".into());
+            let this = wasm_bindgen::JsValue::NULL;
+            let r = llm_step.call2(
+                &this,
+                &wasm_bindgen::JsValue::from_str(_system),
+                &wasm_bindgen::JsValue::from_str(&hist_json),
+            );
+            match r {
+                Ok(v) => v
+                    .as_string()
+                    .ok_or_else(|| String::from("llm_step returned non-string")),
+                Err(e) => Err(e.as_string().unwrap_or_else(|| String::from("llm_step threw"))),
+            }
+        };
+        let _ = &history;
+        Ok(run_agent(
+            task,
+            &mut step_fn,
+            &registry.inner.borrow(),
+            max_steps,
+            &|_, _| false, // headless: ask-permission tools deny unless host flips to allow
+        ))
+    })();
+    match result {
+        Ok(r) => serde_json::to_string(&r).unwrap_or_else(|e| format!("{{\"error\":\"{e}\"}}")),
+        Err(e) => format!("{{\"completed\":false,\"error\":\"{e}\",\"answer\":\"\",\"steps\":[]}}"),
+    }
+}

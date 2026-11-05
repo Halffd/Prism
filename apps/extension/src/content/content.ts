@@ -2,6 +2,7 @@ import type {
   ContextData,
   ExtensionSettings,
   PopupDisplayMode,
+  ContentRequest,
 } from '@prism/shared-types';
 import {
   createIframe,
@@ -11,71 +12,157 @@ import {
 } from './iframe-manager';
 import { showToast, createFloatingButton } from './ui-controls';
 import { estimateTokenCount, isIgnoredElement } from './utils';
+import {
+  findActiveEditable,
+  findEditableHost,
+  isEditableTarget,
+  isInputElement,
+  isTextAreaElement,
+} from './editable-target';
+import { replaceRangeWithText } from './text-insertion';
+
+// The content script runs in every frame of the page. Only the top frame owns
+// the extension UI and answers page-level context requests; subframes keep
+// the editable/shortcut handling because editors often live inside iframes.
+const isTopFrame = window.top === window;
 
 // Default settings
 let currentDisplayMode: PopupDisplayMode = 'popup';
 let currentSidebarPosition: 'left' | 'right' = 'right';
 let currentSidebarWidth: number = 350;
 
+// True when a same-origin descendant frame currently owns the focus. Used to
+// let the focused frame answer selection requests instead of the top frame.
+function hasFocusedDescendantFrame(doc: Document): boolean {
+  const frames = doc.querySelectorAll('iframe, frame');
+
+  for (const frame of Array.from(frames)) {
+    let frameDocument: Document | null = null;
+    try {
+      frameDocument = (frame as HTMLIFrameElement).contentDocument;
+    } catch {
+      // Cross-origin frames are not reachable; ignore them.
+      continue;
+    }
+
+    if (!frameDocument) {
+      continue;
+    }
+
+    if (frameDocument.hasFocus() || hasFocusedDescendantFrame(frameDocument)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 // Listen for messages from background script
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log('Content script received message:', request); // Debug logging
+chrome.runtime.onMessage.addListener(
+  (request: ContentRequest, sender, sendResponse): boolean | void => {
+    console.log('Content script received message:', request); // Debug logging
 
-  if (request.type === 'EXTRACT_CONTEXT') {
-    const tokenLimit = request.pageContentTokenLimit || 20000;
-    const context = extractPageContext(tokenLimit);
-    sendResponse(context);
+    if (request.type === 'EXTRACT_CONTEXT') {
+      // Page context is a top-frame concern: subframes must not answer.
+      if (!isTopFrame) {
+        return false;
+      }
+      const tokenLimit = request.pageContentTokenLimit || 20000;
+      const context = extractPageContext(tokenLimit);
+      sendResponse(context);
+      return true;
+    }
+
+    if (request.type === 'GET_SELECTED_TEXT') {
+      const descendantHasFocus = hasFocusedDescendantFrame(document);
+
+      if (isTopFrame) {
+        // The top frame only answers when no same-origin descendant frame owns
+        // the focus; otherwise the focused frame answers with its own selection.
+        if (descendantHasFocus) {
+          return false;
+        }
+      } else if (!document.hasFocus()) {
+        // Subframes answer only while they are the focused frame.
+        return false;
+      }
+
+      const selection = window.getSelection();
+      const selectedText = selection ? selection.toString().trim() : '';
+      sendResponse({ text: selectedText, focused: document.hasFocus() });
+      return true;
+    }
+
+    if (request.type === 'GET_PAGE_CONTENTS') {
+      if (!isTopFrame) {
+        return false;
+      }
+      const content = getMainContent();
+      sendResponse({ content });
+      return true;
+    }
+
+    if (request.type === 'OPEN_CHAT') {
+      if (!isTopFrame) {
+        return false;
+      }
+      openChatInterface();
+      sendResponse({ success: true });
+      return true;
+    }
+
+    if (request.type === 'INJECT_IFRAME_CHAT') {
+      if (!isTopFrame) {
+        return false;
+      }
+      injectChatPopup();
+      sendResponse({ success: true });
+      return true;
+    }
+
+    if (request.type === 'UPDATE_DISPLAY_MODE') {
+      updateDisplaySettings(request.data);
+      if (!isTopFrame) {
+        return false;
+      }
+      sendResponse({ success: true });
+      return true;
+    }
+
+    if (request.type === 'GET_PAGE_CONTENTS_WITH_LIMIT') {
+      if (!isTopFrame) {
+        return false;
+      }
+      const content = getMainContentWithTokenLimit(request.tokenLimit || 20000);
+      sendResponse({ content });
+      return true;
+    }
+
+    if (request.type === 'PING') {
+      // The background service worker probes whether a content script is
+      // reachable on a tab. Every frame answers; the first response wins.
+      sendResponse({ success: true, url: window.location.href });
+      return true;
+    }
+
+    if (request.type === 'UPDATE_FONT_SCALE') {
+      // Font scaling applies to every frame of the page.
+      currentFontScale = Math.max(0.5, Math.min(8.0, request.scale));
+      applyFontScale();
+      return true;
+    }
+
+    // The union above is exhaustive, so anything reaching this point is a
+    // message the extension does not know (for example a message sent by
+    // another extension). Subframes stay silent.
+    console.warn('Unrecognized message type:', request);
+    if (!isTopFrame) {
+      return false;
+    }
+    sendResponse({ error: 'Unrecognized message type' });
     return true;
-  }
-
-  if (request.type === 'GET_SELECTED_TEXT') {
-    const selection = window.getSelection();
-    const selectedText = selection ? selection.toString().trim() : '';
-    sendResponse({ text: selectedText });
-    return true;
-  }
-
-  if (request.type === 'GET_PAGE_CONTENTS') {
-    const content = getMainContent();
-    sendResponse({ content });
-    return true;
-  }
-
-  if (request.type === 'OPEN_CHAT') {
-    openChatInterface();
-    sendResponse({ success: true });
-    return true;
-  }
-
-  if (request.type === 'INJECT_IFRAME_CHAT') {
-    injectChatPopup();
-    sendResponse({ success: true });
-    return true;
-  }
-
-  if (request.type === 'UPDATE_DISPLAY_MODE') {
-    updateDisplaySettings(request.data);
-    sendResponse({ success: true });
-    return true;
-  }
-
-  if (request.type === 'GET_PAGE_CONTENTS_WITH_LIMIT') {
-    const content = getMainContentWithTokenLimit(request.tokenLimit || 20000);
-    sendResponse({ content });
-    return true;
-  }
-
-  if (request.type === 'UPDATE_FONT_SCALE') {
-    currentFontScale = Math.max(0.5, Math.min(8.0, request.scale));
-    applyFontScale();
-    return true;
-  }
-
-  // Handle any unrecognized message types
-  console.warn('Unrecognized message type:', request.type);
-  sendResponse({ error: `Unrecognized message type: ${request.type}` });
-  return true;
-});
+  },
+);
 
 function updateDisplaySettings(settings: Partial<ExtensionSettings>) {
   if (settings.popupDisplayMode) {
@@ -417,6 +504,10 @@ function truncateToTokenLimit(text: string, tokenLimit: number): string {
 
 // Open chat interface based on current display mode
 async function openChatInterface() {
+  if (!isTopFrame) {
+    return;
+  }
+
   // Get current display settings from storage to determine the mode
   const result = await chrome.storage.local.get(['displaySettings']);
   const settings = result.displaySettings;
@@ -481,6 +572,10 @@ function removeExistingInterfaces() {
 
 // Import dynamic components for sidebar and iframe
 async function injectSidebar() {
+  if (!isTopFrame) {
+    return;
+  }
+
   // Dynamically import the sidebar component
   const { injectSidebar: injectSidebarComponent } =
     await import('../sidebar/Sidebar.js');
@@ -488,6 +583,10 @@ async function injectSidebar() {
 }
 
 async function injectIframePopup() {
+  if (!isTopFrame) {
+    return;
+  }
+
   // Dynamically import the iframe component
   const { injectIframePopup: injectIframeComponent } =
     await import('../iframe/IframePopup.js');
@@ -496,6 +595,10 @@ async function injectIframePopup() {
 void injectIframePopup;
 
 async function injectFloatingPopup() {
+  if (!isTopFrame) {
+    return;
+  }
+
   // Check if floating popup already exists to avoid duplicates
   if (document.getElementById('prism-floating-popup')) {
     return;
@@ -707,6 +810,10 @@ async function injectFloatingPopup() {
 
 // Add floating button on page (top right corner)
 function injectFloatingButton() {
+  if (!isTopFrame) {
+    return;
+  }
+
   // Check if button already exists to avoid duplicates
   if (document.getElementById('prism-floating-button')) {
     return;
@@ -762,6 +869,10 @@ function injectFloatingButton() {
 
 // Function to inject the chat popup iframe using shadow DOM
 function injectChatPopup() {
+  if (!isTopFrame) {
+    return;
+  }
+
   // Check if popup already exists to avoid duplicates
   if (document.getElementById('prism-chat-iframe')) {
     return;
@@ -1027,7 +1138,7 @@ initializePromptShortcuts();
 setupPromptShortcutReplacement();
 
 // Only observe if the button hasn't been removed by the user
-if (!buttonRemovedByUser) {
+if (isTopFrame && !buttonRemovedByUser) {
   const observer = new MutationObserver((mutationsList) => {
     if (!document.getElementById('prism-floating-button')) {
       setTimeout(() => injectFloatingButton(), 500); // Small delay to allow page to load
@@ -1395,6 +1506,10 @@ function deleteTypedSequence(element: HTMLElement, length: number) {
 
 // Function to launch the iframe
 function launchIframe() {
+  if (!isTopFrame) {
+    return;
+  }
+
   // Check if iframe already exists to avoid duplicates
   if (document.getElementById('prism-chat-iframe')) {
     return;
@@ -1552,65 +1667,87 @@ function removeChatPopup() {
   }
 }
 
+// Guards against the input event we dispatch ourselves re-entering the
+// shortcut handler.
+let isReplacingPromptShortcut = false;
+
 // Function to replace prompt shortcuts in text fields
 function setupPromptShortcutReplacement() {
   // Listen for input events on text fields
   document.addEventListener(
     'input',
     async (event) => {
-      const target = event.target as
-        HTMLInputElement | HTMLTextAreaElement | HTMLElement;
+      if (isReplacingPromptShortcut) {
+        return;
+      }
 
-      // Only process if the target is an input, textarea, or contenteditable element
-      if (
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.isContentEditable
-      ) {
+      const target = event.target as HTMLElement | null;
+      if (!target || !isEditableTarget(target)) {
+        return;
+      }
+
+      try {
+        // Get all prompt shortcuts from storage
+        const result = await chrome.storage.local.get(['promptShortcuts']);
+        const promptShortcuts = result.promptShortcuts || [];
+
+        // Resolve the editable that owns the event target. For contenteditable
+        // hosts the target may be a nested node, so walk up to the host. When
+        // the caret lives in a same-origin iframe, findActiveEditable descends
+        // into that frame.
+        const targetEditable = findEditableHost(target);
+        const activeEditable = findActiveEditable(document);
+        const editable =
+          activeEditable &&
+          (activeEditable === target || activeEditable.contains(target))
+            ? activeEditable
+            : targetEditable;
+
         const currentValue =
-          ('value' in target ? target.value : target.textContent) || '';
+          (isInputElement(editable) || isTextAreaElement(editable)
+            ? (editable as HTMLInputElement | HTMLTextAreaElement).value
+            : editable.textContent) || '';
 
-        try {
-          // Get all prompt shortcuts from storage
-          const result = await chrome.storage.local.get(['promptShortcuts']);
-          const promptShortcuts = result.promptShortcuts || [];
-
-          // Check if the current value contains any prompt shortcuts
-          for (const prompt of promptShortcuts) {
-            if (
-              prompt.shortcutKey &&
-              currentValue.includes(prompt.shortcutKey)
-            ) {
-              // Replace the shortcut with the full prompt content
-              const newValue = currentValue.replace(
+        // Check if the current value contains any prompt shortcuts
+        for (const prompt of promptShortcuts) {
+          if (prompt.shortcutKey && currentValue.includes(prompt.shortcutKey)) {
+            isReplacingPromptShortcut = true;
+            try {
+              // Replace only the matched shortcut occurrence, in place, so
+              // surrounding content and formatting survive the replacement.
+              const replaced = replaceRangeWithText(
+                editable,
                 prompt.shortcutKey,
                 prompt.content,
               );
 
-              if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
-                // For input and textarea elements
-                (target as HTMLInputElement | HTMLTextAreaElement).value =
-                  newValue;
-
-                // Trigger input event to notify other listeners
-                target.dispatchEvent(new Event('input', { bubbles: true }));
-              } else if (target.isContentEditable) {
-                // For contenteditable elements
-                target.textContent = newValue;
-
-                // Trigger input event to notify other listeners
-                target.dispatchEvent(new Event('input', { bubbles: true }));
+              if (!replaced) {
+                continue;
               }
 
-              // Show a notification that the replacement occurred
-              showToast(`Replaced ${prompt.shortcutKey} with prompt`);
-
-              break; // Only replace the first match to avoid conflicts
+              // Trigger input event to notify other listeners. The event is
+              // created in the editable's own realm so it can be dispatched
+              // on elements living inside an iframe.
+              const EventConstructor =
+                editable.ownerDocument.defaultView?.Event ?? Event;
+              editable.dispatchEvent(
+                new EventConstructor('input', {
+                  bubbles: true,
+                  composed: true,
+                }),
+              );
+            } finally {
+              isReplacingPromptShortcut = false;
             }
+
+            // Show a notification that the replacement occurred
+            showToast(`Replaced ${prompt.shortcutKey} with prompt`);
+
+            break; // Only replace the first match to avoid conflicts
           }
-        } catch (error) {
-          console.error('Error processing prompt shortcuts:', error);
         }
+      } catch (error) {
+        console.error('Error processing prompt shortcuts:', error);
       }
     },
     true,

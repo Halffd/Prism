@@ -4842,6 +4842,7 @@ dependencies = [
 name = "prism-wasm"
 version = "0.1.0"
 dependencies = [
+ "js-sys",
  "prism-core",
  "serde",
  "serde_json",

@@ -31,6 +31,7 @@ import {
   TogetherLLMService,
   PerplexityLLMService,
 } from '@prism/llm';
+import { evaluateInSandbox } from './sandbox';
 
 export interface AgentService {
   readonly provider: string;
@@ -140,14 +141,12 @@ export class BuiltinToolExecutor implements ToolExecutor {
     }
   }
 
-  private codeEval(input: string): string {
-    try {
-      const fn = new Function(`"use strict"; return (${input})`);
-      const result = fn();
-      return `[code_eval] Result: ${JSON.stringify(result)}`;
-    } catch {
-      return `[code_eval] Error: could not evaluate expression`;
+  private async codeEval(input: string): Promise<string> {
+    const result = await evaluateInSandbox(input);
+    if (result.ok) {
+      return `[code_eval] Result: ${JSON.stringify(result.value)}`;
     }
+    return `[code_eval] Error: could not evaluate expression`;
   }
 }
 
@@ -406,9 +405,17 @@ export class ReActAgentService implements AgentService {
       for (let step = 0; step < maxSteps; step++) {
         let prompt: string;
         if (history.length > 0) {
-          prompt = `${systemPrompt.replace('{tools}', toolDescriptions)}\n\nTask: ${request.task}\n\n${history.join('\n')}\nObservation: ${currentInput}\nThought:`;
+          prompt = `${systemPrompt.replace(
+            '{tools}',
+            toolDescriptions,
+          )}\n\nTask: ${request.task}\n\n${history.join(
+            '\n',
+          )}\nObservation: ${currentInput}\nThought:`;
         } else {
-          prompt = `${systemPrompt.replace('{tools}', toolDescriptions)}\n\nTask: ${request.task}`;
+          prompt = `${systemPrompt.replace(
+            '{tools}',
+            toolDescriptions,
+          )}\n\nTask: ${request.task}`;
         }
 
         const llmResult = await this.llm.complete({

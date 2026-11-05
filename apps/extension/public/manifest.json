@@ -3,18 +3,11 @@
   "name": "Prism - Context AI Assistant",
   "version": "0.1.0",
   "description": "AI assistant that understands your webpage context",
-  "permissions": [
-    "activeTab",
-    "storage",
-    "contextMenus",
-    "commands"
-  ],
-  "host_permissions": [
-    "http://localhost:3000/*",
-    "https://api.prism.app/*"
-  ],
+  "permissions": ["activeTab", "storage", "contextMenus", "commands"],
+  "host_permissions": ["http://localhost:3000/*", "https://api.prism.app/*"],
   "action": {
     "default_popup": "index.html",
+    "default_title": "Prism - Context AI Assistant",
     "default_icon": {
       "16": "icon16.png",
       "48": "icon48.png",
@@ -43,13 +36,12 @@
   },
   "content_scripts": [
     {
-      "matches": [
-        "<all_urls>"
-      ],
-      "js": [
-        "content.js"
-      ],
-      "run_at": "document_idle"
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": true,
+      "match_about_blank": true,
+      "match_origin_as_fallback": true
     }
   ],
   "icons": {
@@ -63,14 +55,8 @@
   },
   "web_accessible_resources": [
     {
-      "resources": [
-        "assets/*",
-        "chat.html",
-        "index.html"
-      ],
-      "matches": [
-        "<all_urls>"
-      ]
+      "resources": ["assets/*", "chat.html", "index.html"],
+      "matches": ["<all_urls>"]
     }
   ],
   "content_security_policy": {

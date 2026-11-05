@@ -256,6 +256,32 @@ Adopted from the opencode survey (features #1 of the ranked list):
   `models` reserved), headers UI (schema-supported, no input yet),
   editing existing entries (remove + re-add).
 
+## Agent loop + code tools + extension system (2026-11-05)
+
+- **Core loop**: `prism_core::agent` — `Tool` trait, `ToolRegistry`
+  (`register()` is the extension point; permissions allow/deny/ask),
+  `run_agent(task, step_fn, registry, max_steps, ask)`. Loop semantics:
+  JSON thought/action/observation; `Final Answer` ends; non-JSON model
+  response is treated as the direct answer; max steps returns
+  `completed: false` + error. `StepFn` keeps the loop transport-free —
+  surfaces inject their own LLM call.
+- **Built-ins**: `CalculatorTool` (recursive-descent parser, no eval),
+  `WebSearchStubTool` (placeholder the host replaces by registering a
+  real tool under `web_search`).
+- **Code editing tools**: `prism_core::native_tools` (native-transport
+  gated) — `read_file`/`write_file`/`edit_file` (exact string replace,
+  errors when pattern absent — never silent)/`list_dir`. All resolve
+  through `safe_join(root, path)`: `..` traversal and absolute escapes
+  rejected; `register_all` sets write/edit to Ask so interactive
+  surfaces gate mutations.
+- **WASM extension API**: `AgentRegistry` (JS-registered `JsTool`s,
+  permission setter, gated execute with a JS ask fn) and
+  `agent_run(task, registry, llm_step, max_steps)` — the JS host
+  provides the LLM step function, the core owns loop semantics.
+- Deferred: plan-and-execute/reflexion strategies (ReAct first — the
+  TS libs/agent already has them for the extension), streaming
+  step-by-step callbacks, tool result truncation policy.
+
 ## Service-worker note (extension)
 
 The MV3 background service worker imports the core (it relays
