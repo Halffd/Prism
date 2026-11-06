@@ -88,11 +88,13 @@ export component AppWindow inherits Window {
     callback history-back();
     callback history-forward();
     callback scroll-to-end();
+    callback invoke-agent-done(string); // JSON AgentResult
     callback palette-toggle();
     callback palette-query-changed(string);
     callback palette-execute(string); // arg: PaletteRow.id
     callback palette-move(int);       // arg: index delta (+1/-1)
     callback custom-provider-add();
+    callback agent-done(string); // JSON AgentResult
     callback custom-provider-remove(string);
     callback new-chat();
     callback open-chat(string);
@@ -122,7 +124,7 @@ export component AppWindow inherits Window {
     changed temperature => { temperature-edited(self.temperature); }
 
     scroll-to-end => {
-        list.viewport-y = list.height - list.viewport-height;
+        list.content-y = list.height - list.content-height;
     }
 
     HorizontalLayout {

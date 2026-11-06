@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { Provider } from 'react-redux';
-import { store } from '@prism/redux-store';
+import { store, setOpenTabs, setCurrentSessionId } from '@prism/redux-store';
 import { Popup } from '../popup/Popup';
 
 jest.mock('../auth-provider', () => ({
@@ -97,6 +97,11 @@ describe('Popup chat tabs', () => {
     (chrome.storage.local.remove as jest.Mock).mockImplementation(
       (keys: string | string[]) => storage.remove(keys),
     );
+
+    // The store is a module singleton, so the open tabs of one test would
+    // still be there in the next one.
+    store.dispatch(setOpenTabs([]));
+    store.dispatch(setCurrentSessionId(''));
   });
 
   it('shows a tab strip and keeps the open tabs across a remount', async () => {

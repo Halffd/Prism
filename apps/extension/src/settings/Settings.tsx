@@ -12,6 +12,7 @@ import { UnifiedAIClient } from '@prism/api-client';
 import { logger, type LogLevel } from '@prism/logging';
 import { ModelRecentsEditor } from './ModelRecentsEditor';
 import { CustomModelManager } from '../chat/CustomModelManager';
+import { customModelOptions } from '../chat/custom-model';
 import {
   getSetting,
   saveSetting,
@@ -401,6 +402,15 @@ export function Settings({ onClose }: SettingsProps) {
   const fetchAvailableModels = async () => {
     setFetchingModels(true);
     try {
+      // A selected custom model is addressed at its own endpoint, so its
+      // model list comes from there and not from the hosted provider that
+      // happens to be selected in the provider list.
+      const customOptions = customModelOptions(aiConfig);
+      if (customOptions.length > 0) {
+        setAvailableModels(customOptions);
+        return;
+      }
+
       // Create a temporary client with the current AI config
       // Update the current provider's API key in the config temporarily to use the new providerKeys structure
       const tempConfig = { ...aiConfig };

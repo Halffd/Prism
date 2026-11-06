@@ -56,7 +56,10 @@ import {
   saveTabState,
   type ChatTabState,
 } from '../chat/chat-tabs';
-import { resolveRequestConfig } from '../chat/custom-model';
+import {
+  customModelOptions,
+  resolveRequestConfig,
+} from '../chat/custom-model';
 
 // Initialize with default settings - will be overridden by stored settings
 const defaultAIConfig: AIConfig = {
@@ -1278,6 +1281,15 @@ export function Popup() {
   const fetchAvailableModels = async (config: AIConfig) => {
     setFetchingModels(true);
     try {
+      // A selected custom model is addressed at its own endpoint, so its
+      // model list comes from there and not from the hosted provider that
+      // happens to be selected in the provider list.
+      const customOptions = customModelOptions(config);
+      if (customOptions.length > 0) {
+        setAvailableModels(customOptions);
+        return;
+      }
+
       // Create a temporary client with the current AI config
       const tempClient = new UnifiedAIClient({
         aiConfig: config,

@@ -10,7 +10,12 @@ crate-type = ["cdylib"]
 
 [dependencies]
 prism-core = { path = "../../crates/prism-core" }
-slint = { version = "1", features = ["backend-android-activity-06"] }
+slint = { version = "1.18.1", features = ["backend-android-activity-06"] }
+serde_json = "1.0"
+
+[features]
+default = []
+agent = ["prism-core/native-transport"]
 
 [build-dependencies]
 slint-build = "1"

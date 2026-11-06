@@ -22,13 +22,19 @@ export interface DBChatSession {
   groupChatMode?: GroupChatMode; // 'round-robin' | 'reactive' | 'selective' | undefined (single)
 }
 
-// Database schema version
+// Database schema version.
+//
+// The Dexie client numbers its versions in steps of ten: its `version(5)`
+// is the native version 50. Both clients open the same database, so they
+// have to use the same numbering, or one of them always finds a version it
+// cannot open.
 const DB_NAME = 'PrismDB';
-const DB_VERSION = 4;
+const DB_VERSION = 50;
 
 const CHAT_HISTORY_STORE = 'chatHistory';
 const SESSIONS_STORE = 'chatSessions';
 const PROMPTS_STORE = 'prompts';
+const PROMPT_SHORTCUTS_STORE = 'promptShortcuts';
 const CACHE_STORE = 'cache';
 const CHARACTERS_STORE = 'characters';
 const PERSONAS_STORE = 'personas';
@@ -36,6 +42,10 @@ const PRESETS_STORE = 'promptPresets';
 const WORLD_INFO_STORE = 'worldInfo';
 const WORLD_INFO_ENTRIES_STORE = 'worldInfoEntries';
 const CUSTOM_AGENTS_STORE = 'customAgents';
+const SETTINGS_STORE = 'settings';
+const SITE_FILTERS_STORE = 'siteFilters';
+const IMAGE_GEN_CONFIGS_STORE = 'imageGenConfigs';
+const AGENT_MEMORIES_STORE = 'agentMemories';
 
 let dbInstance: IDBPDatabase | null = null;
 
@@ -66,6 +76,9 @@ export async function getDatabase(): Promise<IDBPDatabase> {
         });
         sessionsStore.createIndex('createdAt', 'createdAt', { unique: false });
         sessionsStore.createIndex('updatedAt', 'updatedAt', { unique: false });
+        sessionsStore.createIndex('groupChatMode', 'groupChatMode', {
+          unique: false,
+        });
       }
 
       // Prompts store
@@ -75,6 +88,17 @@ export async function getDatabase(): Promise<IDBPDatabase> {
         });
         promptsStore.createIndex('category', 'category', { unique: false });
         promptsStore.createIndex('createdAt', 'createdAt', { unique: false });
+      }
+
+      // The legacy name of the prompts store. The Dexie client knows this
+      // table under this name, so both clients have to agree that it
+      // exists.
+      if (!db.objectStoreNames.contains(PROMPT_SHORTCUTS_STORE)) {
+        const shortcutsStore = db.createObjectStore(PROMPT_SHORTCUTS_STORE, {
+          keyPath: 'id',
+        });
+        shortcutsStore.createIndex('category', 'category', { unique: false });
+        shortcutsStore.createIndex('createdAt', 'createdAt', { unique: false });
       }
 
       // Cache store
@@ -90,6 +114,7 @@ export async function getDatabase(): Promise<IDBPDatabase> {
           keyPath: 'id',
         });
         charStore.createIndex('name', 'name', { unique: false });
+        charStore.createIndex('createdAt', 'createdAt', { unique: false });
         charStore.createIndex('updatedAt', 'updatedAt', { unique: false });
       }
 
@@ -98,6 +123,7 @@ export async function getDatabase(): Promise<IDBPDatabase> {
           keyPath: 'id',
         });
         personaStore.createIndex('name', 'name', { unique: false });
+        personaStore.createIndex('createdAt', 'createdAt', { unique: false });
         personaStore.createIndex('updatedAt', 'updatedAt', { unique: false });
       }
 
@@ -106,6 +132,7 @@ export async function getDatabase(): Promise<IDBPDatabase> {
           keyPath: 'id',
         });
         presetStore.createIndex('name', 'name', { unique: false });
+        presetStore.createIndex('createdAt', 'createdAt', { unique: false });
         presetStore.createIndex('updatedAt', 'updatedAt', { unique: false });
       }
 
@@ -114,6 +141,7 @@ export async function getDatabase(): Promise<IDBPDatabase> {
           keyPath: 'id',
         });
         wiStore.createIndex('name', 'name', { unique: false });
+        wiStore.createIndex('createdAt', 'createdAt', { unique: false });
         wiStore.createIndex('updatedAt', 'updatedAt', { unique: false });
       }
 
@@ -125,10 +153,58 @@ export async function getDatabase(): Promise<IDBPDatabase> {
         wieStore.createIndex('insertionOrder', 'insertionOrder', {
           unique: false,
         });
+        wieStore.createIndex('createdAt', 'createdAt', { unique: false });
+        wieStore.createIndex('updatedAt', 'updatedAt', { unique: false });
       }
 
-      // V2 -> V3 migration: Add group chat fields to existing sessions
-      if (oldVersion < 3 && transaction) {
+      if (!db.objectStoreNames.contains(CUSTOM_AGENTS_STORE)) {
+        db.createObjectStore(CUSTOM_AGENTS_STORE, { keyPath: 'id' });
+      }
+
+      if (!db.objectStoreNames.contains(SETTINGS_STORE)) {
+        const settingsStore = db.createObjectStore(SETTINGS_STORE, {
+          keyPath: 'id',
+          autoIncrement: true,
+        });
+        settingsStore.createIndex('key', 'key', { unique: false });
+        settingsStore.createIndex('createdAt', 'createdAt', { unique: false });
+        settingsStore.createIndex('updatedAt', 'updatedAt', { unique: false });
+      }
+
+      if (!db.objectStoreNames.contains(SITE_FILTERS_STORE)) {
+        const filtersStore = db.createObjectStore(SITE_FILTERS_STORE, {
+          keyPath: 'id',
+          autoIncrement: true,
+        });
+        filtersStore.createIndex('urlPattern', 'urlPattern', { unique: false });
+        filtersStore.createIndex('type', 'type', { unique: false });
+        filtersStore.createIndex('createdAt', 'createdAt', { unique: false });
+      }
+
+      if (!db.objectStoreNames.contains(IMAGE_GEN_CONFIGS_STORE)) {
+        const imageStore = db.createObjectStore(IMAGE_GEN_CONFIGS_STORE, {
+          keyPath: 'id',
+          autoIncrement: true,
+        });
+        imageStore.createIndex('apiKey', 'apiKey', { unique: false });
+        imageStore.createIndex('createdAt', 'createdAt', { unique: false });
+        imageStore.createIndex('updatedAt', 'updatedAt', { unique: false });
+      }
+
+      if (!db.objectStoreNames.contains(AGENT_MEMORIES_STORE)) {
+        const memoriesStore = db.createObjectStore(AGENT_MEMORIES_STORE, {
+          keyPath: 'id',
+        });
+        memoriesStore.createIndex('agentId', 'agentId', { unique: false });
+        memoriesStore.createIndex('importance', 'importance', { unique: false });
+        memoriesStore.createIndex('createdAt', 'createdAt', { unique: false });
+        memoriesStore.createIndex('updatedAt', 'updatedAt', { unique: false });
+      }
+
+      // V2 -> V3 migration: Add group chat fields to existing sessions.
+      // The Dexie client numbers its versions in steps of ten, so its
+      // version 3 is the native version 30.
+      if (oldVersion < 30 && transaction) {
         const sessionsStore = transaction.objectStore(SESSIONS_STORE);
         let cursor = await (sessionsStore as any).openCursor();
         while (cursor) {
@@ -144,6 +220,41 @@ export async function getDatabase(): Promise<IDBPDatabase> {
           cursor = await cursor.continue();
         }
       }
+
+      // V4 -> V5 migration: bring the database up to the schema that both
+      // clients agree on. The stores exist already in a database that was
+      // created by the Dexie client, so their indexes have to be added
+      // here rather than at creation.
+      if (oldVersion < 50 && transaction) {
+        const addIndex = (
+          storeName: string,
+          indexName: string,
+          keyPath: string,
+        ) => {
+          if (!db.objectStoreNames.contains(storeName)) {
+            return;
+          }
+          const store = transaction.objectStore(storeName);
+          if (!store.indexNames.contains(indexName)) {
+            store.createIndex(indexName, keyPath, { unique: false });
+          }
+        };
+
+        addIndex(SESSIONS_STORE, 'groupChatMode', 'groupChatMode');
+        addIndex(WORLD_INFO_ENTRIES_STORE, 'createdAt', 'createdAt');
+        addIndex(WORLD_INFO_ENTRIES_STORE, 'updatedAt', 'updatedAt');
+        addIndex(CHARACTERS_STORE, 'createdAt', 'createdAt');
+        addIndex(PERSONAS_STORE, 'createdAt', 'createdAt');
+        addIndex(PRESETS_STORE, 'createdAt', 'createdAt');
+        addIndex(WORLD_INFO_STORE, 'createdAt', 'createdAt');
+      }
+    },
+    // Another client of the same database — the Dexie one — needs to open
+    // a newer version. The connection has to be given up, or that client
+    // waits for it forever.
+    blocking() {
+      dbInstance?.close();
+      dbInstance = null;
     },
   });
 

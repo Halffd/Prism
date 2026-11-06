@@ -503,8 +503,14 @@ export class AIService {
       }
     });
 
+    // A custom model carries its own base URL; the hosted OpenAI endpoint
+    // is only the default.
+    const baseUrl = (
+      config.apiUrl?.trim() || 'https://api.openai.com/v1'
+    ).replace(/\/+$/, '');
+
     const response = await axios.post(
-      'https://api.openai.com/v1/chat/completions',
+      `${baseUrl}/chat/completions`,
       {
         model: config.model || 'gpt-4-vision-preview', // Use vision model for image support
         messages: openAiMessages,
@@ -659,20 +665,38 @@ export class AIService {
   }
 
   private async getOpenAIModels(): Promise<string[]> {
-    if (!this.config.apiKey) {
+    // A custom model addresses its own endpoint, which serves its own
+    // models. The hosted OpenAI list is only the default.
+    const customBaseUrl = this.config.apiUrl?.trim();
+    const isCustomEndpoint =
+      !!customBaseUrl &&
+      customBaseUrl.replace(/\/+$/, '') !== 'https://api.openai.com/v1';
+
+    if (!this.config.apiKey && !isCustomEndpoint) {
       return ['gpt-3.5-turbo', 'gpt-4', 'gpt-4o', 'gpt-4-turbo'];
     }
 
+    const baseUrl = (
+      customBaseUrl || 'https://api.openai.com/v1'
+    ).replace(/\/+$/, '');
+
     try {
-      const response = await axios.get('https://api.openai.com/v1/models', {
+      const response = await axios.get(`${baseUrl}/models`, {
         headers: {
           Authorization: `Bearer ${this.config.apiKey}`,
           'Content-Type': 'application/json',
         },
       });
 
-      // Filter for chat models
       const allModels = (await parseModelsBody(response.data)) ?? [];
+
+      if (isCustomEndpoint) {
+        // A custom endpoint serves models of any name, so nothing is
+        // filtered out.
+        return allModels.sort();
+      }
+
+      // Filter for chat models
       const chatModels = allModels
         .filter((id) => id.includes('gpt'))
         .sort();
@@ -682,7 +706,9 @@ export class AIService {
         : ['gpt-3.5-turbo', 'gpt-4', 'gpt-4o', 'gpt-4-turbo'];
     } catch (error) {
       console.error('Error fetching OpenAI models:', error);
-      return ['gpt-3.5-turbo', 'gpt-4', 'gpt-4o', 'gpt-4-turbo'];
+      return isCustomEndpoint
+        ? []
+        : ['gpt-3.5-turbo', 'gpt-4', 'gpt-4o', 'gpt-4-turbo'];
     }
   }
 

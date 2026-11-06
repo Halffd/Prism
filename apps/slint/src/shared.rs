@@ -4,10 +4,13 @@ slint::include_modules!();
 
 // Re-export all public types and functions from dependencies
 pub use prism_core::catalog;
+pub use prism_core::agent::{run_agent, AgentResult, CalculatorTool, StepMessage, ToolRegistry};
 pub use prism_core::client::{
     ApiChatRequest, ChatMessage, ModelsEvent, ModelsRequest, OllamaChatRequest, StreamEvent,
     StreamRequest,
 };
+#[cfg(feature = "native-transport")]
+pub use prism_core::native_tools;
 pub use prism_core::conversations::{self, Conversation, ConversationMeta, StoredMessage};
 pub use prism_core::providers::{self, ollama_root_url, PROVIDERS};
 pub use prism_core::settings::{Connection, Settings};
@@ -16,6 +19,11 @@ pub use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 pub use std::cell::RefCell;
 pub use std::rc::Rc;
 pub use std::sync::mpsc::{self, Receiver, TryRecvError};
+use serde_json;
+#[cfg(feature = "native-transport")]
+use crate::native_tools;
+#[cfg(feature = "native-transport")]
+use prism_core::transport::ReqwestTransport;
 
 /// Matches COMPUTE_LEVELS in the TUI settings screen / shared types.
 pub const COMPUTE_LEVELS: &[&str] = &[
@@ -276,6 +284,135 @@ pub fn current_model_info(settings: &Settings) -> Option<catalog::ModelInfo> {
         .cloned()
 }
 
+
+#[cfg(feature = "agent")]
+mod agent_integration {
+    use super::*;
+    use crate::native_tools;
+    use prism_core::agent::{run_agent, AgentResult, CalculatorTool, StepMessage, ToolRegistry};
+    use prism_core::transport::{HttpRequest, ReqwestTransport};
+    use std::sync::Arc;
+    use tokio::runtime::Builder as TokioRuntimeBuilder;
+
+    struct SlintLlmStep {
+        transport: ReqwestTransport,
+        base_url: String,
+        api_key: String,
+        model: String,
+        temperature: f32,
+        max_tokens: Option<u32>,
+    }
+
+    impl SlintLlmStep {
+        fn complete(&self, system: &str, history: &[StepMessage]) -> Result<String, String> {
+            let body = serde_json::json!({
+                "model": self.model,
+                "temperature": self.temperature,
+                "max_tokens": self.max_tokens.unwrap_or(2048),
+                "messages": std::iter::once(serde_json::json!({
+                    "role": "system", "content": system,
+                }))
+                .chain(history.iter().map(|m| serde_json::json!({
+                    "role": m.role, "content": m.content,
+                })))
+                .collect::<Vec<_>>(),
+            });
+            let mut headers = vec![("Content-Type".to_string(), "application/json".to_string())];
+            if !self.api_key.is_empty() {
+                headers.push(("Authorization".to_string(), format!("Bearer {}", self.api_key)));
+            }
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("runtime: {e}"))?;
+            rt.block_on(async {
+                let bytes = self
+                    .transport
+                    .post_body(prism_core::transport::HttpRequest {
+                        url: self.base_url.clone(),
+                        headers,
+                        body: Some(body.to_string()),
+                    })
+                    .await?;
+                let v: serde_json::Value =
+                    serde_json::from_slice(&bytes).map_err(|e| format!("json: {e}"))?;
+                v["choices"][0]["message"]["content"]
+                    .as_str()
+                    .map(String::from)
+                    .ok_or_else(|| String::from("missing choices[0].message.content in response"))
+            })
+        }
+    }
+
+    #[cfg(feature = "agent")]
+    pub fn run_agent_from_palette(
+        ui: &AppWindow,
+        state: &Rc<RefCell<State>>,
+        lines_model: &Rc<VecModel<ChatLine>>,
+        task: &str,
+    ) {
+        if state.borrow().streaming {
+            push_system(ui, state, lines_model, "wait for the chat stream to finish".into());
+            return;
+        }
+        let task = state.borrow().settings.provider.clone();
+        let provider = state.borrow().settings.provider.clone();
+        let settings = state.borrow().settings.clone();
+        let workspace_root = std::path::PathBuf::from(".");
+        let ui_clone = ui.clone();
+        let state_c = state.clone();
+        let lines_c = lines_model.clone();
+
+        std::thread::spawn(move || {
+            let reg = ToolRegistry::new();
+            reg.register(Arc::new(CalculatorTool));
+            native_tools::register_all(&reg, &workspace_root);
+
+            let resolved = settings
+                .resolve_provider(&provider)
+                .expect("unknown provider");
+            let api_key = settings.key_for(&provider);
+            if resolved.needs_key && api_key.trim().is_empty() {
+                eprintln!("agent: API key required for {}", resolved.label);
+                return;
+            }
+
+            let step_impl = SlintLlmStep {
+                transport: Box::leak(Box::new(ReqwestTransport::new())),
+                base_url: resolved.base_url.clone(),
+                api_key: api_key.trim().to_string(),
+                model: if settings.model.trim().is_empty() {
+                    resolved.default_model.clone()
+                } else {
+                    settings.model.trim().to_string()
+                },
+                temperature: settings.temperature,
+                max_tokens: settings.max_tokens,
+            };
+
+            let task = task;
+            let result: AgentResult = {
+                let mut step_fn = |system: &str, hist: &[StepMessage]| {
+                    step_impl.complete(system, hist)
+                };
+                run_agent(&task, &mut step_fn, &reg, 12, &|_, _| false)
+            };
+
+            let result_json = serde_json::to_string(&result).unwrap_or_else(|e| format!("{{"error":"{e}"}}"));
+            let _ = ui_clone.invoke_agent_done(result_json.into());
+        });
+    }
+}
+
+#[cfg(not(feature = "agent"))]
+pub fn run_agent_from_palette(
+    _ui: &AppWindow,
+    _state: &Rc<RefCell<State>>,
+    _lines_model: &Rc<VecModel<ChatLine>>,
+    _task: &str,
+) {
+    eprintln!("agent feature not enabled");
+}
 /// Kick off a live /models fetch for the current provider. Shared by
 /// the settings button and the palette command.
 pub fn fetch_models(ui: &AppWindow, state: &Rc<RefCell<State>>) {
@@ -549,6 +686,61 @@ pub fn palette_execute(
             ui.set_show_settings(next);
         }
         "view.scroll_end" => ui.invoke_scroll_to_end(),
+        "agent.run" => {
+            if state.borrow().streaming {
+                push_system(ui, state, lines_model, "wait for the chat stream to finish".into());
+                return;
+            }
+            let task = state.borrow().settings.provider.clone();
+            let provider = state.borrow().settings.provider.clone();
+            let settings = state.borrow().settings.clone();
+            let workspace_root = std::path::PathBuf::from("."); // cwd
+            let ui_clone = ui.clone();
+            let state_c = state.clone();
+            let lines_c = lines_model.clone();
+
+            // Spawn agent on background thread (blocking LLM step over ReqwestTransport)
+            std::thread::spawn(move || {
+                let reg = ToolRegistry::new();
+                reg.register(Arc::new(CalculatorTool));
+                native_tools::register_all(&reg, &workspace_root);
+
+                let resolved = settings
+                    .resolve_provider(&provider)
+                    .expect("unknown provider");
+                let api_key = settings.key_for(&provider);
+                if resolved.needs_key && api_key.trim().is_empty() {
+                    // Can't signal error back to UI from this thread easily — just log
+                    eprintln!("agent: API key required for {}", resolved.label);
+                    return;
+                }
+
+                let step_impl = SlintLlmStep {
+                    transport: Box::leak(Box::new(prism_core::transport::prism_core::transport::ReqwestTransport::new())),
+                    base_url: resolved.base_url.clone(),
+                    api_key: api_key.trim().to_string(),
+                    model: if settings.model.trim().is_empty() {
+                        resolved.default_model.clone()
+                    } else {
+                        settings.model.trim().to_string()
+                    },
+                    temperature: settings.temperature,
+                    max_tokens: settings.max_tokens,
+                };
+
+                let task = task;
+                let result: AgentResult = {
+                    let mut step_fn = |system: &str, hist: &[StepMessage]| {
+                        step_impl.complete(system, hist)
+                    };
+                    run_agent(&task, &mut step_fn, &reg, 12, &|_, _| false)
+                };
+
+                // Post results back to UI thread via event loop
+                let result_json = serde_json::to_string(&result).unwrap_or_else(|e| format!("{{"error":"{e}"}}"));
+                let _ = ui_clone.invoke_agent_done(result_json.into());
+            });
+        }
         other => push_system(ui, state, lines_model, format!("unknown command: {other}")),
     }
 }
@@ -1210,6 +1402,63 @@ pub fn run_ui() {
             ui.set_palette_idx(next);
         });
     }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        let lines_c = lines_model.clone();
+        ui.on_agent_done(move |json| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            let result: AgentResult = match serde_json::from_str(&json.to_string()) {
+                Ok(r) => r,
+                Err(e) => {
+                    push_system(&ui, &state_c, &lines_c, format!("agent result parse: {e}"));
+                    return;
+                }
+            };
+            for (i, step) in result.steps.iter().enumerate() {
+                push_system(
+                    &ui,
+                    &state_c,
+                    &lines_c,
+                    format!(
+                        "[{}/{}] {}: {} -> {}",
+                        i + 1,
+                        result.steps.len(),
+                        step.action,
+                        step.action_input,
+                        if step.observation.len() > 120 {
+                            format!("{}…", &step.observation[..120])
+                        } else {
+                            step.observation.clone()
+                        }
+                    ),
+                );
+            }
+            if result.completed {
+                ui.set_palette_open(false);
+                push_system(&ui, &state_c, &lines_c, "agent finished".into());
+                // Append final answer to transcript
+                let provider = { let st = state_c.borrow(); st.settings.provider.clone() };
+                let mut st = state_c.borrow_mut();
+                st.lines.push(Line {
+                    role: "user".into(),
+                    content: provider,
+                    thinking: None,
+                });
+                st.lines.push(Line {
+                    role: "assistant".into(),
+                    content: result.answer.clone(),
+                    thinking: None,
+                });
+                refresh_transcript(&ui, &lines_c, &st.lines);
+                st.chats = host::list_conversations();
+                // TODO: persist conversation
+            } else {
+                push_system(&ui, &state_c, &lines_c, result.error.unwrap_or("agent stopped".into()));
+            }
+        });
+    }
+
     {
         let ui_w = ui.as_weak();
         let state_c = state.clone();

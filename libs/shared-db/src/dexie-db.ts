@@ -104,10 +104,38 @@ class PrismDexie extends Dexie {
     this.version(4).stores({
       agentMemories: 'id, agentId, importance, createdAt, updatedAt',
     });
+    // Version 5 mirrors the schema of the raw `idb` client in `db.ts`.
+    // Both clients open the same database, so they have to agree on the
+    // version and on the tables; otherwise one of them waits for the other
+    // to close a connection that is never closed.
+    this.version(5).stores({
+      settings: '++id, key, createdAt, updatedAt',
+      siteFilters: '++id, urlPattern, type, createdAt',
+      imageGenConfigs: '++id, apiKey, createdAt, updatedAt',
+      chatSessions: 'id, createdAt, updatedAt, groupChatMode',
+      chatHistory: 'id, sessionId, timestamp',
+      promptShortcuts: 'id, category, createdAt',
+      prompts: 'id, category, createdAt',
+      cache: 'key, expiresAt',
+      characters: 'id, name, createdAt, updatedAt',
+      personas: 'id, name, createdAt, updatedAt',
+      promptPresets: 'id, name, createdAt, updatedAt',
+      worldInfo: 'id, name, createdAt, updatedAt',
+      worldInfoEntries: 'id, worldInfoId, insertionOrder, createdAt, updatedAt',
+      customAgents: 'id',
+      agentMemories: 'id, agentId, importance, createdAt, updatedAt',
+    });
   }
 }
 
 export const db = new PrismDexie();
+
+// The raw `idb` client in `db.ts` opens the same database. When it needs a
+// newer version, this connection has to be given up, or that client waits
+// for it forever.
+db.on('versionchange', () => {
+  db.close();
+});
 
 // Settings functions
 export async function saveSetting(key: string, value: any): Promise<void> {

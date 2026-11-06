@@ -48,6 +48,8 @@ import {
   GroupChatMode,
   CharacterCard,
   AssembledContext,
+  hasActiveCustomModel,
+  resolveRequestConfig,
 } from '@prism/shared-types';
 import { AIFactory } from '@prism/ai-factory';
 import { AdapterRouter } from '@prism/ai-adapters';
@@ -103,7 +105,11 @@ export class UnifiedAIClient {
   private adapterRouter?: AdapterRouter;
 
   constructor(options: UnifiedAIClientOptions = {}) {
-    this.aiConfig = options.aiConfig;
+    // A selected custom model is resolved right here, so that the client
+    // addresses the user's own endpoint no matter how it was constructed.
+    this.aiConfig = options.aiConfig
+      ? resolveRequestConfig(options.aiConfig)
+      : undefined;
     this.prismApiUrl = options.prismApiUrl;
     this.prismApiKey = options.prismApiKey;
 
@@ -112,9 +118,9 @@ export class UnifiedAIClient {
       networkStatusService.updateApiUrl(this.prismApiUrl);
     }
 
-    if (options.aiConfig) {
+    if (this.aiConfig) {
       // Ensure proper configuration for local providers
-      const configForService = this.prepareConfigForService(options.aiConfig);
+      const configForService = this.prepareConfigForService(this.aiConfig);
       this.aiService = new AIService(configForService);
       this.initCapabilityServices(configForService);
       this.initAdapterRouter(configForService);
@@ -351,7 +357,11 @@ export class UnifiedAIClient {
         const isLocalProvider = this.isLocalModelProvider(
           this.aiConfig.provider,
         );
-        const shouldUseLocal = isLocalProvider || !isOnline;
+        // A custom model is addressed at the user's own endpoint, which the
+        // AI service talks to directly. It must not be sent to the Prism
+        // API instead, even when the browser is online.
+        const isCustomModel = hasActiveCustomModel(this.aiConfig);
+        const shouldUseLocal = isLocalProvider || isCustomModel || !isOnline;
 
         if (shouldUseLocal) {
           // Use local AI service (offline first approach)
@@ -745,12 +755,16 @@ export class UnifiedAIClient {
   }
 
   updateAIConfig(config: AIConfig) {
-    this.aiConfig = config;
+    // A selected custom model is resolved here, so that the request is
+    // addressed at the user's own endpoint instead of the hosted provider
+    // that happens to be selected in the provider list.
+    const resolvedConfig = resolveRequestConfig(config);
+    this.aiConfig = resolvedConfig;
     if (this.aiService) {
-      const configForService = this.prepareConfigForService(config);
+      const configForService = this.prepareConfigForService(resolvedConfig);
       this.aiService.updateConfig(configForService);
     } else {
-      const configForService = this.prepareConfigForService(config);
+      const configForService = this.prepareConfigForService(resolvedConfig);
       this.aiService = new AIService(configForService);
     }
 
