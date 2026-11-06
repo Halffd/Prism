@@ -25,6 +25,7 @@ import {
   setLoading,
   setCurrentSessionId,
   setSessions,
+  setOpenTabs,
   setAIConfig,
   updateAIConfig,
   setContext,
@@ -43,6 +44,19 @@ import { HeaderSection } from './HeaderSection';
 import { ImageGenerationSection } from './ImageGenerationSection';
 import { IframeInjectionSection } from './IframeInjectionSection';
 import { ErrorModalHost } from '../components/ErrorModal';
+import { ChatTabBar } from '../chat/ChatTabBar';
+import '../chat/ChatTabs.scss';
+import {
+  closeTab,
+  focusTab,
+  initialTabState,
+  loadTabState,
+  openTab,
+  restoreTabState,
+  saveTabState,
+  type ChatTabState,
+} from '../chat/chat-tabs';
+import { resolveRequestConfig } from '../chat/custom-model';
 
 // Initialize with default settings - will be overridden by stored settings
 const defaultAIConfig: AIConfig = {
@@ -60,9 +74,8 @@ let client = new UnifiedAIClient({ aiConfig: defaultAIConfig });
 
 export function Popup() {
   const dispatch = useDispatch<AppDispatch>();
-  const { messages, currentSessionId, sessions, loading } = useSelector(
-    (state: RootState) => state.chat,
-  );
+  const { messages, currentSessionId, sessions, openTabs, loading } =
+    useSelector((state: RootState) => state.chat);
   const {
     config: reduxAIConfig,
     availableModels,
@@ -254,8 +267,10 @@ export function Popup() {
       }
     });
 
-    // Load history from local IndexedDB
-    loadChatHistoryFromDB();
+    // Restore the open chat tabs and the conversation they show. The tab
+    // state is stored across page loads, so the popup opens on the chats
+    // the user was last working in rather than on an empty conversation.
+    void restoreChatTabs();
 
     // Load chat sessions from local IndexedDB
     loadChatSessionsFromDB();
@@ -526,9 +541,40 @@ export function Popup() {
     };
   }, [dispatch]);
 
-  const loadChatHistoryFromDB = async () => {
+  /**
+   * Restores the open tabs and loads the conversation of the focused tab.
+   *
+   * A tab whose session no longer exists is dropped, and a tab list that
+   * cannot be restored falls back to a single fresh chat, so the popup
+   * always opens on something usable.
+   */
+  const restoreChatTabs = async () => {
     try {
-      const history = await loadChatHistory(currentSessionId);
+      const storedSessions = await getChatSessions();
+      const state = await restoreTabState(
+        storedSessions.map((session) => session.id),
+      );
+
+      // A chat that was never written to the database — a fresh tab from
+      // the last session, for instance — is written now, so that it is a
+      // real chat and not a reference to nothing.
+      if (!storedSessions.some((session) => session.id === state.activeTabId)) {
+        await saveChatHistory(state.activeTabId, []);
+        loadChatSessionsFromDB();
+      }
+
+      dispatch(setOpenTabs(state.openTabs));
+      dispatch(setCurrentSessionId(state.activeTabId));
+      await loadChatHistoryFromDB(state.activeTabId);
+    } catch (error) {
+      console.error('Failed to restore chat tabs:', error);
+      dispatch(setMessages([]));
+    }
+  };
+
+  const loadChatHistoryFromDB = async (sessionId = currentSessionId) => {
+    try {
+      const history = await loadChatHistory(sessionId);
       dispatch(setMessages(history));
     } catch (error) {
       console.error('Failed to load chat history from database:', error);
@@ -574,8 +620,24 @@ export function Popup() {
     }
   };
 
+  /**
+   * Applies a change to the open tabs and stores the result.
+   *
+   * The stored state is the source of truth across page loads, so every
+   * change goes through here rather than being written to storage from
+   * several places.
+   */
+  const applyTabState = async (next: ChatTabState) => {
+    dispatch(setOpenTabs(next.openTabs));
+    dispatch(setCurrentSessionId(next.activeTabId));
+    await saveTabState(next);
+  };
+
   const switchToSession = async (sessionId: string) => {
-    dispatch(setCurrentSessionId(sessionId));
+    const state = await loadTabState();
+    const base =
+      state ?? initialTabState(currentSessionId || `session_${Date.now()}`);
+    await applyTabState(focusTab(base, sessionId));
     try {
       const history = await loadChatHistory(sessionId);
       dispatch(setMessages(history));
@@ -586,10 +648,34 @@ export function Popup() {
     }
   };
 
-  const createNewSession = () => {
+  const createNewSession = async () => {
     const newSessionId = `session_${Date.now()}`;
-    dispatch(setCurrentSessionId(newSessionId));
+    const state = await loadTabState();
+    const base =
+      state ?? initialTabState(currentSessionId || `session_${Date.now()}`);
+    // The session is written straight away so that it exists as a chat
+    // even while it is still empty. Without it the tab would be dropped
+    // on the next load as a reference to a conversation that is not there.
+    await saveChatHistory(newSessionId, []);
+    await applyTabState(openTab(base, newSessionId));
     dispatch(setMessages([]));
+    loadChatSessionsFromDB();
+  };
+
+  /** Closes a tab, leaving the conversation itself in storage. */
+  const closeChatTab = async (sessionId: string) => {
+    const state = await loadTabState();
+    if (!state) {
+      return;
+    }
+    const next = closeTab(state, sessionId);
+    if (next === state) {
+      return;
+    }
+    await applyTabState(next);
+    if (next.activeTabId === sessionId) {
+      await loadChatHistoryFromDB(next.activeTabId);
+    }
   };
 
   const deleteSession = async (sessionId: string) => {
@@ -597,9 +683,25 @@ export function Popup() {
       try {
         await deleteChatSession(sessionId);
         loadChatSessionsFromDB();
+        // A deleted conversation must not stay open as a tab.
+        const state = await loadTabState();
+        if (state && state.openTabs.includes(sessionId)) {
+          const remaining = state.openTabs.filter((id) => id !== sessionId);
+          await applyTabState(
+            remaining.length === 0
+              ? initialTabState(`session_${Date.now()}`)
+              : {
+                  openTabs: remaining,
+                  activeTabId:
+                    state.activeTabId === sessionId
+                      ? remaining[Math.max(0, remaining.length - 1)]
+                      : state.activeTabId,
+                },
+          );
+        }
         // If we're deleting the current session, create a new one
         if (sessionId === currentSessionId) {
-          createNewSession();
+          await createNewSession();
         }
       } catch (error) {
         console.error('Failed to delete session:', error);
@@ -1489,8 +1591,11 @@ export function Popup() {
         conversationHistory = [systemMessage, ...conversationHistory];
       }
 
-      // Update the client with the current AI config (including model)
-      client.updateAIConfig(reduxAIConfig);
+      // Update the client with the current AI config (including model).
+      // A selected custom model is resolved here so that the request is
+      // addressed at the user's own endpoint instead of the hosted provider
+      // that happens to be selected in the provider list.
+      client.updateAIConfig(resolveRequestConfig(reduxAIConfig));
 
       // Try to send the message using the client (which handles online/offline)
       const response = await client.sendMessage(
@@ -1918,6 +2023,15 @@ export function Popup() {
         signInWithGoogle={signInWithGoogle}
         signOut={signOut}
         autoSyncEnabled={autoSyncEnabled}
+      />
+
+      <ChatTabBar
+        openTabs={openTabs}
+        activeTabId={currentSessionId}
+        sessions={sessions}
+        onSelect={(sessionId) => void switchToSession(sessionId)}
+        onClose={(sessionId) => void closeChatTab(sessionId)}
+        onNewTab={() => void createNewSession()}
       />
 
       <div className="metrics-bar">

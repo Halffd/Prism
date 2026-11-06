@@ -14,6 +14,7 @@ pub enum Event {
     Key(KeyEvent),
     Mouse(MouseEvent),
     Stream(StreamEvent),
+    AgentDone(prism_core::agent::AgentResult),
     Resize(u16, u16),
     Tick(u64),
 }

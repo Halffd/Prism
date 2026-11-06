@@ -103,6 +103,34 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
           <option value="zai">Z.AI</option>
         </select>
 
+        {(aiConfig.customModels ?? []).length > 0 && (
+          <select
+            value={aiConfig.activeCustomModelId ?? ''}
+            onChange={(e) => {
+              const customModel = (aiConfig.customModels ?? []).find(
+                (entry) => entry.id === e.target.value,
+              );
+              if (!customModel) {
+                return;
+              }
+              updateAIConfig({
+                ...aiConfig,
+                activeCustomModelId: customModel.id,
+                model: customModel.model,
+              });
+            }}
+            className="custom-model-selector"
+            title="Select a custom model endpoint"
+          >
+            <option value="">Custom: none</option>
+            {(aiConfig.customModels ?? []).map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.label || 'Untitled'}
+              </option>
+            ))}
+          </select>
+        )}
+
         <select
           value={aiConfig.model || ''}
           onChange={(e) => updateModel(e.target.value)}

@@ -53,6 +53,8 @@ pub struct App {
     pub streaming: Option<StreamState>,
     pub queue: VecDeque<String>,
     pub queue_paused: bool,
+    pub agent_running: bool,
+    pub last_agent_task: String,
     pub spinner: usize,
 
     /// Lines counted from the bottom that are hidden (0 = follow).
@@ -90,6 +92,8 @@ impl App {
             streaming: None,
             queue: VecDeque::new(),
             queue_paused: false,
+            agent_running: false,
+            last_agent_task: String::new(),
             spinner: 0,
             scroll: 0,
             line_index: Vec::new(),
@@ -236,6 +240,7 @@ impl App {
             Event::Key(key) => self.handle_key(key, tx),
             Event::Mouse(mouse) => self.handle_mouse(mouse),
             Event::Stream(ev) => self.handle_stream(ev, tx),
+            Event::AgentDone(result) => self.handle_agent_done(result),
             Event::Resize(_, _) => {}
             Event::Tick(t) => self.handle_tick(t),
         }
@@ -255,6 +260,48 @@ impl App {
                 self.status = format!("mouse click at {},{}", mouse.column, mouse.row);
             }
             _ => {}
+        }
+    }
+
+    fn handle_agent_done(&mut self, result: prism_core::agent::AgentResult) {
+        self.agent_running = false;
+        for (i, step) in result.steps.iter().enumerate() {
+            self.push_message(
+                "system",
+                &format!(
+                    "[{}/{}] {}: {} -> {}",
+                    i + 1,
+                    result.steps.len(),
+                    step.action,
+                    step.action_input,
+                    if step.observation.len() > 120 {
+                        format!("{}…", &step.observation[..120])
+                    } else {
+                        step.observation.clone()
+                    }
+                ),
+            );
+        }
+        if result.completed {
+            self.push_message("assistant", &result.answer);
+            self.conv.messages.push(StoredMessage {
+                role: "user".into(),
+                content: self.last_agent_task.clone(),
+                thinking: None,
+            });
+            self.conv.messages.push(StoredMessage {
+                role: "assistant".into(),
+                content: result.answer.clone(),
+                thinking: None,
+            });
+            self.save();
+            self.status = "agent finished".into();
+        } else {
+            self.push_message(
+                "system",
+                result.error.as_deref().unwrap_or("agent stopped"),
+            );
+            self.status = "agent failed".into();
         }
     }
 
@@ -373,7 +420,7 @@ impl App {
 
     // -- commands ----------------------------------------------------------
 
-    fn run_command(&mut self, raw: &str) {
+    fn run_command(&mut self, raw: &str, tx: &std::sync::mpsc::Sender<Event>) {
         let line = raw.trim_start_matches('/');
         let mut parts = line.splitn(2, char::is_whitespace);
         let cmd = parts.next().unwrap_or("");
@@ -518,6 +565,31 @@ impl App {
                 self.input = arg.chars().collect();
                 self.cursor = self.input.len();
             }
+            "agent" => {
+                if arg.is_empty() {
+                    self.push_message(
+                        "system",
+                        "usage: /agent <task> — run the core agent loop (calculator + file tools; writes are denied headless)",
+                    );
+                } else if self.agent_running {
+                    self.push_message("system", "agent already running");
+                } else if self.streaming.is_some() {
+                    self.push_message("system", "wait for the chat stream to finish");
+                } else {
+                    let root = host::config_dir()
+                        .and_then(|d| d.parent().map(|p| p.to_path_buf()))
+                        .unwrap_or_else(|| std::path::PathBuf::from("."));
+                    self.last_agent_task = arg.clone();
+                    self.agent_running = true;
+                    self.status = "agent running…".into();
+                    if let Err(e) =
+                        crate::chat::agent_job::spawn(&self.settings, &arg, root, tx)
+                    {
+                        self.agent_running = false;
+                        self.push_message("system", &e);
+                    }
+                }
+            }
             "quit" | "q" => self.quit = true,
             other => self.push_message("system", &format!("unknown command /{other} — try /help")),
         }
@@ -600,7 +672,7 @@ impl App {
                     self.history.pop_front();
                 }
                 if text.starts_with('/') {
-                    self.run_command(&text);
+                    self.run_command(&text, tx);
                 } else {
                     self.send_message(&text, tx);
                 }

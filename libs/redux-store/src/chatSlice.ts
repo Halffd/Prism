@@ -6,6 +6,7 @@ const initialState: ChatState = {
   messages: [],
   currentSessionId: `session_${Date.now()}`,
   sessions: [],
+  openTabs: [] as string[],
   loading: false,
   selectedProvider: 'prism-api',
   history: {
@@ -57,6 +58,9 @@ export const chatSlice = createSlice({
     },
     setCurrentSessionId: (state, action: PayloadAction<string>) => {
       state.currentSessionId = action.payload;
+    },
+    setOpenTabs: (state, action: PayloadAction<string[]>) => {
+      state.openTabs = action.payload;
     },
     setSessions: (state, action: PayloadAction<any[]>) => {
       state.sessions = action.payload;
@@ -225,6 +229,7 @@ export const {
   clearMessages,
   setCurrentSessionId,
   setSessions,
+  setOpenTabs,
   setLoading,
   setSelectedProvider,
   updateSession,

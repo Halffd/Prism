@@ -61,6 +61,7 @@ export { default as agentReducer } from './agentSlice';
 // Export individual slice actions if needed separately
 export {
   setCurrentSessionId,
+  setOpenTabs,
   setSelectedProvider as setChatSelectedProvider,
   updateMessage as updateChatMessage,
   clearMessages as clearChatMessages,

@@ -113,3 +113,119 @@ pub fn effective_model(settings: &Settings) -> String {
             .unwrap_or_default()
     }
 }
+
+
+/// Run the core agent loop in a background thread and forward steps as
+/// events. Uses `prism_core::agent::run_agent` with a blocking LLM step
+/// over the shared reqwest transport; native file tools are registered
+/// against the workspace root. Streaming surfaces drive the same loop
+/// via their own StepFn — loop semantics live in the core only.
+pub mod agent_job {
+    use super::*;
+    use prism_core::agent::{
+        run_agent, AgentResult, CalculatorTool, StepMessage, ToolRegistry,
+    };
+    use prism_core::native_tools::{self};
+    use prism_core::transport::{HttpRequest, ReqwestTransport, Transport};
+
+    struct FilelessLlmStep<'a> {
+        transport: &'a ReqwestTransport,
+        base_url: String,
+        api_key: String,
+        model: String,
+        temperature: f32,
+        max_tokens: Option<u32>,
+    }
+
+    impl<'a> FilelessLlmStep<'a> {
+        /// One blocking completion over the OpenAI-compat endpoint.
+        fn complete(&self, system: &str, history: &[StepMessage]) -> Result<String, String> {
+            let body = serde_json::json!({
+                "model": self.model,
+                "temperature": self.temperature,
+                "max_tokens": self.max_tokens.unwrap_or(2048),
+                "messages": std::iter::once(serde_json::json!({
+                    "role": "system", "content": system,
+                }))
+                .chain(history.iter().map(|m| serde_json::json!({
+                    "role": m.role, "content": m.content,
+                })))
+                .collect::<Vec<_>>(),
+            });
+            let mut headers = vec![("Content-Type".to_string(), "application/json".to_string())];
+            if !self.api_key.is_empty() {
+                headers.push(("Authorization".to_string(), format!("Bearer {}", self.api_key)));
+            }
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("runtime: {e}"))?;
+            rt.block_on(async {
+                let bytes = self
+                    .transport
+                    .post_body(HttpRequest {
+                        url: prism_core::providers::chat_completions_url(&self.base_url),
+                        headers,
+                        body: Some(body.to_string()),
+                    })
+                    .await?;
+                let v: serde_json::Value =
+                    serde_json::from_slice(&bytes).map_err(|e| format!("json: {e}"))?;
+                v["choices"][0]["message"]["content"]
+                    .as_str()
+                    .map(String::from)
+                    .ok_or_else(|| "missing choices[0].message.content in response".into())
+            })
+        }
+    }
+
+    /// Spawn the agent loop; `tx` receives `Event::Stream` updates keyed
+    /// as system lines (step thoughts/actions) plus the final answer.
+    pub fn spawn(
+        settings: &Settings,
+        task: &str,
+        workspace_root: std::path::PathBuf,
+        tx: &Sender<Event>,
+    ) -> Result<(), String> {
+        let resolved = settings
+            .resolve_provider(&settings.provider)
+            .ok_or_else(|| format!("unknown provider {}", settings.provider))?;
+        let api_key = settings.key_for(&settings.provider);
+        if resolved.needs_key && api_key.trim().is_empty() {
+            return Err(format!("API key required for {} — /key <key>", resolved.label));
+        }
+        let step_impl = FilelessLlmStep {
+            transport: Box::leak(Box::new(ReqwestTransport::new())),
+            base_url: resolved.base_url.clone(),
+            api_key: api_key.trim().to_string(),
+            model: if settings.model.trim().is_empty() {
+                resolved.default_model.clone()
+            } else {
+                settings.model.trim().to_string()
+            },
+            temperature: settings.temperature,
+            max_tokens: settings.max_tokens,
+        };
+        let task = task.to_string();
+        let tx = tx.clone();
+
+        // Agent loop runs on its own thread (blocking LLM steps), tools
+        // scoped to the workspace root. Mutating tools stay on Ask =>
+        // headless deny unless the user flips them with /agent-perms.
+        std::thread::spawn(move || {
+            let registry = ToolRegistry::new();
+            registry.register(std::sync::Arc::new(CalculatorTool));
+            native_tools::register_all(&registry, &workspace_root);
+
+            let result: AgentResult = {
+                let mut step_fn = |system: &str, hist: &[StepMessage]| {
+                    step_impl.complete(system, hist)
+                };
+                run_agent(&task, &mut step_fn, &registry, 12, &|_, _| false)
+            };
+
+            let _ = tx.send(Event::AgentDone(result));
+        });
+        Ok(())
+    }
+}

@@ -11,6 +11,7 @@ import {
 import { UnifiedAIClient } from '@prism/api-client';
 import { logger, type LogLevel } from '@prism/logging';
 import { ModelRecentsEditor } from './ModelRecentsEditor';
+import { CustomModelManager } from '../chat/CustomModelManager';
 import {
   getSetting,
   saveSetting,
@@ -1758,6 +1759,11 @@ export function Settings({ onClose }: SettingsProps) {
               aliases or removing stale entries.
             </small>
           </div>
+
+          <CustomModelManager
+            aiConfig={aiConfig}
+            onChange={(config) => setAiConfig(config)}
+          />
         </div>
 
         <div className="settings-section">

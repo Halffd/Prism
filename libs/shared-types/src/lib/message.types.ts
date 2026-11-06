@@ -129,6 +129,30 @@ export type AIProvider =
   | 'jina'
   | 'searxng';
 
+/**
+ * A user-defined model served over an OpenAI-compatible HTTP API.
+ *
+ * Custom models let the user point Prism at any endpoint that speaks the
+ * OpenAI chat-completions protocol, without the extension needing a
+ * provider entry for it.
+ */
+export interface CustomModel {
+  /** Stable identifier, unique within the user's custom model list. */
+  id: string;
+  /** Display name shown in the model picker. */
+  label: string;
+  /** Base URL of the API, e.g. `https://api.example.com/v1`. */
+  baseUrl: string;
+  /** API key sent as a bearer token. Empty for endpoints that need none. */
+  apiKey?: string;
+  /** Model identifier passed to the endpoint, e.g. `my-model:latest`. */
+  model: string;
+  /** Optional preset list of model ids the endpoint is known to serve. */
+  models?: string[];
+  /** Epoch milliseconds the entry was created. */
+  createdAt?: number;
+}
+
 export interface AIConfig {
   provider: AIProvider;
   providerKeys?: {
@@ -191,6 +215,10 @@ export interface AIConfig {
   hardware?: HardwareProfile;
   /** Reduced memory/animation/token budgets for low-spec machines. */
   lowSpecMode?: boolean;
+  /** User-defined OpenAI-compatible endpoints. */
+  customModels?: CustomModel[];
+  /** Id of the active entry in `customModels`. */
+  activeCustomModelId?: string;
 }
 
 export interface HardwareProfile {

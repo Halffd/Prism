@@ -12,7 +12,7 @@ use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
 pub const HELP_LINES: &[&str] = &[
-    "Prism CLI — commands: /help /new /load N /del N /model X /provider X /key X /system X /think /temp X /conn direct|api /search X /quit",
+    "Prism CLI — commands: /help /new /load N /del N /model X /provider X /key X /system X /think /temp X /conn direct|api /search X /agent <task> /quit",
     "keys: Enter send · Esc stop/clear · Ctrl+F search (n/N navigate) · PgUp/PgDn scroll · Ctrl+T thinking · Alt+N new chat · Alt+P/K pick chat · Alt+O open · Ctrl+U clear input · Ctrl+W del word · Ctrl+C quit",
 ];
 

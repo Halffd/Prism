@@ -1,0 +1,159 @@
+/**
+ * Styles for the chat tab strip and the custom model manager.
+ *
+ * Both the popup and the chat page show the tab strip, so the styles live
+ * in their own file that each of them imports. The colours come from the
+ * theme variables the extension already defines, so the strip follows the
+ * user's chosen theme.
+ */
+
+.chat-tab-bar {
+  display: flex;
+  align-items: stretch;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--surface-container-low);
+  border-bottom: 1px solid var(--outline-variant, rgba(128, 128, 128, 0.2));
+  overflow-x: auto;
+  scrollbar-width: thin;
+  flex-shrink: 0;
+
+  .chat-tab {
+    display: flex;
+    align-items: center;
+    max-width: 180px;
+    min-width: 0;
+    border-radius: var(--radius-lg);
+    background: var(--surface-container-high);
+    transition: background 0.15s ease;
+
+    &:hover {
+      background: var(--surface-container-highest);
+    }
+
+    &.active {
+      background: var(--primary);
+      color: var(--on-primary);
+
+      .chat-tab-label {
+        color: var(--on-primary);
+      }
+
+      .chat-tab-close {
+        color: var(--on-primary);
+      }
+    }
+
+    .chat-tab-label {
+      flex: 1;
+      min-width: 0;
+      padding: var(--spacing-xs) var(--spacing-sm);
+      border: none;
+      background: transparent;
+      color: var(--on-surface);
+      font-size: var(--label-sm);
+      text-align: left;
+      cursor: pointer;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .chat-tab-close {
+      flex-shrink: 0;
+      padding: 0 var(--spacing-xs);
+      border: none;
+      background: transparent;
+      color: var(--on-surface-variant);
+      font-size: var(--label-sm);
+      line-height: 1;
+      cursor: pointer;
+
+      &:hover {
+        color: var(--on-surface);
+      }
+    }
+  }
+
+  .chat-tab-new {
+    flex-shrink: 0;
+    width: 28px;
+    border: none;
+    border-radius: var(--radius-pill);
+    background: var(--surface-container-high);
+    color: var(--on-surface);
+    font-size: var(--font-md);
+    line-height: 1;
+    cursor: pointer;
+
+    &:hover {
+      background: var(--surface-container-highest);
+    }
+  }
+}
+
+.custom-model-manager {
+  .custom-model-entry {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-sm);
+    margin-bottom: var(--spacing-sm);
+    border-radius: var(--radius-lg);
+    background: var(--surface-container-high);
+
+    &.active {
+      outline: 1px solid var(--primary);
+    }
+
+    .custom-model-row {
+      display: flex;
+      gap: var(--spacing-xs);
+      align-items: center;
+    }
+
+    .custom-model-select {
+      flex: 1;
+      text-align: left;
+      border: none;
+      background: transparent;
+      color: var(--on-surface);
+      cursor: pointer;
+      font-size: var(--label-md);
+    }
+
+    .custom-model-delete {
+      border: none;
+      border-radius: var(--radius-pill);
+      background: var(--error-container, var(--surface-container-highest));
+      color: var(--on-error-container, var(--on-surface));
+      padding: 2px 8px;
+      cursor: pointer;
+      font-size: var(--label-sm);
+    }
+  }
+
+  .custom-model-add {
+    width: 100%;
+    padding: var(--spacing-sm);
+    border: none;
+    border-radius: var(--radius-lg);
+    background: var(--surface-container-high);
+    color: var(--on-surface);
+    cursor: pointer;
+
+    &:hover {
+      background: var(--surface-container-highest);
+    }
+  }
+}
+
+.custom-model-selector {
+  max-width: 140px;
+  padding: 4px 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--outline-variant, rgba(128, 128, 128, 0.35));
+  background: var(--surface-container-high);
+  color: var(--on-surface);
+  font-size: var(--label-sm);
+}

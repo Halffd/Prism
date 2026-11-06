@@ -11,6 +11,8 @@ export interface ChatState {
   messages: Message[];
   currentSessionId: string;
   sessions: ChatSession[];
+  /** Session ids of the open chat tabs, in the order they are shown. */
+  openTabs: string[];
   loading: boolean;
   selectedProvider: AIConfig['provider'];
   history: ChatHistoryState;
