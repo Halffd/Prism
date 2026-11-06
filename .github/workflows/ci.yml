@@ -5,39 +5,250 @@ on:
     branches:
       - main
   pull_request:
+  workflow_dispatch:
 
 permissions:
   actions: read
   contents: read
 
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
 jobs:
-  main:
+  # --- Rust: core, CLI, WASM, API ---
+  rust:
+    name: Rust (core, cli, wasm, api)
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
-          filter: tree:0
           fetch-depth: 0
 
-      # This enables task distribution via Nx Cloud
-      # Run this command as early as possible, before dependencies are installed
-      # Learn more at https://nx.dev/ci/reference/nx-cloud-cli#npx-nxcloud-startcirun
-      # Uncomment this line to enable task distribution
-      # - run: npx nx start-ci-run --distribute-on="3 linux-medium-js" --stop-agents-after="e2e-ci"
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown, aarch64-linux-android
 
-      # Cache node_modules
-      - uses: actions/setup-node@v4
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install Android SDK/NDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: 34
+          ndk-version: 28.2.13676358
+          java-version: 21
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      - name: Rust fmt
+        run: cargo fmt --all -- --check
+
+      - name: Rust clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Rust test (prism-core)
+        run: cargo test -p prism-core --all-targets
+
+      - name: Rust test (prism-cli)
+        run: cargo test -p prism-cli
+
+      - name: Rust build (prism-slint desktop)
+        run: cargo build -p prism-slint
+
+      - name: Rust check (prism-wasm)
+        run: cargo check -p prism-wasm --target wasm32-unknown-unknown
+
+      - name: Build API (Node/TypeScript)
+        working-directory: apps/api
+        run: |
+          npm ci
+          npm run build
+
+  # --- Android APK build ---
+  android-apk:
+    name: Android APK (prism-slint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: rust
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Android SDK/NDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: 34
+          ndk-version: 28.2.13676358
+          java-version: 21
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build APK
+        working-directory: apps/slint
+        run: |
+          cargo apk build --target aarch64-linux-android
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: prism-slint-apk
+          path: apps/slint/target/debug/apk/prism-slint.apk
+          retention-days: 30
+
+  # --- JS/TS: extension, web, TUI, etc. ---
+  js:
+    name: JS/TS (extension, web, TUI, etc.)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'npm'
 
-      - run: npm ci
-      - run: npx playwright install --with-deps
+      - name: Install dependencies
+        run: npm ci
 
-      # Prepend any command with "nx-cloud record --" to record its logs to Nx Cloud
-      # - run: npx nx-cloud record -- echo Hello World
-      # When you enable task distribution, run the e2e-ci task instead of e2e
-      - run: npx nx run-many -t lint test build typecheck e2e
-      # Nx Cloud recommends fixes for failures to help you get CI green faster. Learn more: https://nx.dev/ci/features/self-healing-ci
-      - run: npx nx fix-ci
-        if: always()
+      - name: Typecheck
+        run: npx nx run-many -t typecheck
+
+      - name: Lint
+        run: npx nx run-many -t lint
+
+      - name: Test
+        run: npx nx run-many -t test
+
+      - name: Build
+        run: npx nx run-many -t build
+
+  # --- Conformance fixtures (core + wasm) ---
+  conformance:
+    name: Conformance (core + wasm)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      - name: Conformance test (native)
+        run: cargo test -p prism-core conformance
+
+      - name: Conformance test (WASM)
+        working-directory: crates/prism-wasm
+        run: wasm-pack test --node --headless chrome
+
+# --- Release on tag push ---
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [rust, android-apk, js]
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Android SDK/NDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: 34
+          ndk-version: 28.2.13676358
+          java-version: 21
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Update Cargo.toml version
+        run: |
+          sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
+          sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" apps/slint/Cargo.toml
+          sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" apps/cli/Cargo.toml
+          sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" apps/api/package.json
+          sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" apps/extension/package.json
+          sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" crates/prism-core/Cargo.toml
+          sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" crates/prism-wasm/Cargo.toml
+
+      - name: Build release (core + CLI + desktop)
+        run: |
+          cargo build --release -p prism-core -p prism-cli -p prism-slint
+          cargo build --release -p prism-wasm --target wasm32-unknown-unknown
+
+      - name: Build Android APK (release)
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: 34
+          ndk-version: 28.2.13676358
+          java-version: 21
+      - run: |
+          cd apps/slint
+          cargo apk build --target aarch64-linux-android --release
+
+      - name: Build API
+        working-directory: apps/api
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build Extension
+        working-directory: apps/extension
+        run: |
+          npm ci
+          npm run build
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Prism ${{ steps.version.outputs.VERSION }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            target/release/prism
+            target/release/prism-slint
+            target/wasm32-unknown-unknown/release/prism_wasm.wasm
+            apps/slint/target/release/apk/prism-slint.apk
+            apps/api/dist
+            apps/extension/dist
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
