@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   AIConfig,
   ExtensionSettings,
@@ -13,6 +13,7 @@ import { logger, type LogLevel } from '@prism/logging';
 import { ModelRecentsEditor } from './ModelRecentsEditor';
 import { CustomModelManager } from '../chat/CustomModelManager';
 import { customModelOptions } from '../chat/custom-model';
+import { exportData, importData, clearData, downloadEnvelope, parseImport } from '../chat/sync';
 import {
   defaultMediaSettings,
   loadMediaSettings,
@@ -56,6 +57,8 @@ export function Settings({ onClose }: SettingsProps) {
   const [imageGenerationModel, setImageGenerationModel] = useState<string>(
     'stabilityai/stable-diffusion-2-1',
   );
+  const [syncStatus, setSyncStatus] = useState<string>('');
+  const syncFileRef = useRef<HTMLInputElement>(null);
   const [mediaSettings, setMediaSettings] =
     useState<MediaSettings>(defaultMediaSettings);
   const [excludedSites, setExcludedSites] = useState<string[]>([]);
@@ -2200,6 +2203,63 @@ export function Settings({ onClose }: SettingsProps) {
               </select>
             </div>
           ))}
+        </div>
+
+        <div className="settings-section">
+          <h3>Data Sync</h3>
+          <small className="form-hint">
+            Exchange conversations and prompts with the Prism desktop /
+            mobile client (slint). Export writes a JSON envelope; import
+            applies one; clear removes local conversations and prompts
+            (settings are kept).
+          </small>
+          <div className="form-group" style={{ display: 'flex', gap: 8 }}>
+            <button
+              className="btn btn-secondary"
+              onClick={async () => {
+                const env = await exportData(() => (aiConfig ?? {}) as unknown as Record<string, unknown>);
+                downloadEnvelope(env, 'prism-data.json');
+                setSyncStatus('exported prism-data.json');
+              }}
+            >
+              Export
+            </button>
+            <button
+              className="btn btn-secondary"
+              onClick={() => syncFileRef.current?.click()}
+            >
+              Import
+            </button>
+            <input
+              ref={syncFileRef}
+              type="file"
+              accept="application/json,.json"
+              style={{ display: 'none' }}
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const text = await file.text();
+                const env = parseImport(text);
+                if (!env) {
+                  setSyncStatus('not a Prism data envelope');
+                  return;
+                }
+                const n = await importData(env);
+                setSyncStatus(`imported ${n.conversations} conversations, ${n.prompts} prompts`);
+                e.target.value = '';
+              }}
+            />
+            <button
+              className="btn btn-danger"
+              onClick={async () => {
+                const n = await clearData();
+                setSyncStatus(`cleared ${n.sessions} conversations, ${n.prompts} prompts`);
+              }}
+            >
+              Clear local
+            </button>
+          </div>
+          {syncStatus && <small className="form-hint">{syncStatus}</small>}
         </div>
 
         <div className="settings-section">

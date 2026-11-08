@@ -466,6 +466,59 @@ pub fn fetch_models(ui: &AppWindow, state: &Rc<RefCell<State>>) {
     );
 }
 
+// ---- data sync ----
+
+fn sync_status(ui: &AppWindow, msg: impl Into<SharedString>) {
+    ui.set_sync_status(msg.into());
+}
+
+fn sync_export(ui: &AppWindow) {
+    // Desktop: write the envelope to a user-visible file. Slint has no
+    // native file dialog dependency; the config dir path is reported.
+    match host::export_data(None) {
+        Ok(()) => {
+            let where_to = host::sync_path()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "config dir".into());
+            sync_status(ui, format!("exported to {where_to}"));
+        }
+        Err(e) => sync_status(ui, format!("export failed: {e}")),
+    }
+}
+
+fn sync_import(ui: &AppWindow) {
+    // Import the envelope from the standard sync path (the file the
+    // extension exports). Missing file = clear status message.
+    let Some(path) = host::sync_path() else {
+        sync_status(ui, "no config dir on this platform");
+        return;
+    };
+    if !path.exists() {
+        sync_status(ui, format!("no envelope at {}", path.display()));
+        return;
+    }
+    match host::import_data(&path) {
+        Ok(n) => sync_status(ui, format!("imported {n} conversations")),
+        Err(e) => sync_status(ui, format!("import failed: {e}")),
+    }
+}
+
+fn sync_clear(ui: &AppWindow, state: &Rc<RefCell<State>>) {
+    match host::clear_data() {
+        Ok(n) => {
+            {
+                let mut st = state.borrow_mut();
+                st.lines.clear();
+                st.current_id = None;
+                st.current_created = 0;
+                st.confirm_delete = None;
+            }
+            sync_status(ui, format!("cleared {n} conversations (settings kept)"));
+        }
+        Err(e) => sync_status(ui, format!("clear failed: {e}")),
+    }
+}
+
 // ---- custom providers ----
 
 fn refresh_custom_provider_rows(ui: &AppWindow, settings: &Settings) {
@@ -1335,6 +1388,45 @@ pub fn run_ui() {
         ui.on_custom_provider_add(move || {
             let Some(ui) = ui_w.upgrade() else { return };
             add_custom_provider(&ui, &state_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        ui.on_sync_export(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            sync_export(&ui);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        ui.on_sync_import(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            sync_import(&ui);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_sync_clear(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            sync_clear(&ui, &state_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        ui.on_sync_login(move |_email, _password| {
+            // Desktop has no Prism cloud account server wired; the
+            // extension signs in via its auth provider. Report clearly
+            // rather than pretending.
+            let Some(ui) = ui_w.upgrade() else { return };
+            ui.set_sync_status("cloud sign-in is not available on desktop".into());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        ui.on_sync_logout(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            ui.set_sync_status("not signed in".into());
         });
     }
     {

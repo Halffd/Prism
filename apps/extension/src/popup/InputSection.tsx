@@ -1,5 +1,7 @@
+import { useRef, useState } from 'react';
 import type React from 'react';
 import { VoiceInput } from './VoiceInput';
+import { EmojiPicker } from '../components/EmojiPicker';
 
 interface InputSectionProps {
   input: string;
@@ -68,6 +70,48 @@ export const InputSection: React.FC<InputSectionProps> = ({
   voiceClient,
   useWhisper,
 }) => {
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Remembers where the caret was when the picker opened, so the chosen
+  // character lands where the user was typing rather than at the end.
+  const caretRef = useRef<number | null>(null);
+
+  const openEmojiPicker = () => {
+    caretRef.current = textareaRef.current?.selectionStart ?? null;
+    setShowEmojiPicker((open) => !open);
+  };
+
+  /**
+   * Inserts the chosen character at the remembered caret position.
+   *
+   * The textarea's selection is restored before insertion so the browser
+   * puts the character exactly where the user left off.
+   */
+  const insertAtCaret = (value: string) => {
+    const textarea = textareaRef.current;
+    const position = caretRef.current ?? textarea?.selectionStart ?? input.length;
+
+    setInput((prev) => {
+      const start = Math.min(position, prev.length);
+      return prev.slice(0, start) + value + prev.slice(start);
+    });
+
+    caretRef.current = position + value.length;
+    setShowEmojiPicker(false);
+
+    // Restore the caret after React has committed the new value.
+    requestAnimationFrame(() => {
+      const next = textareaRef.current;
+      if (!next) {
+        return;
+      }
+      const caret = Math.min(caretRef.current ?? next.value.length, next.value.length);
+      next.focus();
+      next.setSelectionRange(caret, caret);
+    });
+  };
+
   return (
     <div
       className={`input-container${dragOver ? ' drag-over' : ''}`}
@@ -145,6 +189,13 @@ export const InputSection: React.FC<InputSectionProps> = ({
         >
           🖼️
         </button>
+        <button
+          className={`action-btn${showEmojiPicker ? ' active' : ''}`}
+          onClick={openEmojiPicker}
+          title="Insert emoji or shape"
+        >
+          😀
+        </button>
         {onVoiceTranscript && (
           <VoiceInput
             onTranscript={onVoiceTranscript}
@@ -174,6 +225,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
       )}
 
       <textarea
+        ref={textareaRef}
         value={input}
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={(e) => {
@@ -191,6 +243,12 @@ export const InputSection: React.FC<InputSectionProps> = ({
           e.target.select();
         }}
       />
+      {showEmojiPicker && (
+        <EmojiPicker
+          onSelect={insertAtCaret}
+          onClose={() => setShowEmojiPicker(false)}
+        />
+      )}
       <div className="input-footer">
         <div className="send-options">
           {(sendSelectedText || textSelectionMode) && (

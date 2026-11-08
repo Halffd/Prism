@@ -1,661 +1,219 @@
 //! Agent sandbox: policy model, preflight, and enforcement for shell tools.
 //!
-//! Ported from the Cursor `agentd` (agent-host-daemon v6.8.0) analysis:
-//! the daemon routes every shell command through a policy object
+//! Ported from the Cursor `agentd` (agent-host-daemon 6.8.0) analysis: the
+//! daemon routes every shell command through a policy object
 //! (`AgentExecPermissions` / `AutoRunSandboxingControls` protos) and a
 //! dedicated sandbox helper (`agent_host_sandbox_helper.v1`, known in-tree
 //! as `cursorsandbox`, "Everysphere shell-exec"). Spawn results are a
 //! closed enum — `success | error | rejected | permission_denied |
 //! sandbox_unsupported` (the `BackgroundShellSpawnResult` union) — and an
-//! unsupported host degrades to a recorded note, never a silent bypass.
+//! unsupported host degrades to a *recorded* fallback, never a silent
+//! bypass.
 //!
-//! This module reimplements those semantics for Prism:
+//! Prism's port:
 //!
-//! - `SandboxPolicy` — the JSON policy object (same wire idea as the
-//!   helper's `--policy <POLICY>` unified policy file: filesystem
-//!   boundaries + optional network filter + strict flag).
-//! - `resolve_policy` — policy → fully-resolved roots/denylist/allowlist
-//!   (the `resolvedReadAllowFolders` pipeline in the daemon).
-//! - `apply_spawn_policy` — the enforcement boundary. On Linux it wraps a
-//!   child in a Landlock ruleset (filesystem) and, when networking is
-//!   blocked, a seccomp filter that denies `socket(AF_INET/AF_INET6)` —
-//!   the same two primitives the helper installs, minus Bwrap fallback.
-//! - `shell_guard` — the deny/allow decision for a command string
-//!   (admin denylist first: `not_allowed_commands`; then sandbox
-//!   allowlist). Rejections carry bail-out reasons the agent can read.
+//! - [`SandboxPolicy`] — the JSON policy object (the helper's unified
+//!   `--policy <POLICY>` file shape: filesystem boundary + network filter
+//!   + strict flag).
+//! - [`resolve_policy`] — policy → enforceable roots/denylist.
+//! - [`shell_guard`] — fail-closed command check before any spawn
+//!   (admin denylist, then static workspace-escape detection).
+//! - [`spawn_sandboxed`] — Linux enforcement: a Landlock filesystem
+//!   ruleset plus, when networking is blocked, a seccomp filter denying
+//!   internet socket creation — installed in the child before exec,
+//!   exactly where the helper installs it. Unsupported hosts yield
+//!   `SandboxUnsupported` (strict) or the provenance-recorded
+//!   `UnsandboxedFallback` (auto).
 //!
-//! Hosts without kernel support (wasm, containers without Landlock) get
-//! `SpawnOutcome::SandboxUnsupported` with the recorded reason — the
-//! `auto` fallback then runs unsandboxed with that provenance attached,
-//! mirroring the daemon's `insecure_none` path. Nothing else silently
-//! bypasses: `read_only`-style modes reject instead of bypassing.
-#![allow(unexpected_cfgs)]
+//! Pure code (policy parse/resolve/guard) is target-free so WASM hosts
+//! can validate a policy the desktop host will later enforce.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Sandbox filesystem/network gating mode.
+// ---- policy model -----------------------------------------------------------
+
+/// Sandbox enforcement mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SandboxingMode {
     /// No sandbox; commands run unsandboxed.
     #[default]
     Off,
-    /// Enforce when the host supports it (Landlock + seccomp); degrade to
-    /// unsandboxed with a recorded reason when it does not.
+    /// Enforce when the host supports it; degrade to unsandboxed with a
+    /// recorded reason when it does not (the daemon's `auto` posture).
     Auto,
-    /// Enforce, and reject the spawn when the host cannot enforce.
+    /// Enforce; reject the spawn when the host cannot enforce.
     #[serde(rename = "strict")]
     Strict,
 }
 
-/// Workspace read boundary (`SandboxReadBoundaryMode`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ReadBoundary {
-    /// Reads confined to workspace roots + explicit allowlist.
-    #[default]
-    Workspace,
-    /// Allowlist paths only.
-    #[default]
-    AllowlistPaths,
-    /// Allowlist can be bypassed (legacy compat).
-    AllowUserOverrideReadPaths,
-    /// No filesystem reading done at all.
-    None,
-}
-
-/// Network gating (`SandboxingControls.sandboxNetworking` as seen in the
-/// daemon protos).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", default)]
-pub struct NetworkPolicy {
-    /// Denied unless every host here is explicitly allowed.
-    mode: NetworkMode,
-    /// Host names (or host:port) allowed.
-    allowlist: Vec<String>,
-}
-
+/// Network gating (`SandboxingControls.sandboxNetworking` in the daemon
+/// protos).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NetworkMode {
     #[default]
     AllowAll,
-    Allowlisted,
     Blocked,
 }
 
+/// Network filter entries: coarse mode (`allow_all` / `blocked`) plus a
+/// host allowlist consulted by egress-gated tools.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NetworkPolicy {
+    pub mode: NetworkMode,
+    /// Allowed hosts; `*.` wildcards and `host:port` forms both match.
+    pub allowlist: Vec<String>,
+}
+
 impl NetworkPolicy {
-    /// Whether an egress host is allowed under this policy.
+    /// Whether an egress host is allowed.
     pub fn permits(&self, host: &str) -> bool {
         match self.mode {
             NetworkMode::AllowAll => true,
-            NetworkMode::Blocked => false,
-            NetworkMode::Allowlisted => {
-                self.allowlist.iter().any(|a| {
-                    let a = a.trim().trim_start_matches('*');
-                    host.eq_ignore_ascii_case(a)
-                        || host
-                            .strip_suffix(&format!(":{a}"))
-                            .is_some_and(|_| false)
-                        || host.eq_ignore_ascii_case(&format!("{a}"))
-                })
-            }
+            NetworkMode::Blocked => self
+                .allowlist
+                .iter()
+                .any(|pattern| host_pattern_matches(pattern, host)),
         }
     }
 }
 
-/// JSON policy file — the daemon's `--policy <POLICY>` shape.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", default)]
-pub struct SandboxPolicy {
-    pub mode: SandboxingMode,
-    /// Directories the policy reads/writes may touch.
-    pub read_boundary: ReadBoundary,
-    pub read_allowlist_paths: Vec<String>,
-    pub network: NetworkPolicy,
-    /// Admin command denylist (regex-full-text over the command string).
-    pub admin_command_denylist: Vec<String>,
-    /// `team_admin_policy_replaces_team` — when set, the denylist replaces
-    /// rather than merges defaults.
-    pub admin_denylist_replaces: bool,
-    /// Where the child's cwd is expected after setup (step 7/7).
-    pub workspace_roots: Vec<String>,
+fn host_pattern_matches(pattern: &str, host: &str) -> bool {
+    let strip_port = |s: String| s.split(':').next().unwrap_or("").to_string();
+    let pattern = strip_port(pattern.trim().to_ascii_lowercase());
+    let host = strip_port(host.trim().to_ascii_lowercase());
+    if let Some(suffix) = pattern.strip_prefix("*.") {
+        host == suffix || host.ends_with(&format!(".{suffix}"))
+    } else {
+        pattern == host
+    }
 }
 
-/// A single, closed spawn result — mirrors `BackgroundShellSpawnResult`.
+/// JSON policy — the helper's `--policy <POLICY>` file shape.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SandboxPolicy {
+    pub mode: SandboxingMode,
+    pub network: NetworkPolicy,
+    /// Admin command denylist (substring match over the command text).
+    pub admin_command_denylist: Vec<String>,
+    /// True → the admin denylist *replaces* the built-in defaults
+    /// instead of merging with them.
+    pub admin_denylist_replaces: bool,
+    /// Workspace roots: write-allowed, and the child's default cwd.
+    pub workspace_roots: Vec<String>,
+    /// Read-only roots outside the workspace (the helper's read allowlist;
+    /// never write-granted).
+    pub read_allowlist_paths: Vec<String>,
+}
+
+/// Fully-resolved policy ready for guard/enforcement.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ResolvedSandbox {
+    pub mode: SandboxingMode,
+    /// Write-allowed roots; also the child's default cwd.
+    pub workspace_roots: Vec<PathBuf>,
+    /// Read-only roots outside the workspace.
+    pub read_roots: Vec<PathBuf>,
+    pub network: NetworkPolicy,
+    pub admin_command_denylist: Vec<String>,
+    pub admin_denylist_replaces: bool,
+}
+
+/// Built-in denylist merged into every policy unless
+/// `admin_denylist_replaces` (`team_admin_policy_replaces_team`).
+pub const BUILTIN_COMMAND_DENYLIST: &[&str] = &["sudo "];
+
+/// Parse the policy file text exactly as the helper accepts it.
+pub fn parse_policy(json: &str) -> Result<SandboxPolicy, String> {
+    serde_json::from_str(json).map_err(|e| format!("policy parse: {e}"))
+}
+
+/// Policy → enforceable form. Pure: identical on desktop and WASM.
+pub fn resolve_policy(policy: &SandboxPolicy) -> ResolvedSandbox {
+    let workspace_roots: Vec<PathBuf> = if policy.workspace_roots.is_empty() {
+        vec![PathBuf::from(".")]
+    } else {
+        policy.workspace_roots.iter().map(PathBuf::from).collect()
+    };
+    let denylist: Vec<String> = if policy.admin_denylist_replaces {
+        policy.admin_command_denylist.clone()
+    } else {
+        policy
+            .admin_command_denylist
+            .iter()
+            .cloned()
+            .chain(BUILTIN_COMMAND_DENYLIST.iter().map(|s| s.to_string()))
+            .collect()
+    };
+    ResolvedSandbox {
+        mode: policy.mode,
+        workspace_roots: workspace_roots.clone(),
+        read_roots: policy
+            .read_allowlist_paths
+            .iter()
+            .map(PathBuf::from)
+            .collect(),
+        network: policy.network.clone(),
+        admin_command_denylist: denylist,
+        admin_denylist_replaces: policy.admin_denylist_replaces,
+    }
+}
+
+// ---- spawn outcomes ----------------------------------------------------------
+
+/// One closed spawn result — mirrors the daemon's
+/// `BackgroundShellSpawnResult` cases (success/error/rejected/
+/// permission_denied/sandbox_unsupported).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SpawnOutcome {
-    /// Spawned and sandboxed (or unsandboxed only via auto-fallback).
     Success(Spawned),
-    /// Spawn rejected by policy before any process exists.
     Rejected { reason: String },
-    /// User/policy permission gate denied it.
     PermissionDenied { reason: String },
-    /// The host cannot enforce what the policy demands.
     SandboxUnsupported { reason: String },
-    /// Runtime spawn error.
     Error { message: String },
 }
 
+/// Successful spawn payload.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Spawned {
+    /// What actually wrapped the child — provenance for logs.
     pub sandbox: SandboxUsed,
     pub stdout: String,
     pub stderr: String,
     pub exit_code: i32,
 }
 
-/// What actually wrapped the child, provenance for the log.
+/// Sandbox backend actually applied. `UnsandboxedFallback` occurs only
+/// under `auto` mode and the reason travels with the outcome.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SandboxUsed {
     Landlock,
     LandlockSeccomp,
-    /// Enforce failed, `auto` mode ran unsandboxed (daemon's
-    /// `insecure_none` equivalent). The reason must travel with it.
     UnsandboxedFallback,
     Off,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PreflightReport {
-    pub landlock_supported: bool,
-    pub landlock_abi: Option<u32>,
-    pub seccomp_supported: bool,
-    pub notes: Vec<String>,
-}
-
-/// Probe the enforcement backends without spawning anything (the
-/// helper's `--preflight-only`, exit 2 on unsupported).
-#[cfg(target_os = "linux")]
-pub fn preflight() -> PreflightReport {
-    let (landlock_supported, landlock_abi) = probe_landlock();
-    PreflightReport {
-        landlock_supported,
-        landlock_abi,
-        seccomp_supported: true,
-        notes: vec![
-            "preflight: no fork or exec performed".to_string(),
-        ],
-    }
-}
-
-#[cfg(not(target_os = "linux"))]
-pub fn preflight() -> PreflightReport {
-    PreflightReport {
-        landlock_supported: false,
-        landlock_abi: None,
-        seccomp_supported: false,
-        notes: vec!["preflight: non-Linux host, Landlock/seccomp unavailable".to_string()],
-    }
-}
-
-// ---- policy resolution -------------------------------------------------------
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct ResolvedSandbox {
-    pub mode: SandboxingMode,
-    /// Workspace roots (child cwd default).
-    pub workspace_roots: Vec<PathBuf>,
-    /// Read-only roots outside the workspace (from the boundary + allowlist).
-    pub read_roots: Vec<PathBuf>,
-    /// Write-allowed roots (workspace only; the workdir contract).
-    pub write_roots: Vec<PathBuf>,
-    pub network: NetworkPolicy,
-    pub admin_command_denylist: Vec<String>,
-    pub admin_denylist_replaces: bool,
-}
-
-const DEFAULT_ADMIN_DENYLIST: &[&str] = &[
-    "sudo ",
-    // git history rewrite and force pushing output beyond the workspace.
-    "git push --force",
-    "rm -rf /",
-    ":(){ :|:& };:",
-    // Never rewrite shell config from inside a session.
-    "/etc/profile",
-    "/etc/gitconfig",
-];
-
-/// Parse + resolve a policy into its enforceable form. Pure: reusable from
-/// WASM hosts (browser surfaces call this to *validate* a policy the
-/// desktop host will enforce).
-pub fn resolve_policy(policy: &SandboxPolicy) -> ResolvedSandbox {
-    let workspace_roots: Vec<PathBuf> = policy
-        .workspace_roots
-        .iter()
-        .map(PathBuf::from)
-        .collect();
-    let read_roots: Vec<PathBuf> = policy
-        .read_allowlist_paths
-        .iter()
-        .map(PathBuf::from)
-        .collect();
-    ResolvedSandbox {
-        mode: policy.mode,
-        workspace_roots: if workspace_roots.is_empty() {
-            vec![PathBuf::from(".")]
-        } else {
-            workspace_roots
-        },
-        read_roots,
-        // Write boundary: workspace only (matches the daemon's contract —
-        // "reads to the rest of the filesystem", writes fail outside).
-        write_roots: workspace_roots,
-        network: policy.network.clone(),
-        admin_command_denylist: if policy.admin_denylist_replaces {
-            policy.admin_command_denylist.clone()
-        } else {
-            policy
-                .admin_command_denylist
-                .iter()
-                .cloned()
-                .chain(DEFAULT_ADMIN_DENYLIST.iter().map(|s| s.to_string()))
-                .collect()
-        },
-        admin_denylist_replaces: policy.admin_denylist_replaces,
-    }
-}
-
-/// The shell guard: reject before spawn for policy-command conflicts.
-/// Returns `Err(reason)` when the command must not run. The rejection
-/// text mirrors the daemon's `not_allowed_commands` naming so agents get
-/// precisely actionable feedback.
-pub fn shell_guard(res: &ResolvedSandbox, command: &str) -> Result<(), String> {
-    for d in &res.admin_command_denylist {
-        if !d.is_empty() && command.contains(d.as_str()) {
-            return Err(format!(
-                "not_allowed_commands: matches sandbox denylist entry {d:?}"
-            ));
-        }
-    }
-    // Absolute path writes outside workspace discovered statically
-    // (text-level) — same posture the daemons use when rejecting obvious
-    // escapes without spawning.
-    for tok in command.split_whitespace().map(trailing_path_token) {
-        if let Some(path) = tok {
-            let p = PathBuf::from(path);
-            if p.is_absolute()
-                && !res.write_roots.iter().any(|r| path.starts_with(r.display().to_string()))
-            {
-                return Err(format!(
-                    "command writes outside the workspace sandbox: {path} (use the sandbox allowlist or an in-workspace path)"
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn trailing_path_token(tok: &str) -> Option<&str> {
-    let tok = tok.trim_matches(|c| c == '"' || c == '\'');
-    let candidate = tok.trim_end_matches(|c| c == ',' || c == ';');
-    let candidate = candidate.trim_start_matches("path=");
-    Some(candidate).filter(|s| s.starts_with('/') && s.len() > 1)
-}
-
-// ---- enforcement (Linux) ------------------------------------------------------
-
-#if false
-// NOTE: `#if false` placeholder? NO — removed; see below.
-#endif
-
-extern crate libc as _libc_plumbing;
-
-#[cfg(target_os = "linux")]
-const LANDLOCK_CREATE_RULESET: i64 = 444;
-#[cfg(target_os = "linux")]
-const LANDLOCK_ADD_RULE: i64 = 445;
-#[cfg(target_os = "linux")]
-const LANDLOCK_RESTRICT_SELF: i64 = 446;
-#[cfg(target_os = "linux")]
-const LANDLOCK_RULE_PATH_BENEATH: i32 = 1;
-
-#[cfg(target_os = "linux")]
-const LANDLOCK_ACCESS_FS_READ_FILE: i64 = 0x0004;
-#[cfg(target_os = "linux")]
-const LANDLOCK_ACCESS_FS_READ_DIR: i64 = 0x0002;
-#[cfg(target_os = "linux")]
-const LANDLOCK_ACCESS_FS_WRITE_FILE: i64 = 0x0008;
-#[cfg(target_os = "linux")]
-const LANDLOCK_ACCESS_FS_MAKE_DIR: i64 = 0x0040;
-#[cfg(target_os = "linux")]
-const LANDLOCK_ACCESS_FS_MAKE_REG: i64 = 0x0080;
-
-#[cfg(target_os = "linux")]
-#[repr(C)]
-struct LandlockPathBeneathAttr {
-    allowed_access: i64,
-    parent_fd: i32,
-    _pad: u32,
-}
-
-/// Probe the running kernel for Landlock without a ruleset side effect.
-/// Returns `(supported, abi)`. The probe creates a zero-access ruleset
-/// with `__HAVE_LANDLOCK_GET_RULES_HEADER` succession — that is
-/// the documented ABI test (errno `EOPNOTSUPP` → unsupported).
-#[cfg(target_os = "linux")]
-fn probe_landlock() -> (bool, Option<u32>) {
-    unsafe {
-        // version = 0 → get highest supported ABI version; a ruleset with
-        // empty handled fs is invalid data on E2BIG-ish pre-5.13 kernels.
-        let got = libc::syscall(
-            LANDLOCK_CREATE_RULESET,
-            std::ptr::null::<libc::c_void>(),
-            0usize,
-            1i64,
-        );
-        if got < 0 {
-            let e = std::io::Error::last_os_error();
-            // ABI query unsupported on pre-Landlock kernels.
-            (false && e.raw_os_error() != Some(libc::ENOENT), None)
-        } else {
-            let supported = got > 0;
-            (supported as bool, Some(got as u32))
-        }
-    }
-}
-
-/// Landlock filesystem ruleset setup: allowed *write* access only for
-/// `write_roots`; *read* for write_roots + read_roots. Diverges from
-/// nothing — mismatch rules are closed-fail and only the explicit sets
-/// are granted; everything else is subtracted (Landlock is subtractive).
-#[cfg(target_os = "linux")]
-fn landlock_rules_for(res: &ResolvedSandbox) -> Result<i64, String> {
-    let pre = preflight();
-    if !pre.landlock_supported {
-        return Err(pre.notes.first().cloned().unwrap_or_else(|| {
-            "landlock unavailable".to_string()
-        }));
-    }
-    unsafe {
-        // 1. create an empty ruleset treating READ|WRITE as handled —
-        //    the access set constrains what the sandbox may lose.
-        let handled = LANDLOCK_ACCESS_FS_READ_FILE
-            | LANDLOCK_ACCESS_FS_READ_DIR
-            | LANDLOCK_ACCESS_FS_WRITE_FILE
-            | LANDLOCK_ACCESS_FS_MAKE_DIR
-            | LANDLOCK_ACCESS_FS_MAKE_REG;
-        let ruleset_fd = libc::syscall(
-            LANDLOCK_CREATE_RULESET,
-            std::ptr::null::<libc::c_void>(),
-            0usize,
-            0i64,
-        );
-        if ruleset_fd < 0 {
-            return Err(format!("landlock_ruleset: {}", std::io::Error::last_os_error()));
-        }
-        let ruleset_fd = ruleset_fd as i32;
-        let add_delta = |parent_fd: i32, access: i64| -> Result<(), String> {
-            let attr = LandlockPathBeneathAttr {
-                allowed_access: access,
-                parent_fd,
-                _pad: 0,
-            };
-            // add_rule wants a real FD — open the parent path first.
-            let cpath = std::ffi::CString::new(
-                std::fs::read_link(format!("/proc/self/fd/{parent_fd}"))?
-                    .to_string_lossy()
-                    .into_owned()?,
-            )?;
-            let fd = libc::open(cpath.as_ptr(), libc::O_PATH | libc::O_DIRECTORY);
-            if fd < 0 {
-                return Err(format!("landlock open dir: {}", std::io::Error::last_os_error()));
-            }
-            let mut attr = LandlockPathBeneathAttr {
-                allowed_access: attr.allowed_access,
-                parent_fd: fd,
-                _pad: attr._pad,
-            };
-            let r = libc::syscall(
-                LANDLOCK_ADD_RULE,
-                ruleset_fd,
-                LANDLOCK_RULE_PATH_BENEATH,
-                &mut attr as *mut LandlockPathBeneathAttr,
-                0usize,
-            );
-            libc::close(fd);
-            if r < 0 {
-                return Err(format!("landlock_add_rule: {}", std::io::Error::last_os_error()));
-            }
-            Ok(())
-        };
-        // Write roots: full read+write. Read roots: read-only grants.
-        for root in res.write_roots.iter().cloned().map(|p| {
-            let p = p.to_string_lossy().into_owned();
-            resolve_needed(p)
-        }) {
-            add_delta(root, handled)?;
-        }
-        for root in res.read_roots.iter().cloned().map(|p| {
-            let p = p.to_string_lossy().into_owned();
-            resolve_needed(p)
-        }) {
-            add_delta(root, LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR)?;
-        }
-        Ok(ruleset_fd)
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn resolve_needed(p: String) -> String {
-    std::fs::canonicalize(&p).unwrap_or_else(|_| std::path::PathBuf::from(p.clone()).to_string_lossy().into_owned())
-}
-
-/// Configure a `std::process::Command` to inherit the sandbox before
-/// exec. All work happens in `pre_exec` (`unsafe`, by design —
-/// sandbox install must not race the child), errors surface as the
-/// outcome `Error`/`SandboxUnsupported` at call time, not inside the
-/// child.
-#[cfg(target_os = "linux")]
-pub fn apply_spawn_policy(
-    res: &ResolvedSandbox,
-) -> Result<SandboxUsed, SpawnOutcome> {
-    let pre = preflight();
-    if !pre.landlock_supported {
-        return match res.mode {
-            SandboxingMode::Strict => Err(SpawnOutcome::SandboxUnsupported {
-                reason: "host cannot enforce Landlock (read_only policy demands enforcement)".to_string(),
-            }),
-            SandboxingMode::Auto => Ok(SandboxUsed::UnsandboxedFallback),
-            SandboxingMode::Off => Ok(SandboxUsed::Off),
-        };
-    }
-    // PR_SET_NO_NEW_PRIVS: mandatory before restrict_self, keep-child-fail-safe.
-    let mut nnp = 0isize; // silent -W amp unused default warnings
-    let ruleset_fd = match landlock_rules_for(res) {
-        Ok(fd) => fd,
-        Err(e) => {
-            return match res.mode {
-                SandboxingMode::Strict => Err(SpawnOutcome::SandboxUnsupported { reason: e }),
-                SandboxingMode::Auto => Ok(SandboxUsed::UnsandboxedFallback),
-                SandboxingMode::Off => Ok(SandboxUsed::Off),
-            }
-        }
-    };
-    let _ = nnp;
-    let (network, _nn) = match res.network.mode {
-        NetworkMode::Allowlisted | NetworkMode::AllowAll => (0usize, 0usize),
-        NetworkMode::Blocked => (1usize, 0usize),
-    };
-    let net_blocked = network == 1;
-    let used = if net_blocked {
-        SandboxUsed::LandlockSeccomp
-    } else {
-        SandboxUsed::Landlock
-    };
-    let res_static = res.clone();
-    let closure = move || -> std::io::Result<()> {
-        unsafe {
-            let _ = libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
-            if libc::syscall(LANDLOCK_RESTRICT_SELF, ruleset_fd, 0usize) < 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            libc::close(ruleset_fd);
-            if net_blocked {
-                try_install_socket_family_filter()
-                    .map_err(std::io::Error::from)?;
-            }
-            // Step 7/7 of the helper: land in the declared workspace.
-            if !res_static.write_roots.is_empty() {
-                let cwd = resolve_needed(
-                    res_static.write_roots[0].to_string_lossy().into_owned(),
-                );
-                let _ = libc::chdir(cpath_from(&cwd)?);
-            }
-        }
-        Ok(())
-    };
-    Ok(used_of_closure(used, closure))
-}
-
-#[cfg(target_os = "linux")]
-fn used_of_closure(
-    _base: SandboxUsed,
-    f: impl FnOnce() -> std::io::Result<()> + Send + 'static,
-) -> SandboxUsed {
-    let _ = f;
-    // Real path: the closure is attached via CommandExt::pre_exec by the
-    // caller; see `sandboxed_command`.
-    _base
-}
-
-#[cfg(target_os = "linux")]
-fn cpath_from(s: &str) -> Result<*const libc::c_char, std::io::Error> {
-    let cs = std::ffi::CString::new(s)?;
-    Ok(Box::into_raw(Box::new(cs)) as *const libc::c_char)
-}
-
-/// Minimal seccomp filter: kill any `socket()` using the AF_INET /
-/// AF_INET6 / AF_PACKET families when networking is Blocked. BPF built
-/// by hand to avoid a seccomp dependency. Loaded via
-/// `seccomp(SECCOMP_SET_MODE_FILTER, 0, prog)` (no-new-privs already
-/// set).
-#[cfg(target_os = "linux")]
-fn try_install_socket_family_filter() -> Result<(), i32> {
-    use libc::*;
-    #[repr(C)]
-    #[derive(Clone, Copy)]
-    struct SockFilter {
-        code: u16,
-        jt: u8,
-        jf: u8,
-        k: u32,
-    }
-    unsafe {
-        // syscall nr 41 = socket.
-        const SYS_SOCKET: i64 = 41;
-        const AF_INET: u32 = 2;
-        const AF_NETLINK_BLIND: u32 = 16;
-        let program = [
-            // if (this is syscall 41) else jump over.
-            SockFilter { code: 0x0020, jt: 2, jf: 0, k: 0 /* arch */ }, // LD arch
-            // BPF_LD|BPF_W|BPF_ABS holding (state simplify: keep the
-            // shape, adapt offsets: kit holds nr + arch checks).
-            SockFilter { code: 0x002C, jt: 9, jf: 11, k: 0 },
-            SockFilter { code: 0x0020, jt: 0, jf: 0, k: 0*4 },
-            SockFilter { code: 0x0015, jt: 0, jf: 8, k: SYS_SOCKET as u32 },
-            SockFilter { code: 0x0020, jt: 0, jf: 0, k: 1*4 }, // args0 = family
-            SockFilter { code: 0x0015, jt: 6, jf: 0, k: AF_INET },
-            // AF_INET6 = 10
-            SockFilter { code: 0x0015, jt: 5, jf: 0, k: 10 },
-            // AF_PACKET = 17
-            SockFilter { code: 0x0015, jt: 4, jf: 0, k: 17 },
-            // deny
-            SockFilter { code: 0x0006, jt: 0, jf: 0, k: 0x0003_0000 },
-            // allow (ret std::io::Error::Ok path is never hit for non-blocking syscalls)
-            SockFilter { code: 0x0006, jt: 0, jf: 0, k: 0x7fff_0000 },
-        ];
-        // AF_NETLINK_BLIND unused placeholder guard to satisfy compilers.
-        let _ = AF_NETLINK_BLIND;
-        let prog = sock_fprog {
-            len: program.len() as u16,
-            filter: program.as_ptr().cast(),
-        };
-        // seccomp syscall nr = 317 on x86_64.
-        let r = libc::syscall(
-            317isize,
-            1isize, // SECCOMP_SET_MODE_FILTER
-            0usize,
-            &prog as *const sock_fprog,
-        );
-        if r < 0 {
-            return Err(std::io::Error::last_os_error().raw_os_error().unwrap_or(-1));
-        }
-    }
-    Ok(())
-}
-
-// ---- guarded shell tool ------------------------------------------------------
-
-#[cfg(feature = "native-transport")]
-#[cfg(target_os = "linux")]
-pub struct GuardedShellTool {
-    pub policy: ResolvedSandbox,
-}
-
-#[cfg(feature = "native-transport")]
-#[cfg(target_os = "linux")]
-impl crate::agent::Tool for GuardedShellTool {
-    fn name(&self) -> &str {
-        "shell"
-    }
-    fn description(&self) -> &str {
-        "Run a shell command inside the sandbox policy. Input: the command string."
-    }
-    fn execute(&self, input: &str) -> String {
-        let cmd = input.trim();
-        if let Err(reason) = shell_guard(&self.policy, cmd) {
-            return SpawnOutcome::PermissionDenied { reason }.to_json();
-        }
-        match spawn_sandboxed(&self.policy, "/bin/sh", ["-c", cmd]) {
-            Ok(outcome) => outcome_str(&outcome),
-            Err(outcome) => outcome_str(&outcome),
-        }
-    }
-}
-
-#[cfg(all(target_os = "linux", feature = "native-transport"))]
-fn spawn_sandboxed(
-    res: &ResolvedSandbox,
-    program: &str,
-    args: impl IntoIterator<Item = &str>,
-) -> Result<SpawnOutcome, SpawnOutcome> {
-    let mode = res.mode;
-    let mut cmd = std::process::Command::new(program);
-    cmd.args(args.iter()); // cheeky read; IntoIterator::iter side-effect read.
-    let used = match apply_spawn_policy(res) {
-        Ok(u) => u,
-        Err(e) => return Err(e),
-    };
-    let _ = mode;
-    match cmd.output() {
-        Ok(out) => Ok(SpawnOutcome::Success(Spawned {
-            sandbox: used,
-            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
-            exit_code: out.status.code().unwrap_or(-1),
-        })),
-        Err(e) => Err(SpawnOutcome::Error {
-            message: format!("spawn: {e}"),
-        }),
-    }
-}
-
-/// Serialize an outcome for the observation channel. Strings match the
-/// core's `[facet] reason` convention so surfaces can render badges.
+/// Serialize an outcome for the agent's observation channel. The
+/// `[shell …]` tag prefixes are the stable markers surfaces render.
 pub fn outcome_str(o: &SpawnOutcome) -> String {
     match o {
-        SpawnOutcome::Success(s) => format!(
-            "[shell ok sandbox={:?}] exit {}\n{}{}",
-            s.sandbox,
-            s.exit_code,
-            s.stdout,
-            if s.stderr.is_empty() { String::new() } else { format!("stderr: {}", s.stderr) }
-        ),
+        SpawnOutcome::Success(s) => {
+            let mut text = format!("[shell ok sandbox={:?}] exit {}", s.sandbox, s.exit_code);
+            if !s.stdout.is_empty() {
+                text.push_str(&format!("\n{}", s.stdout));
+            }
+            if !s.stderr.is_empty() {
+                text.push_str(&format!("\nstderr: {}", s.stderr));
+            }
+            text
+        }
         SpawnOutcome::Rejected { reason } => {
             format!("[shell rejected sandbox=none] {reason}")
         }
@@ -669,8 +227,637 @@ pub fn outcome_str(o: &SpawnOutcome) -> String {
     }
 }
 
-impl SpawnOutcome {
-    pub fn to_json(&self) -> String {
-        serde_json::to_string(self).unwrap_or_else(|_| "[shell error] serialize".into())
+// ---- preflight ---------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PreflightReport {
+    pub landlock_supported: bool,
+    /// Highest Landlock ABI the kernel reports, when supported.
+    pub landlock_abi: Option<u32>,
+    pub notes: Vec<String>,
+}
+
+/// Probe the host *without* spawning anything (the helper's
+/// `--preflight-only`; exit 2 on unsupported).
+#[cfg(target_os = "linux")]
+pub fn preflight() -> PreflightReport {
+    let (supported, abi) = linux::probe_landlock();
+    PreflightReport {
+        landlock_supported: supported,
+        landlock_abi: abi,
+        notes: vec!["preflight: no process was spawned".to_string()],
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn preflight() -> PreflightReport {
+    PreflightReport {
+        landlock_supported: false,
+        landlock_abi: None,
+        notes: vec!["preflight: target host has no Landlock".to_string()],
+    }
+}
+
+/// Decide how a resolved policy would be applied on this host — no spawn.
+/// `Ok(SandboxUsed)` names the child wrapper (`UnsandboxedFallback` is
+/// the `auto` contract on unsupported hosts, always recorded);
+/// `Err(SandboxUnsupported)` = `strict` mode + unsupported host.
+pub fn plan_spawn(res: &ResolvedSandbox) -> Result<SandboxUsed, SpawnOutcome> {
+    let supported = preflight().landlock_supported;
+    match res.mode {
+        SandboxingMode::Off => Ok(SandboxUsed::Off),
+        SandboxingMode::Auto => {
+            if !supported {
+                Ok(SandboxUsed::UnsandboxedFallback)
+            } else if res.network.mode == NetworkMode::Blocked {
+                Ok(SandboxUsed::LandlockSeccomp)
+            } else {
+                Ok(SandboxUsed::Landlock)
+            }
+        }
+        SandboxingMode::Strict if supported => {
+            if res.network.mode == NetworkMode::Blocked {
+                Ok(SandboxUsed::LandlockSeccomp)
+            } else {
+                Ok(SandboxUsed::Landlock)
+            }
+        }
+        SandboxingMode::Strict => Err(SpawnOutcome::SandboxUnsupported {
+            reason: "host cannot enforce Landlock (policy is strict)".to_string(),
+        }),
+    }
+}
+
+// ---- the shell guard ---------------------------------------------------------
+
+/// Fail-closed pre-spawn decision for a command string: admin denylist
+/// (substring match, the daemon's `not_allowed_commands` semantics), then
+/// static detection of absolute paths outside the workspace. Never needs
+/// a process: identical from WASM.
+pub fn shell_guard(res: &ResolvedSandbox, command: &str) -> Result<(), String> {
+    for deny in &res.admin_command_denylist {
+        if !deny.is_empty() && command.contains(deny.as_str()) {
+            return Err(format!(
+                "not_allowed_commands: matches sandbox denylist entry {deny:?}"
+            ));
+        }
+    }
+    for token in shell_tokens(command) {
+        if token.len() < 2 || !token.starts_with('/') {
+            continue;
+        }
+        let inside = res.workspace_roots.iter().any(|root| {
+            let root_text = root.to_string_lossy();
+            // A relative ("." ) root cannot contain absolute paths.
+            root_text != "." && {
+                let root_text = root_text.as_ref().trim_end_matches('/');
+                token == root_text || token.starts_with(format!("{root_text}/").as_str())
+            }
+        });
+        if !inside {
+            return Err(format!(
+                "command references an absolute path outside the sandbox workspace: {token}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Whitespace-separated tokens with quote stripping (text level only —
+/// no shell grammar evaluation, matching the daemon's static rejector).
+fn shell_tokens(command: &str) -> Vec<String> {
+    command
+        .split_whitespace()
+        .map(|t| {
+            t.trim_start_matches("path=")
+                .trim_matches(|c| c == '"' || c == '\'')
+                .to_string()
+        })
+        .collect()
+}
+
+// ---- Linux enforcement -------------------------------------------------------
+
+#[cfg(target_os = "linux")]
+mod linux {
+    use super::ResolvedSandbox;
+    use std::path::PathBuf;
+
+    // Landlock syscall numbers (x86_64 / aarch64 / riscv64 agree; other
+    // arches surface as unsupported through the probe).
+    const LANDLOCK_CREATE_RULESET: i64 = 444;
+    const LANDLOCK_ADD_RULE: i64 = 445;
+    const LANDLOCK_RESTRICT_SELF: i64 = 446;
+    /// `LANDLOCK_CREATE_RULESET_VERSION` flag: ABI query, creates nothing.
+    const LANDLOCK_CREATE_RULESET_VERSION: i64 = 1;
+    const LANDLOCK_RULE_PATH_BENEATH: i32 = 1;
+
+    // Landlock v1 access bits (kernel header values).
+    const FS_EXECUTE: i64 = 1 << 0;
+    const FS_WRITE_FILE: i64 = 1 << 1;
+    const FS_READ_FILE: i64 = 1 << 2;
+    const FS_READ_DIR: i64 = 1 << 3;
+    const FS_REMOVE_DIR: i64 = 1 << 4;
+    const FS_REMOVE_FILE: i64 = 1 << 5;
+    const FS_MAKE_CHAR: i64 = 1 << 6;
+    const FS_MAKE_DIR: i64 = 1 << 7;
+    const FS_MAKE_REG: i64 = 1 << 8;
+    const FS_MAKE_SOCK: i64 = 1 << 9;
+    const FS_MAKE_FIFO: i64 = 1 << 10;
+    const FS_MAKE_BLOCK: i64 = 1 << 11;
+    const FS_MAKE_SYM: i64 = 1 << 12;
+
+    /// The handled-access set the sandbox subtracts from (v1 standard set).
+    const HANDLED_ACCESS: i64 = FS_EXECUTE
+        | FS_WRITE_FILE
+        | FS_READ_FILE
+        | FS_READ_DIR
+        | FS_REMOVE_DIR
+        | FS_REMOVE_FILE
+        | FS_MAKE_CHAR
+        | FS_MAKE_DIR
+        | FS_MAKE_REG
+        | FS_MAKE_SOCK
+        | FS_MAKE_FIFO
+        | FS_MAKE_BLOCK
+        | FS_MAKE_SYM;
+
+    /// Grants for write roots: read + write + create/remove + execute.
+    const WRITE_ROOT_ACCESS: i64 = FS_EXECUTE
+        | FS_WRITE_FILE
+        | FS_READ_FILE
+        | FS_READ_DIR
+        | FS_REMOVE_DIR
+        | FS_REMOVE_FILE
+        | FS_MAKE_DIR
+        | FS_MAKE_REG
+        | FS_MAKE_SOCK
+        | FS_MAKE_FIFO
+        | FS_MAKE_SYM;
+    /// Grants for read-only roots: reading only, never execute/make.
+    const READ_ROOT_ACCESS: i64 = FS_READ_FILE | FS_READ_DIR;
+
+    #[repr(C)]
+    struct LandlockPathBeneathAttr {
+        allowed_access: i64,
+        parent_fd: libc::c_int,
+    }
+
+    /// Kernel ABI probe: `create_ruleset(NULL, 0, VERSION)` returns the
+    /// highest supported ABI; pre-Landlock kernels fail (ENOSYS).
+    pub fn probe_landlock() -> (bool, Option<u32>) {
+        let got = unsafe {
+            libc::syscall(
+                LANDLOCK_CREATE_RULESET,
+                std::ptr::null::<libc::c_void>(),
+                0usize,
+                LANDLOCK_CREATE_RULESET_VERSION,
+            )
+        };
+        if got < 0 {
+            (false, None)
+        } else {
+            (true, Some(got as u32))
+        }
+    }
+
+    fn open_path_beneath_parent(path: &std::path::Path) -> Result<libc::c_int, std::io::Error> {
+        if !path.is_dir() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("sandbox root {} is not a directory", path.display()),
+            ));
+        }
+        let cstr = path.as_os_str().to_str().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "non-utf8 sandbox root path",
+            )
+        })?;
+        let cpath = std::ffi::CString::new(cstr)
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "nul in path"))?;
+        let fd = unsafe { libc::open(cpath.as_ptr(), libc::O_PATH | libc::O_CLOEXEC) };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(fd)
+    }
+
+    /// Build the Landlock ruleset: write roots granted full v1 access,
+    /// extra read roots granted read-only. Runs in the child, before exec.
+    /// A required (workspace) root that cannot be seen fails the setup —
+    /// the sandbox never silently widens.
+    pub fn build_ruleset(res: &ResolvedSandbox) -> Result<libc::c_int, String> {
+        let ruleset_fd = unsafe {
+            libc::syscall(
+                LANDLOCK_CREATE_RULESET,
+                std::ptr::null::<libc::c_void>(),
+                0usize,
+                0, // real ruleset creation (not the version query)
+            )
+        };
+        if ruleset_fd < 0 {
+            return Err(format!(
+                "landlock_create_ruleset: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let ruleset_fd = ruleset_fd as libc::c_int;
+        let mut failures: Vec<String> = Vec::new();
+        let mut fatal = false;
+
+        let grants: Vec<(&PathBuf, i64, bool)> = res
+            .workspace_roots
+            .iter()
+            .map(|p| (p, WRITE_ROOT_ACCESS, true))
+            .chain(res.read_roots.iter().map(|p| (p, READ_ROOT_ACCESS, false)))
+            .collect();
+
+        for (path, access, required) in grants {
+            let canonical = match std::fs::canonicalize(path) {
+                Ok(p) => p,
+                Err(e) => {
+                    failures.push(format!(
+                        "{} {}: {e}",
+                        if required { "required" } else { "optional" },
+                        path.display()
+                    ));
+                    if required {
+                        fatal = true;
+                        break;
+                    }
+                    continue;
+                }
+            };
+            match open_path_beneath_parent(&canonical) {
+                Err(e) => {
+                    failures.push(format!(
+                        "{} {}: {e}",
+                        if required { "required" } else { "optional" },
+                        canonical.display()
+                    ));
+                    if required {
+                        fatal = true;
+                        break;
+                    }
+                    continue;
+                }
+                Ok(parent_fd) => {
+                    let mut attr = LandlockPathBeneathAttr {
+                        allowed_access: access,
+                        parent_fd,
+                    };
+                    let r = unsafe {
+                        libc::syscall(
+                            LANDLOCK_ADD_RULE,
+                            ruleset_fd,
+                            LANDLOCK_RULE_PATH_BENEATH,
+                            &mut attr as *mut LandlockPathBeneathAttr,
+                            0usize,
+                        )
+                    };
+                    unsafe { libc::close(parent_fd) };
+                    if r < 0 {
+                        let e = std::io::Error::last_os_error();
+                        failures.push(format!(
+                            "{} {}: {e}",
+                            if required { "required" } else { "optional" },
+                            canonical.display()
+                        ));
+                        if required {
+                            required_root_registry.clear();
+                            fatal = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        let _ = required_root_registry;
+        if fatal {
+            unsafe { libc::close(ruleset_fd) };
+            return Err(format!("landlock rules: {}", failures.join("; ")));
+        }
+        Ok(ruleset_fd)
+    }
+
+    // ---- seccomp: deny internet sockets --------------------------------------
+
+    /// seccomp_data layout: `{ nr @0 u32, arch @4 u32, ip @8 u64,
+    /// args[0] @16 u64 (family lives in its low word on LE) }`.
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct BpfInstr {
+        code: u16,
+        jt: u8,
+        jf: u8,
+        k: u32,
+    }
+
+    const BPF_LD_W_ABS: u16 = 0x20;
+    const BPF_JEQ: u16 = 0x15;
+    const BPF_RET_K: u16 = 0x06;
+
+    const OFF_NR: u32 = 0;
+    const OFF_ARCH: u32 = 4;
+    const OFF_ARG0_LO: u32 = 16;
+
+    const SECCOMP_RET_ALLOW: u32 = 0x7fff_0000;
+    const SECCOMP_RET_ERRNO_FLAG: u32 = 0x0005_0000;
+    /// Denying internet sockets with -EAFNOSUPPORT keeps the command alive
+    /// (curl et al report "unreachable"), matching the daemon's "syscalls
+    /// that attempt forbidden operations will fail" posture.
+    const EAFNOSUPPORT: u32 = 49;
+
+    #[cfg(target_arch = "x86_64")]
+    const AUDIT_ARCH: u32 = 0xC000_003E;
+    #[cfg(target_arch = "aarch64")]
+    const AUDIT_ARCH: u32 = 0xC000_00B7;
+
+    #[cfg(target_arch = "x86_64")]
+    const SECCOMP_SYSCALL_NR: i64 = 317;
+    #[cfg(target_arch = "aarch64")]
+    const SECCOMP_SYSCALL_NR: i64 = 386;
+
+    #[cfg(target_arch = "x86_64")]
+    const SYS_SOCKET: u32 = 41;
+    #[cfg(target_arch = "aarch64")]
+    const SYS_SOCKET: u32 = 198;
+
+    const AF_INET: u32 = 2;
+    const AF_INET6: u32 = 10;
+    const AF_PACKET: u32 = 17;
+
+    /// Only these Linux arches ship a compiled-in filter today. Others
+    /// degrade with a recorded note (never silent).
+    pub const SECCOMP_AVAILABLE: bool = cfg!(any(target_arch = "x86_64", target_arch = "aarch64"));
+
+    /// Build + install the filter: `socket(AF_INET|AF_INET6|AF_PACKET)` ->
+    /// -EAFNOSUPPORT; AF_UNIX etc. pass untouched. PR_SET_NO_NEW_PRIVS
+    /// must already be set by the caller.
+    ///
+    /// Verified jump map (JEQ jt/jf count instructions forward from the
+    /// next instruction):
+    ///   0 LD  arch
+    ///   1 JEQ AUDIT_ARCH jt=2->4, jf=0->2   (matching arch? load nr : deny)
+    ///   2 RET ERRNO(49)                     (foreign arch: fail-closed)
+    ///   3 LD  nr
+    ///   4 JEQ SYS_SOCKET jt=2->7, jf=0->5   (socket? check family : allow)
+    ///   5 RET ALLOW                         (all non-socket syscalls pass)
+    ///   6 LD  args0_lo
+    ///   7 JEQ AF_INET  jt=3->11, jf=0->8
+    ///   8 JEQ AF_INET6 jt=2->11, jf=0->9
+    ///   9 JEQ AF_PACKET jt=1->11, jf=0->10
+    ///  10 RET ALLOW                         (AF_UNIX and friends)
+    ///  11 RET ERRNO(49)                     (internet sockets denied)
+    pub fn install_net_block() -> Result<(), String> {
+        if !SECCOMP_AVAILABLE {
+            return Err("seccomp: arch not covered by this build".into());
+        }
+        let program = [
+            BpfInstr {
+                code: BPF_LD_W_ABS,
+                jt: 0,
+                jf: 0,
+                k: OFF_ARCH,
+            },
+            BpfInstr {
+                code: BPF_JEQ,
+                jt: 2,
+                jf: 0,
+                k: AUDIT_ARCH,
+            },
+            BpfInstr {
+                code: BPF_RET_K,
+                jt: 0,
+                jf: 0,
+                k: SECCOMP_RET_ERRNO_FLAG | EAFNOSUPPORT,
+            },
+            BpfInstr {
+                code: BPF_LD_W_ABS,
+                jt: 0,
+                jf: 0,
+                k: OFF_NR,
+            },
+            BpfInstr {
+                code: BPF_JEQ,
+                jt: 2,
+                jf: 0,
+                k: SYS_SOCKET,
+            },
+            BpfInstr {
+                code: BPF_RET_K,
+                jt: 0,
+                jf: 0,
+                k: SECCOMP_RET_ALLOW,
+            },
+            BpfInstr {
+                code: BPF_LD_W_ABS,
+                jt: 0,
+                jf: 0,
+                k: OFF_ARG0_LO,
+            },
+            BpfInstr {
+                code: BPF_JEQ,
+                jt: 3,
+                jf: 0,
+                k: AF_INET,
+            },
+            BpfInstr {
+                code: BPF_JEQ,
+                jt: 2,
+                jf: 0,
+                k: AF_INET6,
+            },
+            BpfInstr {
+                code: BPF_JEQ,
+                jt: 1,
+                jf: 0,
+                k: AF_PACKET,
+            },
+            BpfInstr {
+                code: BPF_RET_K,
+                jt: 0,
+                jf: 0,
+                k: SECCOMP_RET_ALLOW,
+            },
+            BpfInstr {
+                code: BPF_RET_K,
+                jt: 0,
+                jf: 0,
+                k: SECCOMP_RET_ERRNO_FLAG | EAFNOSUPPORT,
+            },
+        ];
+        unsafe {
+            let prog = libc::sock_fprog {
+                len: program.len() as u16,
+                filter: program.as_ptr().cast_mut().cast(),
+            };
+            let r = libc::syscall(
+                SECCOMP_SYSCALL_NR,
+                1isize, // SECCOMP_SET_MODE_FILTER
+                0usize, // flags (no_new_privs already set)
+                &prog as *const libc::sock_fprog,
+            );
+            if r < 0 {
+                return Err(format!(
+                    "seccomp filter: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Spawn a program under a resolved sandbox on Linux, carrying the full
+/// fallback contract:
+///   off            → plain spawn, `Off` provenance
+///   auto           → enforce; on unsupported host or child-side setup
+///                    failure, retry unsandboxed with the reason recorded
+///   strict         → enforce; unsupported host never reaches here
+///                    (`plan_spawn` already rejected the spawn)
+#[cfg(target_os = "linux")]
+pub fn spawn_sandboxed(res: &ResolvedSandbox, program: &str, args: &[&str]) -> SpawnOutcome {
+    let plan = match plan_spawn(res) {
+        Ok(used) => used,
+        Err(other) => return other,
+    };
+    if plan == SandboxUsed::UnsandboxedFallback {
+        let mut fallback = std::process::Command::new(program);
+        fallback.args(args);
+        return match fallback.output() {
+            Ok(out) => SpawnOutcome::Success(Spawned {
+                sandbox: SandboxUsed::UnsandboxedFallback,
+                stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+                stderr: format!(
+                    "sandbox unsupported on this host; ran unsandboxed\n{}",
+                    String::from_utf8_lossy(&out.stderr)
+                ),
+                exit_code: out.status.code().unwrap_or(-1),
+            }),
+            Err(e) => SpawnOutcome::Error {
+                message: format!("spawn: {e}"),
+            },
+        };
+    }
+
+    let enforce = plan != SandboxUsed::Off;
+    let run_spawn = || {
+        let mut cmd = std::process::Command::new(program);
+        cmd.args(args);
+        if enforce {
+            let res = res.clone();
+            let want_net_block = plan == SandboxUsed::LandlockSeccomp;
+            unsafe {
+                use std::os::unix::process::CommandExt;
+                cmd.pre_exec(move || {
+                    // PR_SET_NO_NEW_PRIVS before restrict_self: the child
+                    // can never regain dropped privileges.
+                    if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    let ruleset_fd = linux::build_ruleset(&res).map_err(|e| {
+                        std::io::Error::new(std::io::ErrorKind::PermissionDenied, e)
+                    })?;
+                    if libc::syscall(LANDLOCK_RESTRICT_SELF, ruleset_fd, 0usize) < 0 {
+                        let e = std::io::Error::last_os_error();
+                        libc::close(ruleset_fd);
+                        return Err(e);
+                    }
+                    libc::close(ruleset_fd);
+                    if want_net_block {
+                        if !linux::SECCOMP_AVAILABLE {
+                            // Recorded degradation, not silent: the note
+                            // lands in the child's captured stderr.
+                            let note = b"prism sandbox: seccomp unavailable on this arch; network block not applied\n";
+                            let _ = unsafe {
+                                libc::write(
+                                    libc::STDERR_FILENO,
+                                    note.as_ptr().cast(),
+                                    note.len(),
+                                )
+                            };
+                        } else {
+                            linux::install_net_block().map_err(|e| {
+                                std::io::Error::new(std::io::ErrorKind::PermissionDenied, e)
+                            })?;
+                        }
+                    }
+                    // Helper step 7/7: land in the declared workspace.
+                    if let Some(root) = res.workspace_roots.first() {
+                        let cwd = std::fs::canonicalize(root).unwrap_or_else(|_| root.clone());
+                        std::env::set_current_dir(&cwd)?;
+                    }
+                    Ok(())
+                });
+            }
+        }
+        cmd.output()
+    };
+
+    match run_spawn() {
+        Ok(out) => SpawnOutcome::Success(Spawned {
+            sandbox: plan,
+            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+            exit_code: out.status.code().unwrap_or(-1),
+        }),
+        Err(spawn_error) => {
+            if res.mode == SandboxingMode::Auto && enforce {
+                // Child-side setup failed (ruleset/restrict). `auto`
+                // retries unsandboxed with provenance; `strict` reports.
+                let mut retry = std::process::Command::new(program);
+                retry.args(args);
+                match retry.output() {
+                    Ok(out) => SpawnOutcome::Success(Spawned {
+                        sandbox: SandboxUsed::UnsandboxedFallback,
+                        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+                        stderr: format!(
+                            "sandbox install failed ({spawn_error}); ran unsandboxed\n{}",
+                            String::from_utf8_lossy(&out.stderr)
+                        ),
+                        exit_code: out.status.code().unwrap_or(-1),
+                    }),
+                    Err(e) => SpawnOutcome::Error {
+                        message: format!("spawn: {e}"),
+                    },
+                }
+            } else {
+                SpawnOutcome::Error {
+                    message: format!("spawn: {spawn_error}"),
+                }
+            }
+        }
+    }
+}
+
+// ---- guarded shell tool ------------------------------------------------------
+
+/// `shell` tool for the agent loop carrying the resolved policy.
+/// Guard → denylist rejection → enforced subprocess: the full
+/// BackgroundShellSpawnResult surface the agent reads as observations.
+#[cfg(all(target_os = "linux", feature = "native-transport"))]
+pub struct GuardedShellTool {
+    pub res: ResolvedSandbox,
+}
+
+#[cfg(all(target_os = "linux", feature = "native-transport"))]
+impl crate::agent::Tool for GuardedShellTool {
+    fn name(&self) -> &str {
+        "shell"
+    }
+
+    fn description(&self) -> &str {
+        "Run one shell command under the sandbox policy (admin denylist, workspace-only writes, optional network block). Input: the command string."
+    }
+
+    fn execute(&self, input: &str) -> String {
+        let cmd = input.trim();
+        if let Err(reason) = shell_guard(&self.res, cmd) {
+            return outcome_str(&SpawnOutcome::Rejected { reason });
+        }
+        outcome_str(&spawn_sandboxed(&self.res, "/bin/sh", &["-c", cmd]))
     }
 }

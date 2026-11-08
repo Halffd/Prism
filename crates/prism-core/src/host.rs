@@ -11,7 +11,7 @@ use crate::client::{
 };
 use crate::conversations::{self, Conversation, ConversationMeta};
 use crate::settings::{self, Settings};
-use crate::storage::FsStorage;
+use crate::storage::{FsStorage, Storage};
 use crate::transport::ReqwestTransport;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
@@ -115,6 +115,72 @@ pub fn list_conversations() -> Vec<ConversationMeta> {
 
 pub fn load_conversation(id: &str) -> Option<Conversation> {
     conversations_dir().and_then(|dir| conversations::load_conversation(storage(), &dir, id))
+}
+
+// --- data sync (export / import / clear) ---
+
+/// Path of the export envelope file (config dir root).
+pub fn sync_path() -> Option<PathBuf> {
+    config_dir().map(|d| d.join("prism-data.json"))
+}
+
+/// Build the export envelope from settings + all conversations.
+pub fn export_envelope() -> crate::sync::SyncEnvelope {
+    let convs = list_conversations()
+        .iter()
+        .filter_map(|m| load_conversation(&m.id))
+        .collect::<Vec<_>>();
+    crate::sync::SyncEnvelope::from_core(&convs, &load_settings())
+}
+
+/// Write the envelope to disk (pretty JSON).
+pub fn export_data(path: Option<&std::path::Path>) -> Result<(), String> {
+    let path = match path {
+        Some(p) => p.to_path_buf(),
+        None => sync_path().ok_or("no config dir")?,
+    };
+    let env = export_envelope();
+    if let Some(parent) = path.parent() {
+        storage().create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    storage()
+        .write_atomic(&path, &env.to_json())
+        .map_err(|e| e.to_string())
+}
+
+/// Read + validate an envelope file.
+pub fn load_envelope(path: &std::path::Path) -> Result<crate::sync::SyncEnvelope, String> {
+    let text = storage()
+        .read_to_string(path)
+        .map_err(|e| format!("read {}: {e}", path.display()))?;
+    crate::sync::SyncEnvelope::from_json(&text).ok_or_else(|| "not a Prism data envelope".into())
+}
+
+/// Apply an imported envelope: every conversation is written to the
+/// conversations dir (overwrites by id). Settings are NOT touched —
+/// keys/credentials stay local unless the user edits them.
+pub fn import_data(path: &std::path::Path) -> Result<usize, String> {
+    let env = load_envelope(path)?;
+    let Some(dir) = conversations_dir() else {
+        return Err("no config dir".into());
+    };
+    storage().create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let mut n = 0;
+    for conv in env.to_core() {
+        conversations::save_conversation(storage(), &dir, &conv).map_err(|e| e.to_string())?;
+        n += 1;
+    }
+    Ok(n)
+}
+
+/// Delete every local conversation. Settings and prompt history untouched.
+pub fn clear_data() -> Result<usize, String> {
+    let metas = list_conversations();
+    let n = metas.len();
+    for m in metas {
+        let _ = delete_conversation(&m.id);
+    }
+    Ok(n)
 }
 
 pub fn save_conversation(conv: &Conversation) -> Result<(), String> {

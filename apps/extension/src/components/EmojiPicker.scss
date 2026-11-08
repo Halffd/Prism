@@ -1,0 +1,160 @@
+/* Emoji / shape picker.
+   Uses the same design tokens as the popup so the picker reads as part of
+   the extension rather than a bolted-on widget. */
+
+.emoji-picker {
+  position: absolute;
+  bottom: var(--spacing-md);
+  left: var(--spacing-md);
+  margin-bottom: var(--spacing-sm);
+  width: min(340px, calc(100vw - 32px));
+  background: var(--surface-container-low);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elevation-float);
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-size: var(--font-sm);
+
+  .emoji-picker-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-sm);
+    border-bottom: 1px solid var(--outline-variant);
+  }
+
+  .emoji-picker-tabs {
+    display: flex;
+    gap: 2px;
+    flex-shrink: 0;
+  }
+
+  .emoji-picker-tab {
+    background: none;
+    border: none;
+    border-radius: var(--radius-pill);
+    padding: 4px 8px;
+    cursor: pointer;
+    color: var(--on-surface-variant);
+    font-size: var(--font-xs);
+    white-space: nowrap;
+
+    &:hover {
+      background: var(--surface-container-high);
+      color: var(--on-surface);
+    }
+
+    &.active {
+      background: var(--primary-container);
+      color: var(--on-primary-container);
+      font-weight: 600;
+    }
+  }
+
+  .emoji-picker-search {
+    flex: 1;
+    min-width: 0;
+    background: var(--surface-container-high);
+    border: none;
+    border-radius: var(--radius-pill);
+    padding: 4px 10px;
+    color: var(--on-surface);
+    font-size: var(--font-xs);
+    outline: none;
+
+    &::placeholder {
+      color: var(--on-surface-variant);
+    }
+  }
+
+  .emoji-picker-close {
+    background: none;
+    border: none;
+    color: var(--on-surface-variant);
+    cursor: pointer;
+    font-size: var(--font-sm);
+    padding: 2px 4px;
+    border-radius: var(--radius-pill);
+    flex-shrink: 0;
+
+    &:hover {
+      color: var(--on-surface);
+      background: var(--surface-container-high);
+    }
+  }
+
+  .emoji-picker-categories {
+    display: flex;
+    gap: 2px;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    overflow-x: auto;
+    border-bottom: 1px solid var(--outline-variant);
+  }
+
+  .emoji-picker-category {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: var(--font-lg);
+    line-height: 1;
+    padding: 4px 6px;
+    border-radius: var(--radius-sm);
+
+    &:hover {
+      background: var(--surface-container-high);
+    }
+  }
+
+  .emoji-picker-scroll {
+    max-height: 240px;
+    overflow-y: auto;
+    padding: var(--spacing-sm);
+  }
+
+  .emoji-picker-section {
+    margin-bottom: var(--spacing-md);
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  .emoji-picker-section-title {
+    color: var(--on-surface-variant);
+    font-size: var(--font-xs);
+    font-weight: 600;
+    margin-bottom: var(--spacing-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .emoji-picker-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(32px, 1fr));
+    gap: 2px;
+  }
+
+  .emoji-picker-cell {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: var(--font-xl);
+    line-height: 1;
+    padding: 4px 0;
+    border-radius: var(--radius-sm);
+    min-height: 32px;
+
+    &:hover {
+      background: var(--surface-container-high);
+    }
+  }
+
+  .emoji-picker-empty {
+    color: var(--on-surface-variant);
+    font-size: var(--font-xs);
+    padding: var(--spacing-md);
+    text-align: center;
+  }
+}

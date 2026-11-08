@@ -34,6 +34,7 @@ pub mod prompt_history;
 pub mod providers;
 pub mod settings;
 pub mod storage;
+pub mod sync;
 pub mod thinking;
 pub mod transport;
 

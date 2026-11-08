@@ -71,6 +71,11 @@ export component AppWindow inherits Window {
     in property <string> gpu-label;
     in property <string> ctx-label;
     in-out property <string> input-text;
+    // ---- data sync ----
+    in-out property <string> sync-status;
+    in-out property <string> sync-login-email;
+    in-out property <string> sync-login-password;
+    in property <bool> sync-logged-in;
     // ---- custom providers ----
     in-out property <string> new-provider-id;
     in-out property <int> new-provider-canonical-idx: 0;
@@ -114,6 +119,11 @@ export component AppWindow inherits Window {
     callback palette-query-changed(string);
     callback palette-execute(string); // arg: PaletteRow.id
     callback palette-move(int);       // arg: index delta (+1/-1)
+    callback sync-export();
+    callback sync-import();
+    callback sync-clear();
+    callback sync-login(string, string);
+    callback sync-logout();
     callback custom-provider-add();
     callback agent-done(string); // JSON AgentResult
     callback custom-provider-remove(string);
@@ -537,6 +547,31 @@ export component AppWindow inherits Window {
                                 Button { text: "x"; clicked => { custom-provider-remove(kv.id); } }
                             }
                         }
+                    }
+
+
+                    // ---- data sync (portable with extension) ----
+                    Text { text: "Data sync"; color: #9fb0bd; font-weight: 700; }
+                    VerticalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: "Exchange conversations + prompts with the Prism extension.";
+                            color: #8b95a1;
+                            font-size: 11px;
+                            wrap: word-wrap;
+                        }
+                        if sync-logged-in : HorizontalLayout {
+                            spacing: 8px;
+                            Text { text: "Signed in"; color: #7ee787; font-size: 12px; vertical-alignment: center; horizontal-stretch: 1; }
+                            Button { text: "Sign out"; clicked => { sync-logout(); } }
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Button { text: "Export"; clicked => { sync-export(); } }
+                            Button { text: "Import"; clicked => { sync-import(); } }
+                            Button { text: "Clear local"; clicked => { sync-clear(); } }
+                        }
+                        Text { text: sync-status; color: #8b95a1; font-size: 11px; wrap: word-wrap; }
                     }
 
                     // ---- media capabilities ----

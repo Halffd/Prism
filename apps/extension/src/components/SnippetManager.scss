@@ -1,0 +1,259 @@
+/* Snippet manager.
+   Styled to match the popup's menu panels so it can be dropped into the
+   existing prompt menu without looking out of place. */
+
+.snippet-manager {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+
+  .snippet-manager-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+
+    h3 {
+      margin: 0;
+      color: var(--on-surface);
+      font-size: var(--font-lg);
+      font-weight: 600;
+    }
+  }
+
+  .snippet-manager-header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+  }
+
+  .snippet-add-btn {
+    background: var(--primary);
+    color: var(--on-primary);
+    border: none;
+    border-radius: var(--radius-pill);
+    padding: 6px 12px;
+    font-size: var(--font-xs);
+    cursor: pointer;
+
+    &:hover {
+      filter: brightness(1.1);
+    }
+  }
+
+  .snippet-close-btn {
+    background: none;
+    border: none;
+    color: var(--on-surface-variant);
+    cursor: pointer;
+    font-size: var(--font-lg);
+    line-height: 1;
+    padding: 0 4px;
+    border-radius: var(--radius-pill);
+
+    &:hover {
+      color: var(--on-surface);
+      background: var(--surface-container-high);
+    }
+  }
+
+  .snippet-error {
+    color: var(--error);
+    font-size: var(--font-xs);
+    background: var(--surface-container-high);
+    border-radius: var(--radius-sm);
+    padding: var(--spacing-xs) var(--spacing-sm);
+  }
+
+  .snippet-editor {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+    background: var(--surface-container-high);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+  }
+
+  .snippet-editor-row {
+    display: flex;
+    gap: var(--spacing-xs);
+
+    .snippet-input {
+      flex: 1;
+      min-width: 0;
+    }
+  }
+
+  .snippet-input,
+  .snippet-textarea,
+  .snippet-select {
+    background: var(--surface-container-low);
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-sm);
+    color: var(--on-surface);
+    font-size: var(--font-xs);
+    padding: 6px 8px;
+    outline: none;
+    font-family: inherit;
+
+    &:focus {
+      border-color: var(--primary);
+    }
+  }
+
+  .snippet-textarea {
+    resize: vertical;
+    font-family: inherit;
+  }
+
+  .snippet-select {
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .snippet-editor-actions {
+    display: flex;
+    gap: var(--spacing-xs);
+  }
+
+  .snippet-save-btn,
+  .snippet-cancel-btn {
+    border: none;
+    border-radius: var(--radius-pill);
+    padding: 6px 12px;
+    font-size: var(--font-xs);
+    cursor: pointer;
+  }
+
+  .snippet-save-btn {
+    background: var(--primary);
+    color: var(--on-primary);
+  }
+
+  .snippet-cancel-btn {
+    background: var(--surface-container-highest);
+    color: var(--on-surface);
+  }
+
+  .snippet-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+    max-height: 360px;
+    overflow-y: auto;
+  }
+
+  .snippet-group-title {
+    color: var(--on-surface-variant);
+    font-size: var(--font-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: var(--spacing-xs);
+  }
+
+  .snippet-item {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--spacing-sm);
+    background: var(--surface-container-high);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-sm) var(--spacing-md);
+    margin-bottom: var(--spacing-xs);
+  }
+
+  .snippet-item-main {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .snippet-item-name {
+    color: var(--on-surface);
+    font-size: var(--font-sm);
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+  }
+
+  .snippet-builtin-badge {
+    background: var(--surface-container-highest);
+    color: var(--on-surface-variant);
+    border-radius: var(--radius-pill);
+    padding: 1px 6px;
+    font-size: 10px;
+    font-weight: 400;
+  }
+
+  .snippet-item-info {
+    display: flex;
+    gap: var(--spacing-xs);
+    margin-top: 2px;
+  }
+
+  .snippet-trigger {
+    background: var(--primary-container);
+    color: var(--on-primary-container);
+    border-radius: var(--radius-sm);
+    padding: 1px 6px;
+    font-size: var(--font-xs);
+    font-family: monospace;
+  }
+
+  .snippet-mode {
+    color: var(--on-surface-variant);
+    font-size: var(--font-xs);
+  }
+
+  .snippet-item-text {
+    color: var(--on-surface-variant);
+    font-size: var(--font-xs);
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .snippet-item-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    flex-shrink: 0;
+  }
+
+  .snippet-edit-btn {
+    background: none;
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-pill);
+    color: var(--on-surface);
+    font-size: var(--font-xs);
+    padding: 3px 10px;
+    cursor: pointer;
+
+    &:hover {
+      background: var(--surface-container-highest);
+    }
+  }
+
+  .snippet-delete-btn {
+    background: none;
+    border: none;
+    color: var(--on-surface-variant);
+    cursor: pointer;
+    font-size: var(--font-xs);
+    padding: 2px 6px;
+    border-radius: var(--radius-pill);
+
+    &:hover {
+      color: var(--error);
+      background: var(--surface-container-highest);
+    }
+  }
+
+  .snippet-empty {
+    color: var(--on-surface-variant);
+    font-size: var(--font-xs);
+    padding: var(--spacing-md);
+    text-align: center;
+  }
+}

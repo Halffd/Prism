@@ -282,6 +282,35 @@ Adopted from the opencode survey (features #1 of the ranked list):
   TS libs/agent already has them for the extension), streaming
   step-by-step callbacks, tool result truncation policy.
 
+## Portable data sync (2026-11-08)
+
+Chat/session/prompt storage is compatible across the extension
+(IndexedDB) and Slint/CLI/TUI (JSON files) through one envelope:
+
+- **Envelope**: `SyncEnvelope { app: "prism", version, exported_at,
+  conversations[], prompts[], settings }` — defined twice, once per
+  language, field-for-field identical (`libs/shared-types/src/lib/sync.ts`
+  and `crates/prism-core/src/sync.rs`). Roles are the same strings
+  everywhere; timestamps epoch ms. Messages carry BOTH the extension
+  fields (id/timestamp) and the core field (thinking), so neither side
+  loses what it needs.
+- **Extension** (`apps/extension/src/chat/sync.ts`): `exportData` reads
+  chatSessions + chatHistory + prompts + chrome.storage settings;
+  `importData` writes them back (`saveChatHistory`/`savePromptShortcut`);
+  `clearData` deletes sessions + prompts, keeps settings.
+- **Rust** (`prism_core::host`): `export_data` writes
+  `<config>/prism-data.json` (pretty, diffable); `import_data` applies
+  sessions (settings untouched — keys stay local); `clear_data` removes
+  conversations. `SyncEnvelope::from_core`/`to_core` map the
+  Conversation/StoredMessage shape.
+- **UI**: Slint settings → "Data sync" panel (Export / Import / Clear
+  local + cloud sign-in row; cloud sign-in reports not-available on
+  desktop rather than pretending). Extension Settings gets the same
+  buttons via `sync.ts`.
+- Import path is deliberately explicit (standard sync path, not a file
+  picker) until Slint gains a dialog dependency; the envelope is
+  JSON so any file browser works.
+
 ## Service-worker note (extension)
 
 The MV3 background service worker imports the core (it relays

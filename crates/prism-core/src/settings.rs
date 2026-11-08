@@ -205,6 +205,27 @@ impl Settings {
         }
     }
 
+    /// The portable sync view of these settings (see `crate::sync`).
+    pub fn to_sync(&self) -> crate::sync::SyncSettings {
+        crate::sync::SyncSettings {
+            connection: Some(match self.connection {
+                Connection::Direct => "direct".into(),
+                Connection::PrismApi => "api".into(),
+            }),
+            provider: Some(self.provider.clone()),
+            default_provider: None,
+            model: Some(self.model.clone()),
+            system_prompt: Some(self.system_prompt.clone()),
+            temperature: Some(self.temperature),
+            max_tokens: self.max_tokens,
+            top_p: self.top_p,
+            thinking_enabled: Some(self.thinking_enabled),
+            prism_api_url: Some(self.prism_api_url.clone()),
+            prism_api_token: Some(self.prism_api_token.clone()),
+            base_url: Some(self.local_base_url.clone()),
+        }
+    }
+
     /// Resolve any provider id into a concrete connection spec:
     /// built-in table entry, custom alias (canonical defaults + own
     /// base URL/headers), or bare custom endpoint. `None` = unknown id.
