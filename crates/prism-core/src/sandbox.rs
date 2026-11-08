@@ -348,7 +348,7 @@ mod linux {
     // arches surface as unsupported through the probe).
     const LANDLOCK_CREATE_RULESET: i64 = 444;
     const LANDLOCK_ADD_RULE: i64 = 445;
-    const LANDLOCK_RESTRICT_SELF: i64 = 446;
+    pub const LANDLOCK_RESTRICT_SELF: i64 = 446;
     /// `LANDLOCK_CREATE_RULESET_VERSION` flag: ABI query, creates nothing.
     const LANDLOCK_CREATE_RULESET_VERSION: i64 = 1;
     const LANDLOCK_RULE_PATH_BENEATH: i32 = 1;
@@ -450,10 +450,19 @@ mod linux {
     /// the sandbox never silently widens.
     pub fn build_ruleset(res: &ResolvedSandbox) -> Result<libc::c_int, String> {
         let ruleset_fd = unsafe {
+            // Landlock only restricts what it declares handled: passing a
+            // NULL attribute would create a ruleset that restricts nothing.
+            #[repr(C)]
+            struct landlock_ruleset_attr {
+                handled_access_fs: i64,
+            }
+            let attr = landlock_ruleset_attr {
+                handled_access_fs: HANDLED_ACCESS,
+            };
             libc::syscall(
                 LANDLOCK_CREATE_RULESET,
-                std::ptr::null::<libc::c_void>(),
-                0usize,
+                &attr as *const landlock_ruleset_attr,
+                std::mem::size_of::<landlock_ruleset_attr>(),
                 0, // real ruleset creation (not the version query)
             )
         };
@@ -526,7 +535,6 @@ mod linux {
                             canonical.display()
                         ));
                         if required {
-                            required_root_registry.clear();
                             fatal = true;
                             break;
                         }
@@ -534,7 +542,6 @@ mod linux {
                 }
             }
         }
-        let _ = required_root_registry;
         if fatal {
             unsafe { libc::close(ruleset_fd) };
             return Err(format!("landlock rules: {}", failures.join("; ")));
@@ -761,7 +768,7 @@ pub fn spawn_sandboxed(res: &ResolvedSandbox, program: &str, args: &[&str]) -> S
                     let ruleset_fd = linux::build_ruleset(&res).map_err(|e| {
                         std::io::Error::new(std::io::ErrorKind::PermissionDenied, e)
                     })?;
-                    if libc::syscall(LANDLOCK_RESTRICT_SELF, ruleset_fd, 0usize) < 0 {
+                    if libc::syscall(linux::LANDLOCK_RESTRICT_SELF, ruleset_fd, 0usize) < 0 {
                         let e = std::io::Error::last_os_error();
                         libc::close(ruleset_fd);
                         return Err(e);
@@ -771,14 +778,10 @@ pub fn spawn_sandboxed(res: &ResolvedSandbox, program: &str, args: &[&str]) -> S
                         if !linux::SECCOMP_AVAILABLE {
                             // Recorded degradation, not silent: the note
                             // lands in the child's captured stderr.
-                            let note = b"prism sandbox: seccomp unavailable on this arch; network block not applied\n";
-                            let _ = unsafe {
-                                libc::write(
-                                    libc::STDERR_FILENO,
-                                    note.as_ptr().cast(),
-                                    note.len(),
-                                )
-                            };
+                            let note =
+                                b"prism sandbox: seccomp unavailable on this arch; network block not applied\n";
+                            use std::io::Write as _;
+                            let _ = std::io::stderr().write_all(note);
                         } else {
                             linux::install_net_block().map_err(|e| {
                                 std::io::Error::new(std::io::ErrorKind::PermissionDenied, e)

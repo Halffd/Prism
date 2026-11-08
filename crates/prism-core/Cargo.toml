@@ -23,6 +23,10 @@ dirs = { version = "6", optional = true }
 tempfile = { workspace = true }
 proptest = { workspace = true }
 
+# Landlock/seccomp enforcement primitives (prism sandbox, Linux only).
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
 [features]
 default = ["native-transport"]
 native-transport = ["dep:tokio", "dep:reqwest", "dep:dirs"]

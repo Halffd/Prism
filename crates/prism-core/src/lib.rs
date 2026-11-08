@@ -32,10 +32,13 @@ pub mod native_tools;
 pub mod media;
 pub mod prompt_history;
 pub mod providers;
+pub mod sandbox;
 pub mod settings;
 pub mod storage;
+pub mod subagents;
 pub mod sync;
 pub mod thinking;
+pub mod toolgate;
 pub mod transport;
 
 pub use client::{
