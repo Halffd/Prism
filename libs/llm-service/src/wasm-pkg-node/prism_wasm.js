@@ -1,6 +1,111 @@
 /* @ts-self-types="./prism_wasm.d.ts" */
 
 /**
+ * A registry instance the JS host drives across steps.
+ */
+class AgentRegistry {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        AgentRegistryFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_agentregistry_free(ptr, 0);
+    }
+    /**
+     * Execute a tool directly (permission-gated). `ask_fn` is a JS
+     * function `(toolName, input) => bool`.
+     * @param {string} name
+     * @param {string} input
+     * @param {Function} ask_fn
+     * @returns {string}
+     */
+    execute(name, input, ask_fn) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(input, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ret = wasm.agentregistry_execute(this.__wbg_ptr, ptr0, len0, ptr1, len1, ask_fn);
+            deferred3_0 = ret[0];
+            deferred3_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    constructor() {
+        const ret = wasm.agentregistry_new();
+        this.__wbg_ptr = ret;
+        AgentRegistryFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * Register (or replace) a tool. Extension point.
+     * @param {JsTool} tool
+     */
+    register(tool) {
+        _assertClass(tool, JsTool);
+        var ptr0 = tool.__destroy_into_raw();
+        wasm.agentregistry_register(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * Set a tool's permission: "allow" | "deny" | "ask".
+     * @param {string} name
+     * @param {string} level
+     */
+    set_permission(name, level) {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(level, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.agentregistry_set_permission(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+    }
+}
+if (Symbol.dispose) AgentRegistry.prototype[Symbol.dispose] = AgentRegistry.prototype.free;
+exports.AgentRegistry = AgentRegistry;
+
+/**
+ * A JS-registered tool: the host supplies `execute(input) -> string`.
+ * This is the extension point — surfaces register domain tools (page
+ * context, snippets, editor state) and the core loop dispatches them.
+ */
+class JsTool {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        JsToolFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_jstool_free(ptr, 0);
+    }
+    /**
+     * `execute` must be a JS function `(input: string) => string`.
+     * @param {string} name
+     * @param {string} description
+     * @param {Function} execute
+     */
+    constructor(name, description, execute) {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(description, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.jstool_new(ptr0, len0, ptr1, len1, execute);
+        this.__wbg_ptr = ret;
+        JsToolFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+}
+if (Symbol.dispose) JsTool.prototype[Symbol.dispose] = JsTool.prototype.free;
+exports.JsTool = JsTool;
+
+/**
  * Ollama native NDJSON decoder.
  */
 class NdjsonDecoder {
@@ -128,6 +233,34 @@ class SseDecoder {
 }
 if (Symbol.dispose) SseDecoder.prototype[Symbol.dispose] = SseDecoder.prototype.free;
 exports.SseDecoder = SseDecoder;
+
+/**
+ * One complete agent run. `llm_step` is a JS function
+ * `(system: string, historyJson: string) => string` returning the raw
+ * model response (throw/reject to signal an error). Returns JSON
+ * `AgentResult` (`{answer, steps, completed, error}`).
+ * @param {string} task
+ * @param {AgentRegistry} registry
+ * @param {Function} llm_step
+ * @param {number} max_steps
+ * @returns {string}
+ */
+function agent_run(task, registry, llm_step, max_steps) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(task, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        _assertClass(registry, AgentRegistry);
+        const ret = wasm.agent_run(ptr0, len0, registry.__wbg_ptr, llm_step, max_steps);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.agent_run = agent_run;
 
 /**
  * Prepend the scratchpad instruction to the first user message.
@@ -375,7 +508,8 @@ function parse_models_response(body) {
 exports.parse_models_response = parse_models_response;
 
 /**
- * The provider table: id, label, base_url, default_model, needs_key.
+ * The provider table: id, label, base_url, default_model, needs_key,
+ * env (env-var names that may carry the key).
  * @returns {string}
  */
 function providers_json() {
@@ -415,8 +549,33 @@ exports.strip_thinking = strip_thinking;
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
+        __wbg___wbindgen_is_falsy_16bd49b68658263e: function(arg0) {
+            const ret = !arg0;
+            return ret;
+        },
+        __wbg___wbindgen_string_get_0380ccaa2f57f0d9: function(arg0, arg1) {
+            const obj = arg1;
+            const ret = typeof(obj) === 'string' ? obj : undefined;
+            var ptr1 = isLikeNone(ret) ? 0 : passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            var len1 = WASM_VECTOR_LEN;
+            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+        },
         __wbg___wbindgen_throw_41e9ee4f547fc59a: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
+        },
+        __wbg_call_1875a20c43a36133: function() { return handleError(function (arg0, arg1, arg2, arg3) {
+            const ret = arg0.call(arg1, arg2, arg3);
+            return ret;
+        }, arguments); },
+        __wbg_call_187d372bd5fdd4aa: function() { return handleError(function (arg0, arg1, arg2) {
+            const ret = arg0.call(arg1, arg2);
+            return ret;
+        }, arguments); },
+        __wbindgen_generic_0000000000000001: function(arg0, arg1) {
+            // Cast intrinsic for `Ref(String) -> Externref`.
+            const ret = getStringFromWasm0(arg0, arg1);
+            return ret;
         },
         __wbindgen_init_externref_table: function() {
             const table = wasm.__wbindgen_externrefs;
@@ -434,12 +593,38 @@ function __wbg_get_imports() {
     };
 }
 
+const AgentRegistryFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_agentregistry_free(ptr, 1));
+const JsToolFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_jstool_free(ptr, 1));
 const NdjsonDecoderFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_ndjsondecoder_free(ptr, 1));
 const SseDecoderFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_ssedecoder_free(ptr, 1));
+
+function addToExternrefTable0(obj) {
+    const idx = wasm.__externref_table_alloc();
+    wasm.__wbindgen_externrefs.set(idx, obj);
+    return idx;
+}
+
+function _assertClass(instance, klass) {
+    if (!(instance instanceof klass)) {
+        throw new Error(`expected instance of ${klass.name}`);
+    }
+}
+
+let cachedDataViewMemory0 = null;
+function getDataViewMemory0() {
+    if (cachedDataViewMemory0 === null || cachedDataViewMemory0.buffer.detached === true || (cachedDataViewMemory0.buffer.detached === undefined && cachedDataViewMemory0.buffer !== wasm.memory.buffer)) {
+        cachedDataViewMemory0 = new DataView(wasm.memory.buffer);
+    }
+    return cachedDataViewMemory0;
+}
 
 function getStringFromWasm0(ptr, len) {
     return decodeText(ptr >>> 0, len);
@@ -451,6 +636,19 @@ function getUint8ArrayMemory0() {
         cachedUint8ArrayMemory0 = new Uint8Array(wasm.memory.buffer);
     }
     return cachedUint8ArrayMemory0;
+}
+
+function handleError(f, args) {
+    try {
+        return f.apply(this, args);
+    } catch (e) {
+        const idx = addToExternrefTable0(e);
+        wasm.__wbindgen_exn_store(idx);
+    }
+}
+
+function isLikeNone(x) {
+    return x === undefined || x === null;
 }
 
 function passArray8ToWasm0(arg, malloc) {

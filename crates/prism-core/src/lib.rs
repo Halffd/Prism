@@ -29,6 +29,7 @@ pub mod conversations;
 pub mod host;
 #[cfg(feature = "native-transport")]
 pub mod native_tools;
+pub mod media;
 pub mod prompt_history;
 pub mod providers;
 pub mod settings;

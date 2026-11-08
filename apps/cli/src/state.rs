@@ -11,7 +11,7 @@ use prism_core::client::StreamEvent;
 use prism_core::conversations::{self, Conversation, ConversationMeta, StoredMessage};
 use prism_core::host;
 use prism_core::providers;
-use prism_core::settings::{self, Connection, Settings};
+use prism_core::settings::Connection;
 use prism_core::thinking;
 use std::collections::VecDeque;
 use std::time::Instant;
@@ -112,7 +112,7 @@ impl App {
             }
         }
         let total = providers::PROVIDERS.len() + app.settings.custom_providers.len();
-        let pos = (0..total)
+        let _pos = (0..total)
             .find(|&i| app.provider_id_at(i).as_deref() == Some(app.settings.provider.as_str()))
             .unwrap_or(0);
         app.status = format!(
@@ -183,10 +183,7 @@ impl App {
             .messages
             .iter()
             .filter(|m| m.role != "system")
-            .map(|m| prism_core::client::ChatMessage {
-                role: m.role.clone(),
-                content: m.content.clone(),
-            })
+            .map(|m| prism_core::client::ChatMessage::text(&m.role, &m.content))
             .collect()
     }
 
@@ -380,10 +377,7 @@ impl App {
         }
         self.queue_paused = false;
         let mut history = self.history();
-        history.push(prism_core::client::ChatMessage {
-            role: "user".into(),
-            content: content.clone(),
-        });
+        history.push(prism_core::client::ChatMessage::text("user", &content));
 
         match chat::start_job(&self.settings, history, tx) {
             Ok(()) => {

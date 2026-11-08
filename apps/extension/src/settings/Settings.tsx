@@ -14,6 +14,15 @@ import { ModelRecentsEditor } from './ModelRecentsEditor';
 import { CustomModelManager } from '../chat/CustomModelManager';
 import { customModelOptions } from '../chat/custom-model';
 import {
+  defaultMediaSettings,
+  loadMediaSettings,
+  MEDIA_CAPABILITY_LABELS,
+  providersForCapability,
+  saveMediaSettings,
+  type MediaCapability,
+  type MediaSettings,
+} from '../chat/media-capabilities';
+import {
   getSetting,
   saveSetting,
   getSiteFilters,
@@ -47,6 +56,8 @@ export function Settings({ onClose }: SettingsProps) {
   const [imageGenerationModel, setImageGenerationModel] = useState<string>(
     'stabilityai/stable-diffusion-2-1',
   );
+  const [mediaSettings, setMediaSettings] =
+    useState<MediaSettings>(defaultMediaSettings);
   const [excludedSites, setExcludedSites] = useState<string[]>([]);
   const [whitelistedSites, setWhitelistedSites] = useState<string[]>([]);
   const [promptShortcuts, setPromptShortcuts] = useState<PromptShortcut[]>([]);
@@ -114,6 +125,15 @@ export function Settings({ onClose }: SettingsProps) {
   const [logEntries, setLogEntries] = useState<
     import('@prism/logging').LogEntry[]
   >([]);
+
+  useEffect(() => {
+    // Load the media capability keys and provider choices.
+    loadMediaSettings()
+      .then(setMediaSettings)
+      .catch(() => {
+        // Storage failures leave the defaults in place.
+      });
+  }, []);
 
   useEffect(() => {
     // Initialize API client with current settings
@@ -499,6 +519,9 @@ export function Settings({ onClose }: SettingsProps) {
         imageGenModel: imageGenerationModel,
       });
 
+      // Save the media capability keys and provider choices.
+      await saveMediaSettings(mediaSettings);
+
       // Save excluded and whitelisted sites to local database
       // First, remove all existing filters
       const allFilters = await getSiteFilters();
@@ -586,6 +609,20 @@ export function Settings({ onClose }: SettingsProps) {
     }
   };
 
+  const updateMediaSetting = (
+    capability: MediaCapability,
+    patch: Partial<MediaSettings[MediaCapability]>,
+  ) => {
+    setMediaSettings((previous) => {
+      const next = {
+        ...previous,
+        [capability]: { ...previous[capability], ...patch },
+      };
+      saveMediaSettings(next).catch(() => undefined);
+      return next;
+    });
+  };
+
   const updateSettingsAuto = async () => {
     try {
       // Update the current provider's API key in the providerKeys object
@@ -632,6 +669,9 @@ export function Settings({ onClose }: SettingsProps) {
         imageGenApiKey: imageGenerationApiKey,
         imageGenModel: imageGenerationModel,
       });
+
+      // Save the media capability keys and provider choices.
+      await saveMediaSettings(mediaSettings);
 
       // Save excluded and whitelisted sites to local database
       // First, remove all existing filters
@@ -2119,6 +2159,47 @@ export function Settings({ onClose }: SettingsProps) {
               <option value="black-forest-labs/FLUX.1-dev">FLUX Dev</option>
             </select>
           </div>
+        </div>
+
+        <div className="settings-section">
+          <h3>Media Capabilities</h3>
+          <small className="form-hint">
+            Keys for inpainting, video generation and 3D model generation. The
+            media panel picks the provider for each capability; a key stored
+            for the chat provider is used as a fallback.
+          </small>
+          {(
+            ['inpaint', 'video-gen', 'model-gen'] as const
+          ).map((capability) => (
+            <div className="form-group" key={capability}>
+              <label>
+                {MEDIA_CAPABILITY_LABELS[capability]} API key
+              </label>
+              <input
+                type="password"
+                value={mediaSettings[capability].apiKey}
+                onChange={(e) =>
+                  updateMediaSetting(capability, { apiKey: e.target.value })
+                }
+                placeholder={`Enter your ${MEDIA_CAPABILITY_LABELS[capability]} API key`}
+                className="form-control"
+              />
+              <label>Provider</label>
+              <select
+                value={mediaSettings[capability].provider}
+                onChange={(e) =>
+                  updateMediaSetting(capability, { provider: e.target.value })
+                }
+                className="form-control"
+              >
+                {providersForCapability(capability).map((provider) => (
+                  <option key={provider} value={provider}>
+                    {provider}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))}
         </div>
 
         <div className="settings-section">

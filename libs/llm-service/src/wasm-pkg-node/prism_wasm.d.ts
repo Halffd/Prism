@@ -2,6 +2,42 @@
 /* eslint-disable */
 
 /**
+ * A registry instance the JS host drives across steps.
+ */
+export class AgentRegistry {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Execute a tool directly (permission-gated). `ask_fn` is a JS
+     * function `(toolName, input) => bool`.
+     */
+    execute(name: string, input: string, ask_fn: Function): string;
+    constructor();
+    /**
+     * Register (or replace) a tool. Extension point.
+     */
+    register(tool: JsTool): void;
+    /**
+     * Set a tool's permission: "allow" | "deny" | "ask".
+     */
+    set_permission(name: string, level: string): void;
+}
+
+/**
+ * A JS-registered tool: the host supplies `execute(input) -> string`.
+ * This is the extension point — surfaces register domain tools (page
+ * context, snippets, editor state) and the core loop dispatches them.
+ */
+export class JsTool {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * `execute` must be a JS function `(input: string) => string`.
+     */
+    constructor(name: string, description: string, execute: Function);
+}
+
+/**
  * Ollama native NDJSON decoder.
  */
 export class NdjsonDecoder {
@@ -25,6 +61,14 @@ export class SseDecoder {
     is_done(): boolean;
     constructor();
 }
+
+/**
+ * One complete agent run. `llm_step` is a JS function
+ * `(system: string, historyJson: string) => string` returning the raw
+ * model response (throw/reject to signal an error). Returns JSON
+ * `AgentResult` (`{answer, steps, completed, error}`).
+ */
+export function agent_run(task: string, registry: AgentRegistry, llm_step: Function, max_steps: number): string;
 
 /**
  * Prepend the scratchpad instruction to the first user message.
@@ -97,7 +141,8 @@ export function parse_api_response(body: string): string;
 export function parse_models_response(body: string): string;
 
 /**
- * The provider table: id, label, base_url, default_model, needs_key.
+ * The provider table: id, label, base_url, default_model, needs_key,
+ * env (env-var names that may carry the key).
  */
 export function providers_json(): string;
 

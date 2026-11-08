@@ -164,21 +164,105 @@ describe('AIService chatCompletion (prism-core wasm path)', () => {
     expect(body.options.num_gpu).toBe(16);
   });
 
-  it('image-bearing messages stay on the legacy vision path', async () => {
-    const axios = require('axios');
-    const postMock = jest.fn(async () => ({
-      data: { choices: [{ message: { content: 'vision reply' } }] },
-    }));
-    axios.post = postMock;
-    global.fetch = jest.fn() as unknown as typeof fetch;
-    const svc = new AIService(config({}));
+  it('sends images through the core vision wire format', async () => {
+    global.fetch = jest.fn(
+      async () =>
+        new Response(sseBytes(['vision reply']), { status: 200 }),
+    ) as unknown as typeof fetch;
+    const cfg = config({});
+    const svc = new AIService(cfg);
     const res = await svc.chatCompletion(
-      request(config({}), [
+      request(cfg, [
         msg('what is this?', ['data:image/png;base64,AAAA']),
       ]),
     );
     expect(res.content).toBe('vision reply');
-    expect(global.fetch).not.toHaveBeenCalled();
-    expect(postMock).toHaveBeenCalled();
+    const call = (global.fetch as jest.Mock).mock.calls[0] as unknown as [
+      string,
+      { body: string },
+    ];
+    const body = JSON.parse(call[1].body);
+    const content = body.messages[0].content;
+    expect(Array.isArray(content)).toBe(true);
+    expect(content[0]).toEqual({ type: 'text', text: 'what is this?' });
+    expect(content[1]).toEqual({
+      type: 'image_url',
+      image_url: { url: 'data:image/png;base64,AAAA' },
+    });
+  });
+
+  it('sends every attached image through the core vision wire format', async () => {
+    global.fetch = jest.fn(
+      async () =>
+        new Response(sseBytes(['vision reply']), { status: 200 }),
+    ) as unknown as typeof fetch;
+    const cfg = config({});
+    const svc = new AIService(cfg);
+    await svc.chatCompletion(
+      request(cfg, [
+        msg('compare these', [
+          'data:image/png;base64,AAAA',
+          'data:image/png;base64,BBBB',
+        ]),
+      ]),
+    );
+    const call = (global.fetch as jest.Mock).mock.calls[0] as unknown as [
+      string,
+      { body: string },
+    ];
+    const content = JSON.parse(call[1].body).messages[0].content;
+    expect(content).toHaveLength(3);
+    expect(content[1].image_url.url).toBe('data:image/png;base64,AAAA');
+    expect(content[2].image_url.url).toBe('data:image/png;base64,BBBB');
+  });
+
+  it('keeps a message without images on the plain string shape', async () => {
+    global.fetch = jest.fn(
+      async () =>
+        new Response(sseBytes(['plain reply']), { status: 200 }),
+    ) as unknown as typeof fetch;
+    const cfg = config({});
+    const svc = new AIService(cfg);
+    await svc.chatCompletion(request(cfg, [msg('hi')]));
+    const call = (global.fetch as jest.Mock).mock.calls[0] as unknown as [
+      string,
+      { body: string },
+    ];
+    expect(JSON.parse(call[1].body).messages[0].content).toBe('hi');
+  });
+
+  it('gemini keeps its own image payload shape', async () => {
+    // The Gemini SDK talks to the API over fetch, so the stub has to
+    // answer with a Gemini-shaped body rather than an OpenAI one.
+    const fetchMock = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: 'vision reply' }],
+              role: 'model',
+            },
+          },
+        ],
+        usageMetadata: { totalTokenCount: 7 },
+      }),
+      text: async () => '',
+    }));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const cfg = config({ provider: 'gemini', apiKey: 'gk' });
+    const svc = new AIService(cfg);
+    const res = await svc.chatCompletion(
+      request(cfg, [msg('what is this?', ['data:image/png;base64,AAAA'])]),
+    );
+    expect(res.content).toBe('vision reply');
+    expect(fetchMock).toHaveBeenCalled();
+    const body = (fetchMock.mock.calls[0] as unknown as [string, { body: string }])[1]
+      .body;
+    // Gemini takes the image as inline data, not as an image_url part.
+    expect(body).toContain('inlineData');
+    expect(body).toContain('image/png');
+    expect(body).not.toContain('image_url');
   });
 });

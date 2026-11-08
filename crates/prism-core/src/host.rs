@@ -167,3 +167,45 @@ pub fn spawn_models_fetch(req: ModelsRequest, tx: Sender<ModelsEvent>) {
         }
     });
 }
+
+/// Spawn a media request (image, inpaint, video, 3D model).
+///
+/// The outcome arrives on `tx`: a ready media URL, a task id to poll, or
+/// the reason the request failed.
+pub fn spawn_media(
+    kind: crate::media::MediaKind,
+    req: crate::media::MediaRequest,
+    tx: Sender<crate::media::MediaOutcome>,
+) {
+    runtime().spawn(async move {
+        match crate::media::run_media(transport(), kind, &req).await {
+            Ok(outcome) => {
+                let _ = tx.send(outcome);
+            }
+            Err(e) => {
+                let _ = tx.send(crate::media::MediaOutcome::Failed(e));
+            }
+        }
+    });
+}
+
+/// Spawn a poll of an asynchronous media task.
+pub fn spawn_media_poll(
+    provider: String,
+    base_url: String,
+    api_key: String,
+    task_id: String,
+    tx: Sender<crate::media::MediaOutcome>,
+) {
+    runtime().spawn(async move {
+        match crate::media::poll_media(transport(), &provider, &base_url, &api_key, &task_id).await
+        {
+            Ok(outcome) => {
+                let _ = tx.send(outcome);
+            }
+            Err(e) => {
+                let _ = tx.send(crate::media::MediaOutcome::Failed(e));
+            }
+        }
+    });
+}

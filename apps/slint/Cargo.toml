@@ -15,6 +15,7 @@ serde_json = "1.0"
 
 [features]
 default = []
+# The agent loop needs the core's native transport (reqwest + tokio).
 agent = ["prism-core/native-transport"]
 
 [build-dependencies]

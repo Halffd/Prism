@@ -2,14 +2,17 @@
 
 slint::include_modules!();
 
+pub mod media;
+
 // Re-export all public types and functions from dependencies
 pub use prism_core::catalog;
+#[cfg(feature = "agent")]
 pub use prism_core::agent::{run_agent, AgentResult, CalculatorTool, StepMessage, ToolRegistry};
 pub use prism_core::client::{
     ApiChatRequest, ChatMessage, ModelsEvent, ModelsRequest, OllamaChatRequest, StreamEvent,
     StreamRequest,
 };
-#[cfg(feature = "native-transport")]
+#[cfg(feature = "agent")]
 pub use prism_core::native_tools;
 pub use prism_core::conversations::{self, Conversation, ConversationMeta, StoredMessage};
 pub use prism_core::providers::{self, ollama_root_url, PROVIDERS};
@@ -19,10 +22,7 @@ pub use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 pub use std::cell::RefCell;
 pub use std::rc::Rc;
 pub use std::sync::mpsc::{self, Receiver, TryRecvError};
-use serde_json;
-#[cfg(feature = "native-transport")]
-use crate::native_tools;
-#[cfg(feature = "native-transport")]
+#[cfg(feature = "agent")]
 use prism_core::transport::ReqwestTransport;
 
 /// Matches COMPUTE_LEVELS in the TUI settings screen / shared types.
@@ -110,6 +110,8 @@ pub struct State {
     pub prompt_queue: Vec<String>,
     /// Whether a queued prompt is currently being processed (steered).
     pub queue_processing: bool,
+    /// Media capability panel state.
+    pub media: crate::shared::media::MediaState,
 }
 
 impl State {
@@ -139,6 +141,7 @@ impl State {
             history_draft: None,
             prompt_queue: Vec::new(),
             queue_processing: false,
+            media: crate::shared::media::MediaState::default(),
         }
     }
 }
@@ -288,14 +291,13 @@ pub fn current_model_info(settings: &Settings) -> Option<catalog::ModelInfo> {
 #[cfg(feature = "agent")]
 mod agent_integration {
     use super::*;
-    use crate::native_tools;
     use prism_core::agent::{run_agent, AgentResult, CalculatorTool, StepMessage, ToolRegistry};
     use prism_core::transport::{HttpRequest, ReqwestTransport};
     use std::sync::Arc;
     use tokio::runtime::Builder as TokioRuntimeBuilder;
 
     struct SlintLlmStep {
-        transport: ReqwestTransport,
+        transport: Arc<ReqwestTransport>,
         base_url: String,
         api_key: String,
         model: String,
@@ -355,7 +357,7 @@ mod agent_integration {
             push_system(ui, state, lines_model, "wait for the chat stream to finish".into());
             return;
         }
-        let task = state.borrow().settings.provider.clone();
+        let task = task.to_string();
         let provider = state.borrow().settings.provider.clone();
         let settings = state.borrow().settings.clone();
         let workspace_root = std::path::PathBuf::from(".");
@@ -378,7 +380,7 @@ mod agent_integration {
             }
 
             let step_impl = SlintLlmStep {
-                transport: Box::leak(Box::new(ReqwestTransport::new())),
+                transport: Arc::new(ReqwestTransport::new()),
                 base_url: resolved.base_url.clone(),
                 api_key: api_key.trim().to_string(),
                 model: if settings.model.trim().is_empty() {
@@ -398,13 +400,15 @@ mod agent_integration {
                 run_agent(&task, &mut step_fn, &reg, 12, &|_, _| false)
             };
 
-            let result_json = serde_json::to_string(&result).unwrap_or_else(|e| format!("{{"error":"{e}"}}"));
+            let result_json = serde_json::to_string(&result)
+                .unwrap_or_else(|e| format!("{{\"error\":\"{e}\"}}"));
             let _ = ui_clone.invoke_agent_done(result_json.into());
         });
     }
 }
 
 #[cfg(not(feature = "agent"))]
+#[allow(unexpected_cfgs)]
 pub fn run_agent_from_palette(
     _ui: &AppWindow,
     _state: &Rc<RefCell<State>>,
@@ -687,59 +691,8 @@ pub fn palette_execute(
         }
         "view.scroll_end" => ui.invoke_scroll_to_end(),
         "agent.run" => {
-            if state.borrow().streaming {
-                push_system(ui, state, lines_model, "wait for the chat stream to finish".into());
-                return;
-            }
-            let task = state.borrow().settings.provider.clone();
-            let provider = state.borrow().settings.provider.clone();
-            let settings = state.borrow().settings.clone();
-            let workspace_root = std::path::PathBuf::from("."); // cwd
-            let ui_clone = ui.clone();
-            let state_c = state.clone();
-            let lines_c = lines_model.clone();
-
-            // Spawn agent on background thread (blocking LLM step over ReqwestTransport)
-            std::thread::spawn(move || {
-                let reg = ToolRegistry::new();
-                reg.register(Arc::new(CalculatorTool));
-                native_tools::register_all(&reg, &workspace_root);
-
-                let resolved = settings
-                    .resolve_provider(&provider)
-                    .expect("unknown provider");
-                let api_key = settings.key_for(&provider);
-                if resolved.needs_key && api_key.trim().is_empty() {
-                    // Can't signal error back to UI from this thread easily — just log
-                    eprintln!("agent: API key required for {}", resolved.label);
-                    return;
-                }
-
-                let step_impl = SlintLlmStep {
-                    transport: Box::leak(Box::new(prism_core::transport::prism_core::transport::ReqwestTransport::new())),
-                    base_url: resolved.base_url.clone(),
-                    api_key: api_key.trim().to_string(),
-                    model: if settings.model.trim().is_empty() {
-                        resolved.default_model.clone()
-                    } else {
-                        settings.model.trim().to_string()
-                    },
-                    temperature: settings.temperature,
-                    max_tokens: settings.max_tokens,
-                };
-
-                let task = task;
-                let result: AgentResult = {
-                    let mut step_fn = |system: &str, hist: &[StepMessage]| {
-                        step_impl.complete(system, hist)
-                    };
-                    run_agent(&task, &mut step_fn, &reg, 12, &|_, _| false)
-                };
-
-                // Post results back to UI thread via event loop
-                let result_json = serde_json::to_string(&result).unwrap_or_else(|e| format!("{{"error":"{e}"}}"));
-                let _ = ui_clone.invoke_agent_done(result_json.into());
-            });
+            let task = state.borrow().settings.system_prompt.clone();
+            run_agent_from_palette(ui, state, lines_model, &task);
         }
         other => push_system(ui, state, lines_model, format!("unknown command: {other}")),
     }
@@ -1049,15 +1002,9 @@ pub fn send(
         .lines
         .iter()
         .filter(|l| l.role != "system")
-        .map(|l| ChatMessage {
-            role: l.role.clone(),
-            content: l.content.clone(),
-        })
+        .map(|l| ChatMessage::text(&l.role, &l.content))
         .collect();
-    history.push(ChatMessage {
-        role: "user".into(),
-        content: content.clone(),
-    });
+    history.push(ChatMessage::text("user", &content));
 
     st.lines.push(Line {
         role: "user".into(),
@@ -1096,10 +1043,7 @@ pub fn send(
             if !st.settings.system_prompt.trim().is_empty() {
                 history.insert(
                     0,
-                    ChatMessage {
-                        role: "system".into(),
-                        content: st.settings.system_prompt.trim().to_string(),
-                    },
+                    ChatMessage::text("system", st.settings.system_prompt.trim()),
                 );
             }
             if st.settings.thinking_enabled {
@@ -1314,6 +1258,18 @@ pub fn run_ui() {
         ui.set_cached_models(ModelRc::from(Rc::new(VecModel::from(cached_models(
             &st.settings,
         )))));
+        ui.set_media_kind_labels(ModelRc::from(Rc::new(VecModel::from(
+            media::MEDIA_KINDS
+                .iter()
+                .map(|(label, _)| SharedString::from(*label))
+                .collect::<Vec<_>>(),
+        ))));
+        ui.set_media_provider_labels(ModelRc::from(Rc::new(VecModel::from(
+            st.media.provider_labels(),
+        ))));
+        ui.set_media_provider(st.media.provider().into());
+        ui.set_media_needs_image(st.media.needs_image());
+        ui.set_media_needs_mask(st.media.needs_mask());
         refresh_chats(&ui, &state);
     }
 
@@ -1402,6 +1358,7 @@ pub fn run_ui() {
             ui.set_palette_idx(next);
         });
     }
+    #[cfg(feature = "agent")]
     {
         let ui_w = ui.as_weak();
         let state_c = state.clone();
@@ -1790,6 +1747,38 @@ pub fn run_ui() {
             ui.set_settings_status(status.into());
         });
     }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_media_kind_selected(move |i| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            media::select_kind(&ui, &state_c, i);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_media_provider_selected(move |i| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            media::select_provider(&ui, &state_c, i);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_media_generate(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            media::generate(&ui, &state_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_media_poll(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            media::poll(&ui, &state_c);
+        });
+    }
 
     // ---- event pump ----
     let timer = slint::Timer::default();
@@ -1804,6 +1793,7 @@ pub fn run_ui() {
                 let Some(ui) = ui_w.upgrade() else { return };
                 drain_events(&ui, &state_c, &lines_c);
                 drain_models(&ui, &state_c);
+                media::drain(&ui, &state_c);
             },
         );
     }

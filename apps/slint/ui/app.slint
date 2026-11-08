@@ -82,6 +82,27 @@ export component AppWindow inherits Window {
     in-out property <string> palette-query;
     in property <[PaletteRow]> palette-results;
     in-out property <int> palette-idx: 0;
+    // ---- media (image / video / 3D) ----
+    in property <[string]> media-kind-labels;
+    in property <[string]> media-provider-labels;
+    in-out property <int> media-kind-idx: 0;
+    in-out property <int> media-provider-idx: 0;
+    in property <string> media-provider;
+    in property <bool> media-needs-image: false;
+    in property <bool> media-needs-mask: false;
+    in-out property <string> media-prompt;
+    in-out property <string> media-negative-prompt;
+    in-out property <string> media-image-url;
+    in-out property <string> media-mask-url;
+    in-out property <string> media-model;
+    in-out property <string> media-aspect-ratio;
+    in-out property <string> media-duration;
+    in-out property <string> media-seed;
+    in-out property <string> media-format;
+    in property <string> media-status;
+    in property <string> media-result-url;
+    in property <bool> media-busy: false;
+    in property <bool> media-pending: false;
 
     // ---- callbacks ----
     callback send(string);
@@ -116,12 +137,19 @@ export component AppWindow inherits Window {
     callback prism-url-edited(string);
     callback prism-token-edited(string);
     callback save-settings();
+    // ---- media ----
+    callback media-kind-selected(int);
+    callback media-provider-selected(int);
+    callback media-generate();
+    callback media-poll();
 
     changed connection-idx => { set-connection(self.connection-idx); }
     changed provider-idx => { set-provider(self.provider-idx); }
     changed compute-idx => { compute-selected(self.compute-idx); }
     changed thinking-enabled => { thinking-toggled(self.thinking-enabled); }
     changed temperature => { temperature-edited(self.temperature); }
+    changed media-kind-idx => { media-kind-selected(self.media-kind-idx); }
+    changed media-provider-idx => { media-provider-selected(self.media-provider-idx); }
 
     scroll-to-end => {
         list.content-y = list.height - list.content-height;
@@ -508,6 +536,98 @@ export component AppWindow inherits Window {
                                 Text { text: kv.label; color: #cfd8dc; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
                                 Button { text: "x"; clicked => { custom-provider-remove(kv.id); } }
                             }
+                        }
+                    }
+
+                    // ---- media capabilities ----
+                    Text { text: "Media"; color: #9fb0bd; font-weight: 700; }
+                    VerticalLayout {
+                        spacing: 4px;
+                        Text { text: "Capability"; color: #8b95a1; font-size: 12px; }
+                        ComboBox {
+                            model: media-kind-labels;
+                            current-index <=> media-kind-idx;
+                        }
+                        Text { text: "Provider"; color: #8b95a1; font-size: 12px; }
+                        ComboBox {
+                            model: media-provider-labels;
+                            current-index <=> media-provider-idx;
+                        }
+                        Text { text: "Prompt"; color: #8b95a1; font-size: 12px; }
+                        TextEdit {
+                            height: 60px;
+                            text <=> media-prompt;
+                        }
+                        if media-needs-image : VerticalLayout {
+                            spacing: 2px;
+                            Text { text: "Source image URL"; color: #8b95a1; font-size: 12px; }
+                            LineEdit {
+                                text <=> media-image-url;
+                                placeholder-text: "https://… or data:image/png;base64,…";
+                            }
+                        }
+                        if media-needs-mask : VerticalLayout {
+                            spacing: 2px;
+                            Text { text: "Mask image URL"; color: #8b95a1; font-size: 12px; }
+                            LineEdit {
+                                text <=> media-mask-url;
+                                placeholder-text: "https://… or data:image/png;base64,…";
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            VerticalLayout {
+                                spacing: 2px;
+                                Text { text: "Model"; color: #8b95a1; font-size: 12px; }
+                                LineEdit { text <=> media-model; placeholder-text: "provider default"; }
+                            }
+                            VerticalLayout {
+                                spacing: 2px;
+                                Text { text: "Aspect ratio"; color: #8b95a1; font-size: 12px; }
+                                LineEdit { text <=> media-aspect-ratio; placeholder-text: "1:1"; }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            VerticalLayout {
+                                spacing: 2px;
+                                Text { text: "Duration (s)"; color: #8b95a1; font-size: 12px; }
+                                LineEdit { text <=> media-duration; }
+                            }
+                            VerticalLayout {
+                                spacing: 2px;
+                                Text { text: "Seed"; color: #8b95a1; font-size: 12px; }
+                                LineEdit { text <=> media-seed; }
+                            }
+                            VerticalLayout {
+                                spacing: 2px;
+                                Text { text: "Format"; color: #8b95a1; font-size: 12px; }
+                                LineEdit { text <=> media-format; placeholder-text: "png"; }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Button {
+                                text: media-busy ? "Working…" : "Generate";
+                                enabled: !media-busy;
+                                clicked => { media-generate(); }
+                            }
+                            if media-pending : Button {
+                                text: "Check status";
+                                clicked => { media-poll(); }
+                            }
+                        }
+                        if media-status != "" : Text {
+                            text: media-status;
+                            color: #8b95a1;
+                            font-size: 11px;
+                            wrap: word-wrap;
+                        }
+                        if media-result-url != "" : Text {
+                            text: media-result-url;
+                            color: #7fb3d5;
+                            font-size: 11px;
+                            wrap: word-wrap;
                         }
                     }
                 }

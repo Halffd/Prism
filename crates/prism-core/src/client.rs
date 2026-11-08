@@ -20,6 +20,34 @@ use std::sync::mpsc::Sender;
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
+    /// Images attached to the message, as data URLs or remote URLs.
+    ///
+    /// A message with images is sent in the OpenAI vision shape: the
+    /// content becomes a list of text and image parts. A message without
+    /// images keeps the plain string shape, so a text-only conversation
+    /// sends exactly the bytes it always did.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<String>,
+}
+
+impl ChatMessage {
+    /// A text-only message.
+    pub fn text(role: &str, content: &str) -> Self {
+        Self {
+            role: role.to_string(),
+            content: content.to_string(),
+            images: Vec::new(),
+        }
+    }
+
+    /// A message with images attached.
+    pub fn with_images(role: &str, content: &str, images: Vec<String>) -> Self {
+        Self {
+            role: role.to_string(),
+            content: content.to_string(),
+            images,
+        }
+    }
 }
 
 /// Request for direct (OpenAI-compatible) streaming.
@@ -355,7 +383,7 @@ pub fn parse_models_response(body: &str) -> Result<Vec<String>, String> {
 pub fn stream_request_body(req: &StreamRequest) -> serde_json::Value {
     let mut body = serde_json::json!({
         "model": req.model,
-        "messages": req.messages,
+        "messages": req.messages.iter().map(wire_message).collect::<Vec<_>>(),
         "temperature": req.temperature,
         "stream": true,
     });
@@ -372,6 +400,38 @@ pub fn stream_request_body(req: &StreamRequest) -> serde_json::Value {
         body["presence_penalty"] = serde_json::json!(v);
     }
     body
+}
+
+/// The wire shape of one message.
+///
+/// A message without images stays a plain string, so a text-only
+/// conversation sends exactly the bytes it always did. A message with
+/// images uses the OpenAI vision shape: a list of a text part followed by
+/// one image part per image.
+pub fn wire_message(msg: &ChatMessage) -> serde_json::Value {
+    if msg.images.is_empty() {
+        return serde_json::json!({
+            "role": msg.role,
+            "content": msg.content,
+        });
+    }
+    let mut parts = Vec::with_capacity(msg.images.len() + 1);
+    if !msg.content.is_empty() {
+        parts.push(serde_json::json!({
+            "type": "text",
+            "text": msg.content,
+        }));
+    }
+    for image in &msg.images {
+        parts.push(serde_json::json!({
+            "type": "image_url",
+            "image_url": { "url": image },
+        }));
+    }
+    serde_json::json!({
+        "role": msg.role,
+        "content": parts,
+    })
 }
 
 /// Ollama native `/api/chat` POST body.
@@ -700,10 +760,7 @@ mod tests {
             api_key: "sk".into(),
             model: "gpt-4o".into(),
             temperature: 0.7,
-            messages: vec![ChatMessage {
-                role: "user".into(),
-                content: "hi".into(),
-            }],
+            messages: vec![ChatMessage::text("user", "hi")],
             max_tokens: None,
             top_p: None,
             frequency_penalty: None,
@@ -730,6 +787,86 @@ mod tests {
         let body = stream_request_body(&req);
         assert_eq!(body["max_tokens"], 512);
         assert_eq!(body["top_p"], serde_json::json!(0.9f32));
+    }
+
+    #[test]
+    fn a_message_without_images_keeps_the_plain_string_shape() {
+        let body = stream_request_body(&request());
+        let content = &body["messages"][0]["content"];
+        assert!(content.is_string());
+        assert_eq!(content, "hi");
+    }
+
+    #[test]
+    fn a_message_with_images_uses_the_vision_shape() {
+        let mut req = request();
+        req.messages = vec![ChatMessage::with_images(
+            "user",
+            "what is this?",
+            vec!["data:image/png;base64,AAA".into()],
+        )];
+        let body = stream_request_body(&req);
+        let content = &body["messages"][0]["content"];
+        let parts = content.as_array().expect("content is a list of parts");
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0]["type"], "text");
+        assert_eq!(parts[0]["text"], "what is this?");
+        assert_eq!(parts[1]["type"], "image_url");
+        assert_eq!(parts[1]["image_url"]["url"], "data:image/png;base64,AAA");
+    }
+
+    #[test]
+    fn a_message_with_several_images_carries_all_of_them() {
+        let mut req = request();
+        req.messages = vec![ChatMessage::with_images(
+            "user",
+            "compare these",
+            vec!["data:image/png;base64,AAA".into(), "https://cdn.test/b.png".into()],
+        )];
+        let body = stream_request_body(&req);
+        let parts = body["messages"][0]["content"]
+            .as_array()
+            .expect("content is a list of parts");
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[1]["image_url"]["url"], "data:image/png;base64,AAA");
+        assert_eq!(parts[2]["image_url"]["url"], "https://cdn.test/b.png");
+    }
+
+    #[test]
+    fn a_message_with_only_images_has_no_empty_text_part() {
+        let mut req = request();
+        req.messages = vec![ChatMessage::with_images(
+            "user",
+            "",
+            vec!["data:image/png;base64,AAA".into()],
+        )];
+        let body = stream_request_body(&req);
+        let parts = body["messages"][0]["content"]
+            .as_array()
+            .expect("content is a list of parts");
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0]["type"], "image_url");
+    }
+
+    #[test]
+    fn attached_images_survive_a_json_round_trip() {
+        // The WASM boundary serialises the message, so the images have to
+        // come back out on the other side.
+        let msg = ChatMessage::with_images(
+            "user",
+            "what is this?",
+            vec!["data:image/png;base64,AAA".into()],
+        );
+        let json = serde_json::to_string(&msg).unwrap();
+        let back: ChatMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.images, msg.images);
+        assert_eq!(back.content, "what is this?");
+    }
+
+    #[test]
+    fn a_message_without_images_omits_the_field() {
+        let json = serde_json::to_string(&ChatMessage::text("user", "hi")).unwrap();
+        assert!(!json.contains("images"), "unexpected field in {json}");
     }
 
     #[test]

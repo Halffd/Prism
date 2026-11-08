@@ -8,8 +8,6 @@
 
 mod shared;
 
-use shared::*;
-
 fn main() {
     shared::run_ui();
 }

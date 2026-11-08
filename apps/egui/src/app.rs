@@ -148,10 +148,7 @@ impl PrismApp {
         self.transcript
             .iter()
             .filter(|l| l.role != "system")
-            .map(|l| ChatMessage {
-                role: l.role.clone(),
-                content: l.content.clone(),
-            })
+            .map(|l| ChatMessage::text(&l.role, &l.content))
             .collect()
     }
 
@@ -165,10 +162,7 @@ impl PrismApp {
         // Build the request from history BEFORE appending the new
         // user message and the assistant placeholder to the transcript.
         let mut history = self.history();
-        history.push(ChatMessage {
-            role: "user".into(),
-            content: content.clone(),
-        });
+        history.push(ChatMessage::text("user", &content));
 
         self.transcript.push(TranscriptLine {
             role: "user".into(),
@@ -198,10 +192,7 @@ impl PrismApp {
                 if !self.settings.system_prompt.trim().is_empty() {
                     history.insert(
                         0,
-                        ChatMessage {
-                            role: "system".into(),
-                            content: self.settings.system_prompt.trim().to_string(),
-                        },
+                        ChatMessage::text("system", self.settings.system_prompt.trim()),
                     );
                 }
                 // Thinking scratchpad instruction on the first user message.

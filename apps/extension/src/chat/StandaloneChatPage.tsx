@@ -9,6 +9,7 @@ import type { ChatSession, PromptShortcut } from '@prism/shared-types';
 import { ImageGenerationService } from '@prism/image-gen';
 import type { Message, ContextData, AIConfig } from '@prism/shared-types';
 import { VoiceInput } from '../popup/VoiceInput';
+import { MediaPanel } from '../components/MediaPanel';
 import { ErrorModalHost } from '../components/ErrorModal';
 import '../popup/Popup.scss'; // Reuse popup styles
 
@@ -1297,6 +1298,8 @@ export function StandaloneChatPage() {
             <button onClick={() => setGeneratedImage(null)}>Clear</button>
           </div>
         )}
+
+        <MediaPanel client={client} aiConfig={aiConfig} />
 
         <div
           className={`input-container${dragOver ? ' drag-over' : ''}`}

@@ -2,6 +2,42 @@
 /* eslint-disable */
 
 /**
+ * A registry instance the JS host drives across steps.
+ */
+export class AgentRegistry {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Execute a tool directly (permission-gated). `ask_fn` is a JS
+     * function `(toolName, input) => bool`.
+     */
+    execute(name: string, input: string, ask_fn: Function): string;
+    constructor();
+    /**
+     * Register (or replace) a tool. Extension point.
+     */
+    register(tool: JsTool): void;
+    /**
+     * Set a tool's permission: "allow" | "deny" | "ask".
+     */
+    set_permission(name: string, level: string): void;
+}
+
+/**
+ * A JS-registered tool: the host supplies `execute(input) -> string`.
+ * This is the extension point — surfaces register domain tools (page
+ * context, snippets, editor state) and the core loop dispatches them.
+ */
+export class JsTool {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * `execute` must be a JS function `(input: string) => string`.
+     */
+    constructor(name: string, description: string, execute: Function);
+}
+
+/**
  * Ollama native NDJSON decoder.
  */
 export class NdjsonDecoder {
@@ -25,6 +61,14 @@ export class SseDecoder {
     is_done(): boolean;
     constructor();
 }
+
+/**
+ * One complete agent run. `llm_step` is a JS function
+ * `(system: string, historyJson: string) => string` returning the raw
+ * model response (throw/reject to signal an error). Returns JSON
+ * `AgentResult` (`{answer, steps, completed, error}`).
+ */
+export function agent_run(task: string, registry: AgentRegistry, llm_step: Function, max_steps: number): string;
 
 /**
  * Prepend the scratchpad instruction to the first user message.
@@ -97,7 +141,8 @@ export function parse_api_response(body: string): string;
 export function parse_models_response(body: string): string;
 
 /**
- * The provider table: id, label, base_url, default_model, needs_key.
+ * The provider table: id, label, base_url, default_model, needs_key,
+ * env (env-var names that may carry the key).
  */
 export function providers_json(): string;
 
@@ -110,14 +155,22 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
+    readonly __wbg_agentregistry_free: (a: number, b: number) => void;
+    readonly __wbg_jstool_free: (a: number, b: number) => void;
     readonly __wbg_ndjsondecoder_free: (a: number, b: number) => void;
     readonly __wbg_ssedecoder_free: (a: number, b: number) => void;
+    readonly agent_run: (a: number, b: number, c: number, d: any, e: number) => [number, number];
+    readonly agentregistry_execute: (a: number, b: number, c: number, d: number, e: number, f: any) => [number, number];
+    readonly agentregistry_new: () => number;
+    readonly agentregistry_register: (a: number, b: number) => void;
+    readonly agentregistry_set_permission: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly apply_thinking: (a: number, b: number) => [number, number];
     readonly build_api_chat_body: (a: number, b: number) => [number, number];
     readonly build_ollama_body: (a: number, b: number) => [number, number];
     readonly build_stream_body: (a: number, b: number) => [number, number];
     readonly default_settings_json: () => [number, number];
     readonly derive_title: (a: number, b: number) => [number, number];
+    readonly jstool_new: (a: number, b: number, c: number, d: number, e: any) => number;
     readonly ndjsondecoder_feed: (a: number, b: number, c: number) => [number, number];
     readonly ndjsondecoder_finish: (a: number) => [number, number];
     readonly ndjsondecoder_is_done: (a: number) => number;
@@ -134,9 +187,11 @@ export interface InitOutput {
     readonly ssedecoder_is_done: (a: number) => number;
     readonly ssedecoder_new: () => number;
     readonly strip_thinking: (a: number, b: number) => [number, number];
-    readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+    readonly __wbindgen_exn_store: (a: number) => void;
+    readonly __externref_table_alloc: () => number;
+    readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_start: () => void;
 }

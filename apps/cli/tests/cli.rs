@@ -174,10 +174,7 @@ fn start_job_requires_credentials() {
     };
     let err = chat::start_job(
         &settings,
-        vec![prism_core::client::ChatMessage {
-            role: "user".into(),
-            content: "hi".into(),
-        }],
+        vec![prism_core::client::ChatMessage::text("user", "hi")],
         &tx,
     )
     .unwrap_err();

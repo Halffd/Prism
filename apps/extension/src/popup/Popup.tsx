@@ -42,6 +42,7 @@ import './Popup.scss';
 import { InputSection } from './InputSection';
 import { HeaderSection } from './HeaderSection';
 import { ImageGenerationSection } from './ImageGenerationSection';
+import { MediaPanel } from '../components/MediaPanel';
 import { IframeInjectionSection } from './IframeInjectionSection';
 import { ErrorModalHost } from '../components/ErrorModal';
 import { ChatTabBar } from '../chat/ChatTabBar';
@@ -211,6 +212,10 @@ export function Popup() {
 
   const [historyMissing, setHistoryMissing] = useState(false);
 
+  // The media panel drives the capability services on the client, so it
+  // needs the current instance rather than the module-level one.
+  const [mediaClient, setMediaClient] = useState(client);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -256,6 +261,7 @@ export function Popup() {
             aiConfig: updatedConfig,
             prismApiUrl: updatedConfig.apiUrl,
           });
+          setMediaClient(client);
 
           // Fetch available models for the current provider
           fetchAvailableModels(updatedConfig);
@@ -263,6 +269,7 @@ export function Popup() {
           console.error('Failed to load AI config, using default:', error);
           dispatch(setAIConfig(defaultAIConfig));
           client = new UnifiedAIClient({ aiConfig: defaultAIConfig });
+          setMediaClient(client);
         }
       } else {
         dispatch(setAIConfig(defaultAIConfig));
@@ -2183,6 +2190,8 @@ export function Popup() {
         isGeneratingImage={isGeneratingImage}
         imageGenerationApiKey={imageGenerationApiKey}
       />
+
+      <MediaPanel client={mediaClient} aiConfig={reduxAIConfig} />
 
       {/* Iframe Injection Section */}
       <IframeInjectionSection

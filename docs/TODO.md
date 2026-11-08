@@ -24,6 +24,8 @@ extension has no business ingesting documents or running tool loops.
 | Per-provider model cache                     | done    | ModelRecentsEditor, free-form model input                                    |
 | Themes (6)                                   | done    | data-theme system + picker in Settings                                       |
 | Auto model selection                         | partial | Auto button exists; refined per-task routing lives in TUI/desktop            |
+| Media capabilities (image/inpaint/video/3D) | done    | MediaPanel in Popup + standalone chat; per-capability provider + key in Settings (`media-capabilities.ts`) |
+| Multi-image (vision) chat input             | done    | Attached images ride the core vision wire format; OpenAI-compatible providers go through the core, Gemini/Claude keep their native payload |
 
 **Not in the extension** (by design): tools/permissions, RAG, personalities,
 hardware modes, agent memories. See TUI.
@@ -70,6 +72,8 @@ hardware modes, agent memories. See TUI.
 | Queue/steer (send while streaming)     | done    | `State.prompt_queue` + `queue_processing`; send() queues when streaming; drain_events steers next on completion; Slint shows "Queued" toast; 1 core test |
 | API: /api/model / /api/provider        | done    | `apps/api/src/app/routes/model.provider.routes.ts` backed by wasm `providers_json`; GET /api/model, /model/default, /provider, /provider/:id |
 | SSE backpressure (4096 dropping queue) | done    | per-subscriber dropping queue (cap 4096) on /api/chat/stream; overflow sends error frame + drops oldest non-error; `enqueueWrite` + `processQueue`; opencode pattern |
+| Media capabilities (core + Slint)     | done    | `prism_core::media`: image/inpaint/video/3D request bodies, response parsing (media URL + task id), async provider polling; `host::spawn_media`/`spawn_media_poll`; Slint media panel (capability + provider + prompt/image/mask/seed/duration/format) with ready/pending/failed states |
+| Multi-image (vision) chat request      | done    | `ChatMessage.images`; `stream_request_body` emits the OpenAI vision shape (text part + one `image_url` part per image, empty text part omitted); messages without images keep the plain string shape; `thinking::apply_thinking_to_messages` preserves the attachments |
 | Agent features (tools/permissions/RAG) | planned | Stays per-surface until core proven (single-core plan scope)                                   |
 
 ## CLI (apps/cli)

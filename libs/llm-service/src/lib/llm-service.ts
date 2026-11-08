@@ -214,7 +214,11 @@ async function directStream(
 }
 
 async function coreChatComplete(
-  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  messages: Array<{
+    role: 'system' | 'user' | 'assistant';
+    content: string;
+    images?: string[];
+  }>,
   config: AIConfig,
 ): Promise<string> {
   const core = await loadCore();
@@ -361,6 +365,13 @@ async function parseModelsBody(body: unknown): Promise<string[] | null> {
 export class AIService {
   private config: AIConfig;
 
+  /**
+   * Providers whose image payload shape is not the OpenAI-compatible
+   * `content` array. They keep their own request builder; every other
+   * provider sends images through the core's vision wire format.
+   */
+  private readonly nativeImageProviders = new Set(['gemini', 'claude']);
+
   constructor(config: AIConfig) {
     this.config = config;
   }
@@ -377,10 +388,10 @@ export class AIService {
     const thinkEnabled = request.config.thinkingMode?.enabled === true;
     const hasImages = messages.some((m) => m.images && m.images.length > 0);
 
-    // Vision stays on the legacy provider paths until the core supports
-    // image content (v1 core contract is text-only). Those paths keep
-    // the legacy thinking mechanics (last-user injection + regex strip).
-    if (hasImages) {
+    // Providers with a native image payload (Gemini, Claude) keep their
+    // own request shape. Everything OpenAI-compatible goes through the
+    // core, which owns the vision wire format.
+    if (hasImages && this.nativeImageProviders.has(request.config.provider)) {
       const effectiveRequest = thinkEnabled
         ? { ...request, messages: injectLastUserThinking(messages) }
         : request;
@@ -405,6 +416,7 @@ export class AIService {
     let wire = messages.map((m) => ({
       role: m.role as 'system' | 'user' | 'assistant',
       content: m.content,
+      images: m.images,
     }));
     if (thinkEnabled) {
       wire = JSON.parse(core.apply_thinking(JSON.stringify(wire)));

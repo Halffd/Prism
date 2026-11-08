@@ -37,10 +37,7 @@ pub fn start_job(
             if !settings.system_prompt.trim().is_empty() {
                 history.insert(
                     0,
-                    ChatMessage {
-                        role: "system".into(),
-                        content: settings.system_prompt.trim().to_string(),
-                    },
+                    ChatMessage::text("system", settings.system_prompt.trim()),
                 );
             }
             if settings.thinking_enabled {
