@@ -2,6 +2,8 @@ const mockSendMessage = jest.fn();
 const mockStorageGet = jest.fn();
 const mockStorageSet = jest.fn();
 
+import { getShadowRoot } from '../content/iframe-manager';
+
 // The iframe popup mounts the real Popup component, which needs a redux store
 // and auth context that are irrelevant to the keyboard handling under test.
 jest.mock('../popup/Popup', () => ({
@@ -155,7 +157,11 @@ describe('Iframe and Font Size Functionality', () => {
     const container = await waitFor('#prism-chat-popup-container');
     expect(container).toBeTruthy();
 
-    const shadow = container?.shadowRoot;
+    // The shadow root is closed, so the page cannot reach into it. The
+    // extension keeps its own registry, which is what the test uses to
+    // inspect the mounted UI.
+    const shadow = getShadowRoot('prism-chat-popup-container');
+    expect(shadow).toBeTruthy();
     expect(shadow?.querySelector('#prism-chat-iframe')).toBeTruthy();
     expect(shadow?.querySelector('button[title="Clear chat"]')).toBeTruthy();
     expect(

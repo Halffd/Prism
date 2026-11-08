@@ -50,11 +50,11 @@ describe('Chat Popup Iframe Injection', () => {
 
     const mounted = document.getElementById('prism-chat-popup-container');
     expect(mounted).toBeTruthy();
-    expect(mounted?.shadowRoot).toBeTruthy();
-    expect(mounted?.shadowRoot?.querySelector('iframe')).toBeTruthy();
-    expect(mounted?.shadowRoot?.querySelector('iframe')?.id).toBe(
-      'prism-chat-iframe',
-    );
+    // The shadow root is closed, so the page cannot reach into it. The
+    // extension keeps its own reference, returned by attachShadowToElement.
+    expect(mounted?.shadowRoot).toBeNull();
+    expect(shadow.querySelector('iframe')).toBeTruthy();
+    expect(shadow.querySelector('iframe')?.id).toBe('prism-chat-iframe');
   });
 
   test('does not create a second container with the same id', () => {

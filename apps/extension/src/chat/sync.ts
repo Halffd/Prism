@@ -90,8 +90,7 @@ export async function importData(
       name: prompt.name,
       content: prompt.content,
       ...(prompt.category ? { category: prompt.category } : {}),
-      ...(prompt.created_at ? { createdAt: prompt.created_at } : {}),
-      createdAt: prompt.created_at ?? now,
+      createdAt: prompt.createdAt ?? now,
     });
   }
   return {

@@ -14,8 +14,10 @@ import {
   savePromptShortcut,
   getPromptShortcuts,
   deletePromptShortcut,
+  getSnippets,
 } from '@prism/shared-db';
-import type { PromptShortcut } from '@prism/shared-types';
+import type { PromptShortcut, Snippet } from '@prism/shared-types';
+import { matchSnippet } from '@prism/shared-types';
 import { UnifiedAIClient, networkStatusService } from '@prism/api-client';
 import { ImageGenerationService } from '@prism/image-gen';
 import type { Message, ContextData, AIConfig } from '@prism/shared-types';
@@ -43,6 +45,7 @@ import { InputSection } from './InputSection';
 import { HeaderSection } from './HeaderSection';
 import { ImageGenerationSection } from './ImageGenerationSection';
 import { MediaPanel } from '../components/MediaPanel';
+import { SnippetManager } from '../components/SnippetManager';
 import { IframeInjectionSection } from './IframeInjectionSection';
 import { ErrorModalHost } from '../components/ErrorModal';
 import { ChatTabBar } from '../chat/ChatTabBar';
@@ -173,6 +176,8 @@ export function Popup() {
   };
 
   const [showPrompts, setShowPrompts] = useState(false);
+  const [showSnippets, setShowSnippets] = useState(false);
+  const [snippets, setSnippets] = useState<Snippet[]>([]);
   const [newPrompt, setNewPrompt] = useState({
     name: '',
     content: '',
@@ -287,6 +292,9 @@ export function Popup() {
 
     // Load prompt shortcuts from local IndexedDB
     loadPromptShortcuts();
+
+    // Load the snippets used for trigger expansion in the input
+    loadSnippets();
 
     // Initialize image generation
     initializeImageGeneration();
@@ -744,6 +752,36 @@ export function Popup() {
     }
   };
 
+  /**
+   * Loads the snippets and mirrors them into `chrome.storage.local`.
+   *
+   * The content script cannot read IndexedDB, so the mirror is what lets a
+   * snippet expand in the host page as well as in the popup.
+   */
+  const loadSnippets = async () => {
+    try {
+      const loaded = await getSnippets();
+      setSnippets(loaded);
+
+      if (
+        typeof chrome !== 'undefined' &&
+        chrome.storage &&
+        chrome.storage.local
+      ) {
+        try {
+          await chrome.storage.local.set({ prismSnippets: loaded });
+        } catch (error) {
+          console.warn(
+            'Could not sync snippets to chrome.storage.local:',
+            error,
+          );
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load snippets:', error);
+    }
+  };
+
   const savePromptShortcutToDB = async (prompt: PromptShortcut) => {
     try {
       await savePromptShortcut(prompt);
@@ -1047,6 +1085,38 @@ export function Popup() {
           setTimeout(() => {
             sendMessage();
           }, 0);
+          return;
+        }
+      }
+
+      // Expand a snippet when its trigger is typed in the input. The same
+      // matcher the content script uses decides when a trigger fires, so a
+      // snippet behaves identically in the popup and on the page.
+      if (e.key.length === 1) {
+        const typed = input + e.key;
+        const snippetMatch = matchSnippet(typed, snippets);
+
+        if (snippetMatch) {
+          e.preventDefault();
+
+          const triggerMode = snippetMatch.snippet.triggerMode ?? 'standalone';
+          const replacement =
+            snippetMatch.snippet.expansionMode === 'html' &&
+            snippetMatch.snippet.html
+              ? snippetMatch.snippet.html
+              : snippetMatch.snippet.text;
+
+          if (triggerMode === 'standalone') {
+            setInput(replacement);
+          } else {
+            const index = typed.indexOf(snippetMatch.snippet.shortcut);
+            setInput(
+              typed.slice(0, index) +
+                replacement +
+                typed.slice(index + snippetMatch.snippet.shortcut.length),
+            );
+          }
+          return;
         }
       }
 
@@ -1108,7 +1178,7 @@ export function Popup() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [input, promptShortcuts, editingKeyboardShortcut]);
+  }, [input, promptShortcuts, snippets, editingKeyboardShortcut]);
 
   // Image upload handling
   const handleImageUpload = (e: Event) => {
@@ -1835,6 +1905,15 @@ export function Popup() {
             <button
               className="menu-action-btn"
               onClick={() => {
+                setShowSnippets(true);
+                setShowMenu(false);
+              }}
+            >
+              Snippets
+            </button>
+            <button
+              className="menu-action-btn"
+              onClick={() => {
                 chrome.runtime.openOptionsPage();
                 setShowMenu(false);
               }}
@@ -2239,6 +2318,24 @@ export function Popup() {
 
       {showMenu && renderMenu()}
       {showPrompts && renderPromptShortcuts()}
+      {showSnippets && (
+        <div className="menu-overlay">
+          <div className="menu-panel">
+            <div className="menu-header">
+              <h2>Snippets</h2>
+              <button
+                onClick={() => setShowSnippets(false)}
+                className="close-btn"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="menu-content">
+              <SnippetManager onClose={() => setShowSnippets(false)} />
+            </div>
+          </div>
+        </div>
+      )}
       {historyMissing && (
         <ErrorModalHost onClose={() => setHistoryMissing(false)} />
       )}

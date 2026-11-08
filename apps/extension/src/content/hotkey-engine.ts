@@ -20,6 +20,7 @@ import {
   matchSnippet,
   isPartialTrigger,
   type HotkeyBinding,
+  type PromptShortcut,
   type Snippet,
 } from '@prism/shared-types';
 import {
@@ -41,15 +42,29 @@ export interface HotkeyEngineOptions {
   onAction?: (binding: HotkeyBinding) => void;
   /** Called after a snippet expands, for user feedback. */
   onSnippetExpanded?: (snippet: Snippet) => void;
+  /** Called when a prompt shortcut's keyboard binding fires. */
+  onPromptShortcut?: (content: string) => void;
   /** Returns the snippets currently known to the engine. */
   getSnippets: () => Snippet[];
   /** Returns the hotkey bindings currently known to the engine. */
   getHotkeys: () => HotkeyBinding[];
   /**
-   * Returns the mode states the engine toggles, keyed by mode name. Used so
-   * a toggle hotkey can flip a mode that is currently off.
+   * Returns the prompt shortcuts currently known to the engine, so their
+   * keyboard bindings fire with the same matcher as the other hotkeys.
+   *
+   * The lookup may be async: the caller usually reads the shortcuts from
+   * extension storage, and doing that only when a modifier is held keeps
+   * ordinary typing free of storage reads.
    */
-  getModeState?: (mode: string) => boolean;
+  getPromptShortcuts?: () => PromptShortcut[] | Promise<PromptShortcut[]>;
+  /**
+   * Returns the state of a toggle mode. Used so a toggle hotkey can flip a
+   * mode that is currently off.
+   *
+   * The lookup may be async: the caller usually reads the mode state from
+   * extension storage.
+   */
+  getModeState?: (mode: string) => boolean | Promise<boolean>;
 }
 
 interface HotkeyEngine {
@@ -79,7 +94,7 @@ export function createHotkeyEngine(
    * state.
    */
   let partialTrigger = '';
-  let partialTriggerTimer: number | undefined;
+  let partialTriggerTimer: ReturnType<typeof setTimeout> | undefined;
 
   const clearPartialTrigger = () => {
     partialTrigger = '';
@@ -114,7 +129,6 @@ export function createHotkeyEngine(
   const expandSnippet = async (
     editable: HTMLElement,
     snippet: Snippet,
-    typed: string,
   ): Promise<boolean> => {
     const triggerMode = snippet.triggerMode ?? 'standalone';
     const replacement =
@@ -237,7 +251,7 @@ export function createHotkeyEngine(
     if (binding) {
       event.preventDefault();
       event.stopPropagation();
-      fireHotkey(binding);
+      await fireHotkey(binding);
       return true;
     }
 
@@ -255,7 +269,7 @@ export function createHotkeyEngine(
       clearPartialTrigger();
 
       const editable = findEditableHost(target);
-      const expanded = await expandSnippet(editable, match.snippet, typed);
+      const expanded = await expandSnippet(editable, match.snippet);
       if (expanded) {
         options.onSnippetExpanded?.(match.snippet);
       }
@@ -279,9 +293,9 @@ export function createHotkeyEngine(
   };
 
   /** Runs a hotkey binding. */
-  const fireHotkey = (binding: HotkeyBinding) => {
+  const fireHotkey = async (binding: HotkeyBinding) => {
     if (binding.kind === 'toggle' && binding.mode) {
-      const current = options.getModeState?.(binding.mode) ?? false;
+      const current = (await options.getModeState?.(binding.mode)) ?? false;
       const next = !current;
       options.onToggleMode?.(binding.mode, next);
       return;
@@ -290,21 +304,52 @@ export function createHotkeyEngine(
   };
 
   /**
+   * Finds a prompt shortcut whose keyboard binding matches the event.
+   *
+   * Prompt shortcuts predate the snippet model and store their bindings as
+   * `keyboardShortcut` / `keyboardShortcuts`. They are matched with the
+   * same matcher as the other hotkeys, so `Ctrl+Shift+T` behaves
+   * consistently wherever it is pressed.
+   */
+  const findPromptShortcut = async (
+    event: KeyboardEvent,
+  ): Promise<PromptShortcut | undefined> => {
+    const shortcuts = (await options.getPromptShortcuts?.()) ?? [];
+
+    return shortcuts.find((shortcut) => {
+      const candidates = [
+        shortcut.keyboardShortcut,
+        ...(shortcut.keyboardShortcuts ?? []),
+      ].filter((combo): combo is string => !!combo);
+
+      return candidates.some((combo) =>
+        combinationMatchesEvent(combo, event),
+      );
+    });
+  };
+
+  /**
    * Handles a keystroke anywhere on the page that is not inside an
    * editable. Only hotkeys are relevant here — snippets need a field to
    * expand into.
    */
-  const handleDocumentKey = (event: KeyboardEvent) => {
+  const handleDocumentKey = async (event: KeyboardEvent) => {
     const binding = hotkeys.find((candidate) =>
       combinationMatchesEvent(candidate.combination, event),
     );
-    if (!binding) {
+    if (binding) {
+      event.preventDefault();
+      event.stopPropagation();
+      await fireHotkey(binding);
       return;
     }
 
-    event.preventDefault();
-    event.stopPropagation();
-    fireHotkey(binding);
+    const shortcut = await findPromptShortcut(event);
+    if (shortcut) {
+      event.preventDefault();
+      event.stopPropagation();
+      options.onPromptShortcut?.(shortcut.content);
+    }
   };
 
   const onKeyDown = (event: KeyboardEvent) => {
@@ -312,20 +357,11 @@ export function createHotkeyEngine(
 
     if (target && isEditableTarget(target)) {
       const editable = findEditableHost(target);
-      activeEditable = editable;
       void handleEditableKey(event, editable);
       return;
     }
 
-    handleDocumentKey(event);
-  };
-
-  /** Tracks the caret between fields so expansions land in the right one. */
-  const onFocusIn = (event: FocusEvent) => {
-    const target = event.target as HTMLElement | null;
-    if (target && isEditableTarget(target)) {
-      activeEditable = findEditableHost(target);
-    }
+    void handleDocumentKey(event);
   };
 
   const refresh = async () => {
@@ -336,11 +372,9 @@ export function createHotkeyEngine(
   return {
     start() {
       document.addEventListener('keydown', onKeyDown, true);
-      document.addEventListener('focusin', onFocusIn, true);
     },
     stop() {
       document.removeEventListener('keydown', onKeyDown, true);
-      document.removeEventListener('focusin', onFocusIn, true);
       clearPartialTrigger();
     },
     refresh,

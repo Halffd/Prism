@@ -6,9 +6,11 @@ import type {
 } from '@prism/shared-types';
 import {
   createIframe,
-  createIframeContainer,
+  createShadowHost,
   attachShadowToElement,
   createButton,
+  hasShadowRoot,
+  forgetShadowRoot,
 } from './iframe-manager';
 import { showToast, createFloatingButton } from './ui-controls';
 import { estimateTokenCount, isIgnoredElement } from './utils';
@@ -20,6 +22,12 @@ import {
   isTextAreaElement,
 } from './editable-target';
 import { replaceRangeWithText } from './text-insertion';
+import { createHotkeyEngine } from './hotkey-engine';
+import type {
+  HotkeyBinding,
+  PromptShortcut,
+  Snippet,
+} from '@prism/shared-types';
 
 // The content script runs in every frame of the page. Only the top frame owns
 // the extension UI and answers page-level context requests; subframes keep
@@ -30,6 +38,12 @@ const isTopFrame = window.top === window;
 let currentDisplayMode: PopupDisplayMode = 'popup';
 let currentSidebarPosition: 'left' | 'right' = 'right';
 let currentSidebarWidth: number = 350;
+
+/** The id of the element that hosts the in-page chat iframe. */
+const CHAT_POPUP_CONTAINER_ID = 'prism-chat-popup-container';
+
+/** The id of the chat iframe inside the shadow root. */
+const CHAT_IFRAME_ID = 'prism-chat-iframe';
 
 // True when a same-origin descendant frame currently owns the focus. Used to
 // let the focused frame answer selection requests instead of the top frame.
@@ -549,6 +563,10 @@ function removeExistingInterfaces() {
     existingIframe.remove();
   }
 
+  // Remove the chat popup iframe, and clear its closed shadow root from the
+  // registry so it can be mounted again.
+  removeChatPopup();
+
   // Remove floating popup
   const existingFloating = document.getElementById('prism-floating-popup');
   if (existingFloating) {
@@ -873,13 +891,15 @@ function injectChatPopup() {
     return;
   }
 
-  // Check if popup already exists to avoid duplicates
-  if (document.getElementById('prism-chat-iframe')) {
+  // Check if popup already exists to avoid duplicates. The iframe lives
+  // inside a closed shadow root, so the extension checks its own registry
+  // rather than querying the document.
+  if (hasShadowRoot(CHAT_POPUP_CONTAINER_ID)) {
     return;
   }
 
   // Create the container
-  const container = createIframeContainer('prism-chat-popup-container');
+  const container = createShadowHost(CHAT_POPUP_CONTAINER_ID);
   document.body.appendChild(container);
 
   // Create Shadow DOM to isolate styles
@@ -902,7 +922,7 @@ function injectChatPopup() {
   // Create the iframe
   const iframe = createIframe({
     src: chrome.runtime.getURL('chat.html'), // Points to your React chat page
-    id: 'prism-chat-iframe',
+    id: CHAT_IFRAME_ID,
     style: `
       position: fixed;
       top: 0;
@@ -1137,6 +1157,124 @@ initializePromptShortcuts();
 // Setup prompt shortcut replacement in text fields
 setupPromptShortcutReplacement();
 
+/**
+ * The snippets and hotkeys the page-level engine works from.
+ *
+ * The content script cannot read IndexedDB, so it reads the list the
+ * extension mirrors into `chrome.storage.local`. The list is refreshed
+ * whenever storage changes, so edits made in the popup take effect without
+ * a page reload.
+ */
+let engineSnippets: Snippet[] = [];
+let engineHotkeys: HotkeyBinding[] = [];
+let enginePromptShortcuts: PromptShortcut[] = [];
+
+/** Reads the mirrored snippet and hotkey lists from extension storage. */
+async function refreshEngineData(): Promise<void> {
+  try {
+    const result = await chrome.storage.local.get([
+      'prismSnippets',
+      'prismHotkeys',
+      'promptShortcuts',
+    ]);
+
+    const snippets = result.prismSnippets;
+    const hotkeys = result.prismHotkeys;
+    const promptShortcuts = result.promptShortcuts;
+
+    engineSnippets = Array.isArray(snippets) ? (snippets as Snippet[]) : [];
+    engineHotkeys = Array.isArray(hotkeys) ? (hotkeys as HotkeyBinding[]) : [];
+    enginePromptShortcuts = Array.isArray(promptShortcuts)
+      ? (promptShortcuts as PromptShortcut[])
+      : [];
+
+    await hotkeyEngine.refresh();
+  } catch (error) {
+    console.error('Failed to refresh snippet and hotkey data:', error);
+  }
+}
+
+/**
+ * Reads the current state of a toggle mode.
+ *
+ * The background stores mode state under `mode_<name>`, so the engine can
+ * flip a mode that is currently off.
+ */
+async function getModeState(mode: string): Promise<boolean> {
+  try {
+    const result = await chrome.storage.local.get([`mode_${mode}`]);
+    return result[`mode_${mode}`] === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The page-level hotkey and snippet engine.
+ *
+ * This runs in every frame so snippets expand in editors that live inside
+ * iframes, matching how Blaze installs itself into nested frames.
+ */
+const hotkeyEngine = createHotkeyEngine({
+  getSnippets: () => engineSnippets,
+  getHotkeys: () => engineHotkeys,
+  getPromptShortcuts: async () => {
+    // Prompt shortcuts are read fresh so a shortcut added in the popup works
+    // immediately, without waiting for the next storage-change event.
+    try {
+      const result = await chrome.storage.local.get(['promptShortcuts']);
+      const shortcuts = result.promptShortcuts;
+      return Array.isArray(shortcuts)
+        ? (shortcuts as PromptShortcut[])
+        : enginePromptShortcuts;
+    } catch {
+      return enginePromptShortcuts;
+    }
+  },
+  getModeState,
+  onPromptShortcut: (content) => {
+    void Promise.resolve(
+      chrome.runtime.sendMessage({ type: 'INSERT_PROMPT_SHORTCUT', content }),
+    ).catch(() => {
+      // The background may not be reachable; the shortcut is dropped.
+    });
+  },
+  onToggleMode: (mode, enabled) => {
+    void Promise.resolve(
+      chrome.runtime.sendMessage({ type: 'TOGGLE_MODE', mode, value: enabled }),
+    ).catch(() => {
+      // The background may not be reachable; the mode simply stays as it is.
+    });
+
+    const labels: Record<string, string> = {
+      textSelection: 'Text selection',
+      pageContext: 'Page context',
+      pageScreenshot: 'Page screenshot',
+      clipboard: 'Clipboard',
+      pageInfo: 'Page info',
+    };
+    showToast(
+      `${labels[mode] ?? mode} mode ${enabled ? 'enabled' : 'disabled'}`,
+    );
+  },
+  onSnippetExpanded: (snippet) => {
+    showToast(`Inserted snippet: ${snippet.name}`);
+  },
+});
+
+hotkeyEngine.start();
+void refreshEngineData();
+
+// Keep the engine in step with edits made in the popup or settings.
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'local') {
+    return;
+  }
+  if (changes.prismSnippets || changes.prismHotkeys || changes.promptShortcuts) {
+    void refreshEngineData();
+  }
+});
+
 // Only observe if the button hasn't been removed by the user
 if (isTopFrame && !buttonRemovedByUser) {
   const observer = new MutationObserver((mutationsList) => {
@@ -1345,47 +1483,9 @@ function setupHotkeyListener() {
           }
         }
 
-        // Check for registered keyboard shortcuts for prompt shortcuts
-        // Only do this if not in an input field or contenteditable element
-        // (already checked at the beginning of the function)
-        // Get all registered prompt shortcuts from storage
-        try {
-          const result = await chrome.storage.local.get(['promptShortcuts']);
-          const promptShortcuts = result.promptShortcuts || [];
-
-          // Check if any prompt shortcut matches the current key combination
-          for (const prompt of promptShortcuts) {
-            if (prompt.keyboardShortcut) {
-              // Parse the keyboard shortcut (e.g., "Ctrl+Shift+F")
-              const keys = prompt.keyboardShortcut.split('+');
-              let matches = true;
-
-              // Check modifier keys
-              if (keys.includes('Ctrl') && !event.ctrlKey) matches = false;
-              if (keys.includes('Cmd') && !event.metaKey) matches = false; // For Mac
-              if (keys.includes('Alt') && !event.altKey) matches = false;
-              if (keys.includes('Shift') && !event.shiftKey) matches = false;
-
-              // Check the actual key
-              const actualKey = keys[keys.length - 1].toLowerCase();
-              if (event.key.toLowerCase() !== actualKey) matches = false;
-
-              if (matches) {
-                event.preventDefault();
-
-                // Send a message to the popup to insert the prompt content
-                chrome.runtime.sendMessage({
-                  type: 'INSERT_PROMPT_SHORTCUT',
-                  content: prompt.content,
-                });
-
-                break; // Stop checking other shortcuts once one is found
-              }
-            }
-          }
-        } catch (error) {
-          console.error('Error checking keyboard shortcuts:', error);
-        }
+        // Registered prompt shortcuts are handled by the hotkey engine,
+        // which matches their key combinations with the same rules as the
+        // other page-level hotkeys.
       }
     },
     true,
@@ -1510,13 +1610,15 @@ function launchIframe() {
     return;
   }
 
-  // Check if iframe already exists to avoid duplicates
-  if (document.getElementById('prism-chat-iframe')) {
+  // Check if iframe already exists to avoid duplicates. The iframe lives
+  // inside a closed shadow root, so the extension checks its own registry
+  // rather than querying the document.
+  if (hasShadowRoot(CHAT_POPUP_CONTAINER_ID)) {
     return;
   }
 
   // Create the container
-  const container = createIframeContainer('prism-chat-popup-container');
+  const container = createShadowHost(CHAT_POPUP_CONTAINER_ID);
   document.body.appendChild(container);
 
   // Create Shadow DOM to isolate styles
@@ -1535,7 +1637,7 @@ function launchIframe() {
   // Create the iframe
   const iframe = createIframe({
     src: chrome.runtime.getURL('chat.html'), // Points to your React chat page
-    id: 'prism-chat-iframe',
+    id: CHAT_IFRAME_ID,
     style: `
       position: fixed;
       top: 0;
@@ -1661,10 +1763,13 @@ function launchIframe() {
 
 // Function to remove the chat popup
 function removeChatPopup() {
-  const container = document.getElementById('prism-chat-popup-container');
+  const container = document.getElementById(CHAT_POPUP_CONTAINER_ID);
   if (container) {
     container.remove();
   }
+  // The shadow root is closed, so the registry has to be cleared explicitly
+  // for the popup to be mountable again.
+  forgetShadowRoot(CHAT_POPUP_CONTAINER_ID);
 }
 
 // Guards against the input event we dispatch ourselves re-entering the

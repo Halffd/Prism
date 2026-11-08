@@ -7,6 +7,7 @@ import {
   AIMode,
   AICapability,
   HardwareProfile,
+  HotkeyBinding,
 } from '@prism/shared-types';
 import { UnifiedAIClient } from '@prism/api-client';
 import { logger, type LogLevel } from '@prism/logging';
@@ -31,6 +32,8 @@ import {
   removeSiteFilter,
   getImageGenConfig,
   saveImageGenConfig,
+  getHotkeys,
+  saveHotkey,
 } from '@prism/shared-db';
 import './Settings.scss';
 
@@ -91,6 +94,7 @@ export function Settings({ onClose }: SettingsProps) {
   const [clipboardKey, setClipboardKey] = useState<string>('4');
   const [pageInfoKey, setPageInfoKey] = useState<string>('5');
   const [iframeToggleKey, setIframeToggleKey] = useState<string>('`');
+  const [hotkeyBindings, setHotkeyBindings] = useState<HotkeyBinding[]>([]);
   const [systemPrompt, setSystemPrompt] = useState<string>('');
   const [buttonSensitivityAreaPercentage, setButtonSensitivityAreaPercentage] =
     useState<number>(10);
@@ -137,6 +141,54 @@ export function Settings({ onClose }: SettingsProps) {
         // Storage failures leave the defaults in place.
       });
   }, []);
+
+  useEffect(() => {
+    // Load the page-level hotkey bindings.
+    getHotkeys()
+      .then(setHotkeyBindings)
+      .catch(() => {
+        // Storage failures leave the defaults in place.
+      });
+  }, []);
+
+  /**
+   * Saves a hotkey binding and mirrors the updated list into
+   * `chrome.storage.local`, where the content script reads it.
+   */
+  const persistHotkey = async (binding: HotkeyBinding) => {
+    try {
+      await saveHotkey(binding);
+      const updated = await getHotkeys();
+      setHotkeyBindings(updated);
+      await chrome.storage.local.set({ prismHotkeys: updated });
+    } catch (error) {
+      console.error('Failed to save hotkey:', error);
+    }
+  };
+
+  const updateHotkeyCombination = (
+    id: string,
+    combination: string,
+  ) => {
+    setHotkeyBindings((previous) =>
+      previous.map((binding) =>
+        binding.id === id ? { ...binding, combination } : binding,
+      ),
+    );
+  };
+
+  const updateHotkeyEnabled = (id: string, enabled: boolean) => {
+    setHotkeyBindings((previous) => {
+      const binding = previous.find((candidate) => candidate.id === id);
+      if (!binding) {
+        return previous;
+      }
+      void persistHotkey({ ...binding, enabled });
+      return previous.map((candidate) =>
+        candidate.id === id ? { ...candidate, enabled } : candidate,
+      );
+    });
+  };
 
   useEffect(() => {
     // Initialize API client with current settings
@@ -1979,6 +2031,48 @@ export function Settings({ onClose }: SettingsProps) {
               Key to toggle iframe show/hide (default: backtick `)
             </small>
           </div>
+        </div>
+
+        <div className="settings-section">
+          <h3>Page Hotkeys</h3>
+          <p className="form-hint">
+            These combinations work anywhere on the page, not just inside the
+            Prism popup. Use <code>Ctrl</code> for <code>Cmd</code> on macOS.
+          </p>
+          {hotkeyBindings.map((binding) => (
+            <div className="form-group" key={binding.id}>
+              <label>{binding.name}</label>
+              <div className="hotkey-binding-row">
+                <input
+                  type="text"
+                  value={binding.combination}
+                  onChange={(e) =>
+                    updateHotkeyCombination(binding.id, e.target.value)
+                  }
+                  onBlur={() => {
+                    const updated = hotkeyBindings.find(
+                      (candidate) => candidate.id === binding.id,
+                    );
+                    if (updated) {
+                      void persistHotkey(updated);
+                    }
+                  }}
+                  className="form-control"
+                  placeholder="e.g., Ctrl+Shift+T"
+                />
+                <label className="hotkey-enabled-toggle">
+                  <input
+                    type="checkbox"
+                    checked={binding.enabled}
+                    onChange={(e) =>
+                      updateHotkeyEnabled(binding.id, e.target.checked)
+                    }
+                  />
+                  Enabled
+                </label>
+              </div>
+            </div>
+          ))}
         </div>
 
         <div className="settings-section">

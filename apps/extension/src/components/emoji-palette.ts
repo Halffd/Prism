@@ -294,7 +294,6 @@ const SHAPE_KEYWORDS: Record<string, string[]> = {
   '☁': ['cloud', 'weather'],
   '❄': ['snowflake', 'snow', 'weather'],
   '☾': ['moon', 'weather'],
-  '★': ['star', 'filled star'],
   '♥': ['heart', 'love'],
   '♦': ['diamond', 'suit'],
   '♠': ['spade', 'suit'],

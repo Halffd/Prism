@@ -274,18 +274,6 @@ pub fn cached_models(settings: &Settings) -> Vec<SharedString> {
         .collect()
 }
 
-/// Catalog metadata for the currently effective model, if known.
-/// Surfaces use this for capability-aware UI (e.g. hide thinking
-/// toggle on non-reasoning providers).
-pub fn current_model_info(settings: &Settings) -> Option<catalog::ModelInfo> {
-    let model = effective_model(settings);
-    if model.is_empty() {
-        return None;
-    }
-    catalog::snapshot()
-        .model(&settings.provider, &model)
-        .cloned()
-}
 
 
 #[cfg(feature = "agent")]
