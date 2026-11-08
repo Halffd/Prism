@@ -16,6 +16,7 @@ pub enum CommandGroup {
     Models,
     Settings,
     Hardware,
+    Agent,
     View,
 }
 
@@ -27,6 +28,7 @@ impl CommandGroup {
             CommandGroup::Models => "Models",
             CommandGroup::Settings => "Settings",
             CommandGroup::Hardware => "Hardware",
+            CommandGroup::Agent => "Agent",
             CommandGroup::View => "View",
         }
     }
@@ -75,6 +77,9 @@ pub const COMMANDS: &[CommandDef] = &[
     CommandDef { id: "view.toggle_chats", title: "Toggle chats sidebar", group: CommandGroup::View, takes_arg: false, while_streaming: true },
     CommandDef { id: "view.toggle_settings", title: "Toggle settings panel", group: CommandGroup::View, takes_arg: false, while_streaming: true },
     CommandDef { id: "view.scroll_end", title: "Scroll transcript to end", group: CommandGroup::View, takes_arg: false, while_streaming: true },
+    // Agent
+    CommandDef { id: "agent.run", title: "Run agent on the system prompt", group: CommandGroup::Agent, takes_arg: false, while_streaming: false },
+    CommandDef { id: "agent.sandbox", title: "Agent sandbox preflight (probe host, plan policy)", group: CommandGroup::Agent, takes_arg: false, while_streaming: false },
 ];
 
 /// Look up a command by id.
@@ -128,6 +133,7 @@ mod tests {
                 CommandGroup::Models => "models",
                 CommandGroup::Settings => "settings",
                 CommandGroup::Hardware => "hardware",
+                CommandGroup::Agent => "agent",
                 CommandGroup::View => "view",
             };
             assert_eq!(prefix, expected, "{} group/prefix mismatch", c.id);

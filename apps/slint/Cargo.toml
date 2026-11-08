@@ -12,11 +12,19 @@ crate-type = ["cdylib"]
 prism-core = { path = "../../crates/prism-core" }
 slint = { version = "1.18.1", features = ["backend-android-activity-06"] }
 serde_json = "1.0"
+# Agent loop completion steps run on a current-thread runtime; linked
+# only when the agent feature is on.
+tokio = { version = "1", features = ["rt"], optional = true }
 
 [features]
 default = []
-# The agent loop needs the core's native transport (reqwest + tokio).
-agent = ["prism-core/native-transport"]
+# The agent loop needs the core's native transport (reqwest + tokio);
+# tokio is also linked directly for the current-thread completion loop.
+agent = ["prism-core/native-transport", "dep:tokio"]
+
+[lints.rust]
+# Cross-crate cfg: the `agent` feature turns on prism-core's transport gate.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("native-transport"))'] }
 
 [build-dependencies]
 slint-build = "1"

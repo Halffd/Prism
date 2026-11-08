@@ -7,7 +7,7 @@ pub mod media;
 // Re-export all public types and functions from dependencies
 pub use prism_core::catalog;
 #[cfg(feature = "agent")]
-pub use prism_core::agent::{run_agent, AgentResult, CalculatorTool, StepMessage, ToolRegistry};
+pub use prism_core::agent::AgentResult;
 pub use prism_core::client::{
     ApiChatRequest, ChatMessage, ModelsEvent, ModelsRequest, OllamaChatRequest, StreamEvent,
     StreamRequest,
@@ -22,8 +22,6 @@ pub use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 pub use std::cell::RefCell;
 pub use std::rc::Rc;
 pub use std::sync::mpsc::{self, Receiver, TryRecvError};
-#[cfg(feature = "agent")]
-use prism_core::transport::ReqwestTransport;
 
 /// Matches COMPUTE_LEVELS in the TUI settings screen / shared types.
 pub const COMPUTE_LEVELS: &[&str] = &[
@@ -56,6 +54,15 @@ pub const CONTEXT_TOKEN_CYCLE: &[Option<u32>] = &[
     Some(16384),
     Some(32768),
 ];
+
+/// One message from the agent thread, drained on the UI thread by the
+/// timer pump. `Done` carries the JSON `AgentResult` and is handed to
+/// the `agent-done` callback; `Failed` is a pre-execution failure.
+#[cfg(feature = "agent")]
+pub enum AgentEvent {
+    Done(String),
+    Failed(String),
+}
 
 /// One line in the chat transcript.
 #[derive(Clone, Debug)]
@@ -97,6 +104,13 @@ pub struct State {
     pub streaming: bool,
     pub rx: Option<Receiver<StreamEvent>>,
     pub rx_models: Option<Receiver<ModelsEvent>>,
+
+    /// Receiver for agent-jobs results, drained by the timer pump
+    /// (`drain_agent`); Slint handles are not `Send`, so the agent
+    /// thread reports back through the channel instead of upgrading a
+    /// weak handle off the main thread.
+    #[cfg(feature = "agent")]
+    pub rx_agent: Option<Receiver<AgentEvent>>,
     pub gpu_idx: usize,
     pub ctx_idx: usize,
     /// Position in the sent-prompt history while cycling with Up/Down:
@@ -135,6 +149,8 @@ impl State {
             streaming: false,
             rx: None,
             rx_models: None,
+            #[cfg(feature = "agent")]
+            rx_agent: None,
             gpu_idx,
             ctx_idx,
             history_idx: None,
@@ -276,13 +292,31 @@ pub fn cached_models(settings: &Settings) -> Vec<SharedString> {
 
 
 
+/// Load the sandbox policy: a path to a policy JSON file, or inline
+/// JSON (`PRISM_AGENT_SANDBOX_POLICY` accepts both) — the same env
+/// contract the CLI uses.
+pub fn load_sandbox_policy(source: &str) -> Result<prism_core::sandbox::ResolvedSandbox, String> {
+    let text = match std::fs::read_to_string(source) {
+        Ok(text) => text,
+        Err(_) if source.contains('{') => source.to_string(),
+        Err(e) => {
+            return Err(match std::fs::exists(source) {
+                Ok(true) => format!("sandbox policy {source}: {e}"),
+                _ => format!("sandbox policy: could not open {source} ({e})"),
+            })
+        }
+    };
+    let policy =
+        prism_core::sandbox::parse_policy(&text).map_err(|e| format!("policy: {e}"))?;
+    Ok(prism_core::sandbox::resolve_policy(&policy))
+}
+
 #[cfg(feature = "agent")]
 mod agent_integration {
     use super::*;
     use prism_core::agent::{run_agent, AgentResult, CalculatorTool, StepMessage, ToolRegistry};
-    use prism_core::transport::{HttpRequest, ReqwestTransport};
+    use prism_core::transport::{ReqwestTransport, Transport as _};
     use std::sync::Arc;
-    use tokio::runtime::Builder as TokioRuntimeBuilder;
 
     struct SlintLlmStep {
         transport: Arc<ReqwestTransport>,
@@ -349,21 +383,74 @@ mod agent_integration {
         let provider = state.borrow().settings.provider.clone();
         let settings = state.borrow().settings.clone();
         let workspace_root = std::path::PathBuf::from(".");
-        let ui_clone = ui.clone();
-        let state_c = state.clone();
-        let lines_c = lines_model.clone();
+
+        // Opt-in sandbox through the same env contract as the CLI
+        // (`PRISM_AGENT_SANDBOX_POLICY` = policy JSON or a path to it).
+        // A plan failure under `strict` aborts instead of silently
+        // weakening; the posture line is echoed into the transcript.
+        let sandbox = match std::env::var("PRISM_AGENT_SANDBOX_POLICY") {
+            Ok(source) => match load_sandbox_policy(&source) {
+                Ok(res) => match prism_core::sandbox::plan_spawn(&res) {
+                    Ok(used) => {
+                        push_system(ui, state, lines_model, format!("agent sandbox: plan {used:?}"));
+                        Some(res)
+                    }
+                    Err(outcome) => {
+                        push_system(
+                            ui,
+                            state,
+                            lines_model,
+                            format!(
+                                "agent aborted — sandbox preflight: {}",
+                                prism_core::sandbox::outcome_str(&outcome)
+                            ),
+                        );
+                        return;
+                    }
+                },
+                Err(e) => {
+                    push_system(ui, state, lines_model, format!("agent runs unsandboxed — {e}"));
+                    None
+                }
+            },
+            Err(_) => None,
+        };
+
+        // The agent loop runs on its own thread; completion is reported
+        // through the channel and drained by the timer pump (Slint
+        // handles are not Send, so no handle upgrade off the main
+        // thread).
+        let (atx, arx) = std::sync::mpsc::channel::<AgentEvent>();
+        state.borrow_mut().rx_agent = Some(arx);
 
         std::thread::spawn(move || {
             let reg = ToolRegistry::new();
             reg.register(Arc::new(CalculatorTool));
             native_tools::register_all(&reg, &workspace_root);
 
-            let resolved = settings
-                .resolve_provider(&provider)
-                .expect("unknown provider");
+            // The sandbox policy is the permission boundary for the
+            // guarded `shell` tool; guard → denylist → enforced subprocess.
+            #[cfg(all(target_os = "linux", feature = "native-transport"))]
+            if let Some(res) = &sandbox {
+                reg.register(Arc::new(prism_core::sandbox::GuardedShellTool { res: res.clone() }));
+            }
+            #[cfg(not(all(target_os = "linux", feature = "native-transport")))]
+            {
+                // Enforcing tool unavailable on this host; the posture
+                // above already recorded what (if anything) is active.
+                let _ = &sandbox;
+            }
+
+            let Some(resolved) = settings.resolve_provider(&provider) else {
+                let _ = atx.send(AgentEvent::Failed(format!("unknown provider {provider}")));
+                return;
+            };
             let api_key = settings.key_for(&provider);
             if resolved.needs_key && api_key.trim().is_empty() {
-                eprintln!("agent: API key required for {}", resolved.label);
+                let _ = atx.send(AgentEvent::Failed(format!(
+                    "API key required for {} — set it in settings",
+                    resolved.label
+                )));
                 return;
             }
 
@@ -390,7 +477,7 @@ mod agent_integration {
 
             let result_json = serde_json::to_string(&result)
                 .unwrap_or_else(|e| format!("{{\"error\":\"{e}\"}}"));
-            let _ = ui_clone.invoke_agent_done(result_json.into());
+            let _ = atx.send(AgentEvent::Done(result_json));
         });
     }
 }
@@ -733,7 +820,37 @@ pub fn palette_execute(
         "view.scroll_end" => ui.invoke_scroll_to_end(),
         "agent.run" => {
             let task = state.borrow().settings.system_prompt.clone();
+            #[cfg(feature = "agent")]
+            crate::shared::agent_integration::run_agent_from_palette(ui, state, lines_model, &task);
+            #[cfg(not(feature = "agent"))]
             run_agent_from_palette(ui, state, lines_model, &task);
+        }
+        // Palette command: probe the host and report how the agent's
+        // sandbox would be planned (preflight, policy from
+        // `PRISM_AGENT_SANDBOX_POLICY` when set). Nothing spawns.
+        "agent.sandbox" => {
+            let report = prism_core::sandbox::preflight();
+            let mut detail = format!(
+                "sandbox preflight: landlock {}{}",
+                if report.landlock_supported { "supported" } else { "UNSUPPORTED" },
+                report
+                    .landlock_abi
+                    .map(|abi| format!(" (abi v{abi})"))
+                    .unwrap_or_default()
+            );
+            match std::env::var("PRISM_AGENT_SANDBOX_POLICY") {
+                Ok(source) => {
+                    detail.push_str(&match load_sandbox_policy(&source) {
+                        Ok(res) => match prism_core::sandbox::plan_spawn(&res) {
+                            Ok(used) => format!(" · plan {used:?}"),
+                            Err(outcome) => format!(" · plan rejected: {}", prism_core::sandbox::outcome_str(&outcome)),
+                        },
+                        Err(e) => format!(" · {e}"),
+                    });
+                }
+                Err(_) => detail.push_str( " · no PRISM_AGENT_SANDBOX_POLICY set (agent runs without a shell tool)"),
+            }
+            push_system(ui, state, lines_model, detail);
         }
         other => push_system(ui, state, lines_model, format!("unknown command: {other}")),
     }
@@ -1008,6 +1125,28 @@ pub fn drain_models(ui: &AppWindow, state: &Rc<RefCell<State>>) {
             st.rx_models = Some(rx);
         }
         Err(TryRecvError::Disconnected) => {}
+    }
+}
+
+/// Drain the agent-jobs channel once per timer tick. `Done` is handed to
+/// the `agent-done` callback (which renders the steps and appends the
+/// answer); `Failed` becomes a system line. Disconnected = the thread
+/// exited without a result (aborted path) — stop polling.
+#[cfg(feature = "agent")]
+pub fn drain_agent(ui: &AppWindow, state: &Rc<RefCell<State>>, lines_model: &Rc<VecModel<ChatLine>>) {
+    let Some(rx) = state.borrow_mut().rx_agent.take() else {
+        return;
+    };
+    match rx.try_recv() {
+        Ok(AgentEvent::Done(json)) => ui.invoke_agent_done(json.into()),
+        Ok(AgentEvent::Failed(e)) => push_system(ui, state, lines_model, e),
+        Err(mpsc::TryRecvError::Empty) => {
+            // Job still running: keep polling.
+            state.borrow_mut().rx_agent = Some(rx);
+        }
+        Err(mpsc::TryRecvError::Disconnected) => {
+            push_system(ui, state, lines_model, "agent job ended without a result".into());
+        }
     }
 }
 
@@ -1873,6 +2012,8 @@ pub fn run_ui() {
                 let Some(ui) = ui_w.upgrade() else { return };
                 drain_events(&ui, &state_c, &lines_c);
                 drain_models(&ui, &state_c);
+                #[cfg(feature = "agent")]
+                drain_agent(&ui, &state_c, &lines_c);
                 media::drain(&ui, &state_c);
             },
         );
