@@ -364,3 +364,88 @@ pub fn agent_run(
         Err(e) => format!("{{\"completed\":false,\"error\":\"{e}\",\"answer\":\"\",\"steps\":[]}}"),
     }
 }
+
+/// Preflight + plan a sandbox policy without spawning anything. Input:
+/// JSON `SandboxPolicy` (the helper's `--policy` shape). Returns JSON
+/// `{ok, sandbox_used, error}` where `error` is the closed
+/// `SpawnOutcome` (`sandbox_unsupported` on hosts without Landlock).
+/// Identical to the CLI's `prism sandbox preflight --policy` gate.
+#[wasm_bindgen]
+pub fn agent_sandbox_policy_check(policy_json: &str) -> String {
+    let check = (|| -> std::result::Result<serde_json::Value, String> {
+        let policy = prism_core::sandbox::parse_policy(policy_json)?;
+        let res = prism_core::sandbox::resolve_policy(&policy);
+        match prism_core::sandbox::plan_spawn(&res) {
+            Ok(used) => Ok(serde_json::json!({ "ok": true, "sandbox_used": used })),
+            Err(outcome) => Ok(serde_json::json!({ "ok": false, "error": outcome })),
+        }
+    })();
+    match check {
+        Ok(v) => v.to_string(),
+        Err(e) => serde_json::json!({ "ok": false, "error": e }).to_string(),
+    }
+}
+
+/// Repair a model-produced tool argument into the plain string input the
+/// core tools take. Recommended to run before dispatching any tool call.
+/// Returns JSON `{input, notes: [...]}` — notes name every normalisation
+/// applied, so a surface can log the repair.
+#[wasm_bindgen]
+pub fn agent_tool_repair(raw_input: &str) -> String {
+    let report = prism_core::toolgate::repair_tool_input(raw_input);
+    serde_json::to_string(&serde_json::json!({
+        "input": report.input,
+        "notes": report.notes,
+    }))
+    .unwrap_or_else(|_| "{}".into())
+}
+
+/// Classify a tool observation and get the actionable detail appended
+/// the way `gated_execute` does. Returns `{kind, detail: string|null}`.
+#[wasm_bindgen]
+pub fn agent_tool_classify(observation: &str) -> String {
+    let kind = prism_core::toolgate::ToolErrorKind::from_observation(observation);
+    serde_json::to_string(&serde_json::json!({
+        "kind": kind_name(kind),
+        "detail": prism_core::toolgate::detail_of(kind),
+    }))
+    .unwrap_or_else(|_| "{}".into())
+}
+
+fn kind_name(kind: prism_core::toolgate::ToolErrorKind) -> &'static str {
+    match kind {
+        prism_core::toolgate::ToolErrorKind::NotRecognized => "not_recognized",
+        prism_core::toolgate::ToolErrorKind::PermissionDenied => "permission_denied",
+        prism_core::toolgate::ToolErrorKind::InvalidInput => "invalid_input",
+        prism_core::toolgate::ToolErrorKind::NotFound => "not_found",
+        prism_core::toolgate::ToolErrorKind::Environment => "environment",
+        prism_core::toolgate::ToolErrorKind::None => "none",
+    }
+}
+
+/// List the shipped subagent registry (names + tool allowlists). The
+/// surfaces use it to advertise `task_*` tools.
+#[wasm_bindgen]
+pub fn agent_subagents_list() -> String {
+    let reg = prism_core::subagents::SubagentRegistry::default();
+    serde_json::to_string(
+        &reg.names()
+            .iter()
+            .filter_map(|n| reg.get(n).cloned())
+            .collect::<Vec<_>>(),
+    )
+    .unwrap_or_else(|_| "[]".into())
+}
+
+/// Forced-model resolution for one subagent — the daemon's documented
+/// order: the spec's `forced_model`, then the session host model, then
+/// the provider default. Returns `{model, tier: subagent_forced|session|
+/// provider_default}` or JSON error when nothing resolves.
+#[wasm_bindgen]
+pub fn agent_subagent_resolve_model(name: &str, session_model: &str, provider_default: Option<String>) -> String {
+    let reg = prism_core::subagents::SubagentRegistry::default();
+    match reg.resolve_model(name, session_model, provider_default) {
+        Ok(r) => serde_json::to_string(&r).unwrap_or_else(|e| format!("{{\"error\":\"{e}\"}}")),
+        Err(e) => format!("{{\"error\":\"{e}\"}}"),
+    }
+}

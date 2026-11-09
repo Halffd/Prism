@@ -220,6 +220,12 @@ impl ToolErrorKind {
     }
 }
 
+/// Free-standing mirror of `ToolErrorKind::detail` for cross-crate use
+/// (wasm/classification bindings).
+pub fn detail_of(kind: ToolErrorKind) -> Option<&'static str> {
+    kind.detail()
+}
+
 /// The full gated execution path: repair → clamp → (caller-provided
 /// execute) → classify + detail. Kept dependency-free so surfaces (CLI,
 /// Slint, wasm, TS mirror) can adopt the same order.
