@@ -2,6 +2,42 @@
 /* eslint-disable */
 
 /**
+ * A registry instance the JS host drives across steps.
+ */
+export class AgentRegistry {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Execute a tool directly (permission-gated). `ask_fn` is a JS
+     * function `(toolName, input) => bool`.
+     */
+    execute(name: string, input: string, ask_fn: Function): string;
+    constructor();
+    /**
+     * Register (or replace) a tool. Extension point.
+     */
+    register(tool: JsTool): void;
+    /**
+     * Set a tool's permission: "allow" | "deny" | "ask".
+     */
+    set_permission(name: string, level: string): void;
+}
+
+/**
+ * A JS-registered tool: the host supplies `execute(input) -> string`.
+ * This is the extension point — surfaces register domain tools (page
+ * context, snippets, editor state) and the core loop dispatches them.
+ */
+export class JsTool {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * `execute` must be a JS function `(input: string) => string`.
+     */
+    constructor(name: string, description: string, execute: Function);
+}
+
+/**
  * Ollama native NDJSON decoder.
  */
 export class NdjsonDecoder {
@@ -25,6 +61,51 @@ export class SseDecoder {
     is_done(): boolean;
     constructor();
 }
+
+/**
+ * One complete agent run. `llm_step` is a JS function
+ * `(system: string, historyJson: string) => string` returning the raw
+ * model response (throw/reject to signal an error). Returns JSON
+ * `AgentResult` (`{answer, steps, completed, error}`).
+ */
+export function agent_run(task: string, registry: AgentRegistry, llm_step: Function, max_steps: number): string;
+
+/**
+ * Preflight + plan a sandbox policy without spawning anything. Input:
+ * JSON `SandboxPolicy` (the helper's `--policy` shape). Returns JSON
+ * `{ok, sandbox_used, error}` where `error` is the closed
+ * `SpawnOutcome` (`sandbox_unsupported` on hosts without Landlock).
+ * Identical to the CLI's `prism sandbox preflight --policy` gate.
+ */
+export function agent_sandbox_policy_check(policy_json: string): string;
+
+/**
+ * Forced-model resolution for one subagent — the daemon's documented
+ * order: the spec's `forced_model`, then the session host model, then
+ * the provider default. Returns `{model, tier: subagent_forced|session|
+ * provider_default}` or JSON error when nothing resolves.
+ */
+export function agent_subagent_resolve_model(name: string, session_model: string, provider_default?: string | null): string;
+
+/**
+ * List the shipped subagent registry (names + tool allowlists). The
+ * surfaces use it to advertise `task_*` tools.
+ */
+export function agent_subagents_list(): string;
+
+/**
+ * Classify a tool observation and get the actionable detail appended
+ * the way `gated_execute` does. Returns `{kind, detail: string|null}`.
+ */
+export function agent_tool_classify(observation: string): string;
+
+/**
+ * Repair a model-produced tool argument into the plain string input the
+ * core tools take. Recommended to run before dispatching any tool call.
+ * Returns JSON `{input, notes: [...]}` — notes name every normalisation
+ * applied, so a surface can log the repair.
+ */
+export function agent_tool_repair(raw_input: string): string;
 
 /**
  * Prepend the scratchpad instruction to the first user message.
@@ -97,7 +178,8 @@ export function parse_api_response(body: string): string;
 export function parse_models_response(body: string): string;
 
 /**
- * The provider table: id, label, base_url, default_model, needs_key.
+ * The provider table: id, label, base_url, default_model, needs_key,
+ * env (env-var names that may carry the key).
  */
 export function providers_json(): string;
 

@@ -361,7 +361,14 @@ pub fn agent_run(
     })();
     match result {
         Ok(r) => serde_json::to_string(&r).unwrap_or_else(|e| format!("{{\"error\":\"{e}\"}}")),
-        Err(e) => format!("{{\"completed\":false,\"error\":\"{e}\",\"answer\":\"\",\"steps\":[]}}"),
+        // serde_json escaping: the error text can contain quotes.
+        Err(e) => serde_json::json!({
+            "completed": false,
+            "error": e,
+            "answer": "",
+            "steps": [],
+        })
+        .to_string(),
     }
 }
 
@@ -446,6 +453,8 @@ pub fn agent_subagent_resolve_model(name: &str, session_model: &str, provider_de
     let reg = prism_core::subagents::SubagentRegistry::default();
     match reg.resolve_model(name, session_model, provider_default) {
         Ok(r) => serde_json::to_string(&r).unwrap_or_else(|e| format!("{{\"error\":\"{e}\"}}")),
-        Err(e) => format!("{{\"error\":\"{e}\"}}"),
+        // serde_json escaping matters here: the message quotes the
+        // subagent name, which would break a hand-built JSON string.
+        Err(e) => serde_json::json!({ "error": e }).to_string(),
     }
 }
