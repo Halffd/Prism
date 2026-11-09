@@ -94,6 +94,15 @@ export function agent_subagent_resolve_model(name: string, session_model: string
 export function agent_subagents_list(): string;
 
 /**
+ * Clamp a tool call to the advertised surface. Input: JSON
+ * `{"advertised": ["name", ...], "tool": "name"}`. Returns
+ * `{"ok": true}` when the tool is advertised (or is `Final Answer`),
+ * `{"ok": false, "error": "tool_clamped: ..."}` otherwise — the same
+ * fail-closed answer the core's gated execution gives.
+ */
+export function agent_tool_clamp(req_json: string): string;
+
+/**
  * Classify a tool observation and get the actionable detail appended
  * the way `gated_execute` does. Returns `{kind, detail: string|null}`.
  */

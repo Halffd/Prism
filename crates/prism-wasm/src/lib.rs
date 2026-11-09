@@ -419,6 +419,47 @@ pub fn agent_tool_classify(observation: &str) -> String {
     .unwrap_or_else(|_| "{}".into())
 }
 
+/// Clamp a tool call to the advertised surface. Input: JSON
+/// `{"advertised": ["name", ...], "tool": "name"}`. Returns
+/// `{"ok": true}` when the tool is advertised (or is `Final Answer`),
+/// `{"ok": false, "error": "tool_clamped: ..."}` otherwise — the same
+/// fail-closed answer the core's gated execution gives.
+#[wasm_bindgen]
+pub fn agent_tool_clamp(req_json: &str) -> String {
+    let clamped = (|| -> std::result::Result<serde_json::Value, String> {
+        let req: serde_json::Value = serde_json::from_str(req_json)
+            .map_err(|e| format!("invalid request JSON: {e}"))?;
+        let advertised = req
+            .get("advertised")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| "missing field `advertised`".to_string())?
+            .iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect::<Vec<_>>();
+        let tool = req
+            .get("tool")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "missing field `tool`".to_string())?;
+        let surface = prism_core::toolgate::AdvertisedTools::from_list(
+            advertised
+                .into_iter()
+                .map(|name| prism_core::toolgate::AdvertisedTool {
+                    name,
+                    description: String::new(),
+                })
+                .collect(),
+        );
+        match prism_core::toolgate::clamp_advertised_tools(&surface, tool) {
+            Ok(()) => Ok(serde_json::json!({ "ok": true })),
+            Err(e) => Ok(serde_json::json!({ "ok": false, "error": e })),
+        }
+    })();
+    match clamped {
+        Ok(v) => v.to_string(),
+        Err(e) => serde_json::json!({ "ok": false, "error": e }).to_string(),
+    }
+}
+
 fn kind_name(kind: prism_core::toolgate::ToolErrorKind) -> &'static str {
     match kind {
         prism_core::toolgate::ToolErrorKind::NotRecognized => "not_recognized",

@@ -33,6 +33,7 @@ export interface WasmCoreModule {
   agent_sandbox_policy_check(policyJson: string): string;
   agent_tool_repair(rawInput: string): string;
   agent_tool_classify(observation: string): string;
+  agent_tool_clamp(reqJson: string): string;
   agent_subagents_list(): string;
   agent_subagent_resolve_model(
     name: string,
@@ -421,6 +422,19 @@ export type ToolErrorKindName =
   | 'not_found'
   | 'environment'
   | 'none';
+
+/** Clamp a tool call to the advertised surface. A tool that is not
+ *  advertised fails closed with the list of advertised tools, so the
+ *  model can re-aim instead of hallucinating one. */
+export function clampToolCall(
+  core: WasmCore,
+  advertised: string[],
+  tool: string,
+): { ok: boolean; error?: string } {
+  return JSON.parse(
+    core.agent_tool_clamp(JSON.stringify({ advertised, tool })),
+  ) as { ok: boolean; error?: string };
+}
 
 /** Classify a tool observation; `detail` is the actionable advice the
  *  core appends to the observation text. */

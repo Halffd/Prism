@@ -7,7 +7,7 @@ import type {
 } from '@prism/shared-types';
 import { ReActAgentService, PermissionAwareToolExecutor } from '@prism/agent';
 import { OpenAILLMService } from '@prism/llm';
-import { NodeToolExecutor } from './node-tool-executor';
+import { NodeToolExecutor, NODE_TOOLS } from './node-tool-executor';
 import { resolveProviderKey } from './provider-env';
 
 /** Ask handler shape the Ink UI supplies (renders a y/n prompt). */
@@ -64,6 +64,8 @@ export async function runTUIAgent(
     maxSteps: request.maxSteps,
     personality: request.personality,
     memories: request.memories,
-    tools: request.tools,
+    // The TUI's own tool surface is the advertised one: the core's gate
+    // clamps every other name the model may produce.
+    tools: request.tools && request.tools.length > 0 ? request.tools : NODE_TOOLS,
   });
 }

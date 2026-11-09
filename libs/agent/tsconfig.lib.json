@@ -16,7 +16,8 @@
   "references": [
     { "path": "../shared-types/tsconfig.lib.json" },
     { "path": "../llm/tsconfig.lib.json" },
-    { "path": "../web-search/tsconfig.lib.json" }
+    { "path": "../web-search/tsconfig.lib.json" },
+    { "path": "../ai-core/tsconfig.lib.json" }
   ],
   "exclude": ["jest.config.ts", "src/**/*.spec.ts", "src/**/*.test.ts"]
 }

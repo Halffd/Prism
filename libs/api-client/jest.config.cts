@@ -17,5 +17,9 @@ module.exports = {
     '^.+\\.[tj]s$': ['@swc/jest', swcJestConfig],
   },
   moduleFileExtensions: ['ts', 'js', 'html'],
+  // nanoid ships ESM only and is pulled in by the deepsearch chain; it
+  // must go through the transform to be requireable from CommonJS test
+  // code.
+  transformIgnorePatterns: ['node_modules/(?!(nanoid)/)'],
   coverageDirectory: 'test-output/jest/coverage',
 };

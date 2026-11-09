@@ -9,6 +9,7 @@ export const agent_run: (a: number, b: number, c: number, d: any, e: number) => 
 export const agent_sandbox_policy_check: (a: number, b: number) => [number, number];
 export const agent_subagent_resolve_model: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
 export const agent_subagents_list: () => [number, number];
+export const agent_tool_clamp: (a: number, b: number) => [number, number];
 export const agent_tool_classify: (a: number, b: number) => [number, number];
 export const agent_tool_repair: (a: number, b: number) => [number, number];
 export const agentregistry_execute: (a: number, b: number, c: number, d: number, e: number, f: any) => [number, number];

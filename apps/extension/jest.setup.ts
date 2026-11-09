@@ -58,6 +58,10 @@ const chrome = {
       set: jest.fn(),
       remove: jest.fn(),
     },
+    onChanged: {
+      addListener: jest.fn(),
+      removeListener: jest.fn(),
+    },
   },
   action: {
     openPopup: jest.fn(),

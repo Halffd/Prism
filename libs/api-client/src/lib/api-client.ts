@@ -7,9 +7,12 @@ import {
   parseModels,
   streamSseText,
   findProvider,
+  sandboxPlan,
   type WasmCore,
   type WireMessage,
   type ChatConfig,
+  type SandboxPlan,
+  type SandboxPolicy,
 } from '@prism/ai-core';
 import {
   Message,
@@ -1548,6 +1551,46 @@ export class UnifiedAIClient {
         error: error.message || 'Agent execution failed',
       };
     }
+  }
+
+  /**
+   * Plan a sandbox policy on the host that runs the agent.
+   *
+   * The plan is the answer: a strict policy on a host without Landlock
+   * comes back as the closed `sandbox_unsupported` outcome, and the
+   * caller decides what to do with it. Without an API host the local
+   * core plans the policy — a browser host cannot enforce Landlock, and
+   * its plan says so.
+   */
+  async sandboxPreflight(policy: SandboxPolicy): Promise<SandboxPlan> {
+    if (this.prismApiUrl) {
+      try {
+        const resp = await fetch(
+          `${this.prismApiUrl}/agents/sandbox/preflight`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(policy),
+          },
+        );
+        if (resp.ok) {
+          const body = (await resp.json()) as {
+            ok?: boolean;
+            sandbox_used?: string;
+            error?: string;
+          };
+          return body.ok
+            ? { ok: true, sandbox_used: body.sandbox_used ?? 'off' }
+            : { ok: false, error: body.error ?? 'plan_failed' };
+        }
+      } catch (e) {
+        console.warn('sandbox preflight failed, planning locally:', e);
+      }
+    }
+    const core = await this.ensureCore();
+    return core
+      ? sandboxPlan(core, policy)
+      : { ok: false, error: 'sandbox_unsupported' };
   }
 
   async webSearch(

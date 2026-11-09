@@ -1714,3 +1714,62 @@ $ne-spacing-xl: 24px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
+
+// ─── Agent Console ───────────────────────────────────────────────────────
+
+.st-agent-console {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 8px;
+}
+
+.st-agent-console-posture,
+.st-agent-console-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+}
+
+.st-agent-console-badge {
+  border: 1px solid var(--outline-variant);
+  border-radius: 10px;
+  padding: 1px 8px;
+  font-size: 0.625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--on-surface-variant);
+  white-space: nowrap;
+}
+
+.st-agent-console-ok .st-agent-console-badge {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.st-agent-console-warn .st-agent-console-badge {
+  border-color: var(--warning, var(--outline));
+  color: var(--warning, var(--outline));
+}
+
+.st-agent-console-error .st-agent-console-badge {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.st-agent-console-reason,
+.st-agent-console-detail {
+  color: var(--on-surface-variant);
+  font-family: monospace;
+  font-size: 0.6875rem;
+}
+
+.st-agent-console-errors {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}

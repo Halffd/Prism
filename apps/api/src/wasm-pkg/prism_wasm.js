@@ -337,6 +337,31 @@ function agent_subagents_list() {
 exports.agent_subagents_list = agent_subagents_list;
 
 /**
+ * Clamp a tool call to the advertised surface. Input: JSON
+ * `{"advertised": ["name", ...], "tool": "name"}`. Returns
+ * `{"ok": true}` when the tool is advertised (or is `Final Answer`),
+ * `{"ok": false, "error": "tool_clamped: ..."}` otherwise — the same
+ * fail-closed answer the core's gated execution gives.
+ * @param {string} req_json
+ * @returns {string}
+ */
+function agent_tool_clamp(req_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(req_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.agent_tool_clamp(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.agent_tool_clamp = agent_tool_clamp;
+
+/**
  * Classify a tool observation and get the actionable detail appended
  * the way `gated_execute` does. Returns `{kind, detail: string|null}`.
  * @param {string} observation

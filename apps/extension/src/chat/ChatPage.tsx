@@ -6,7 +6,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { MermaidRenderer, Icon } from '@prism/ui-components';
 import { UnifiedAIClient } from '@prism/api-client';
-import { selectAutoModel } from '@prism/ai-adapters';
+import { selectAutoModel } from '@prism/ai-core';
 import {
   saveChatHistory,
   loadChatHistory,
@@ -56,6 +56,12 @@ import { CouncilPanel } from '../components/CouncilPanel';
 import { MultiSendPanel } from '../components/MultiSendPanel';
 import { DebatePanel } from '../components/DebatePanel';
 import { AgentRunnerPanel } from '../components/AgentRunnerPanel';
+import { AgentConsolePanel } from '../components/AgentConsolePanel';
+import { BUILTIN_TOOLS } from '@prism/agent';
+import {
+  loadAgentConsole,
+  type SandboxPosture,
+} from './agentConsole';
 import type {
   WebSearchResultItem,
   DeepSearchPhase,
@@ -172,12 +178,37 @@ export function ChatPage() {
   const [agentInProgress, setAgentInProgress] = useState(false);
   const [agentResult, setAgentResult] = useState<AgentResult | null>(null);
   const [agentStep, setAgentStep] = useState<number>(0);
+  const [agentPosture, setAgentPosture] = useState<SandboxPosture | null>(null);
   const [showSearchPanel, setShowSearchPanel] = useState(false);
   const selectedProvider = reduxSelectedProvider;
 
   const [historyMissing, setHistoryMissing] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // The agent console: the host's sandbox posture for the session. The
+  // plan comes from the host that would run the commands (the Prism
+  // API); the local core answers when there is no such host.
+  useEffect(() => {
+    if (!agentInProgress && !agentResult) {
+      setAgentPosture(null);
+      return;
+    }
+    let cancelled = false;
+    const policy = { mode: 'auto' as const };
+    Promise.all([loadAgentConsole(), client.sandboxPreflight(policy)])
+      .then(([agentConsole, plan]) => {
+        if (!cancelled) {
+          setAgentPosture(agentConsole.sandboxPosture(policy, plan));
+        }
+      })
+      .catch(() => {
+        /* no posture to show */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [agentInProgress, agentResult]);
 
   useEffect(() => {
     // Load AI configuration from chrome storage
@@ -575,6 +606,9 @@ export function ChatPage() {
         maxSteps: 10,
         personality: activeAgent?.personality,
         memories: activeAgent?.coreMemories,
+        // Advertise the extension's tool surface: the tool gate clamps
+        // every other name the model may produce.
+        tools: BUILTIN_TOOLS,
       };
       const response = await client.agent(request);
       if (response.success && response.data) {
@@ -1354,16 +1388,22 @@ export function ChatPage() {
       )}
 
       {(agentResult || agentInProgress) && (
-        <AgentRunnerPanel
-          result={agentResult}
-          inProgress={agentInProgress}
-          currentStep={agentStep}
-          maxSteps={undefined}
-          onClose={() => {
-            setAgentResult(null);
-            setAgentStep(0);
-          }}
-        />
+        <>
+          <AgentRunnerPanel
+            result={agentResult}
+            inProgress={agentInProgress}
+            currentStep={agentStep}
+            maxSteps={undefined}
+            onClose={() => {
+              setAgentResult(null);
+              setAgentStep(0);
+            }}
+          />
+          <AgentConsolePanel
+            steps={agentResult?.steps ?? []}
+            posture={agentPosture}
+          />
+        </>
       )}
 
       {showSearchPanel &&

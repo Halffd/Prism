@@ -1,9 +1,48 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { readFile } from 'fs/promises';
+import type { AgentTool } from '@prism/shared-types';
 import type { ToolExecutor } from '@prism/agent';
 
 const execAsync = promisify(exec);
+
+/**
+ * The TUI's tool surface — exactly what `NodeToolExecutor` can run.
+ * The session advertises these, and the core's tool gate clamps every
+ * other name the model may produce.
+ */
+export const NODE_TOOLS: AgentTool[] = [
+  {
+    name: 'shell',
+    description: 'Run a shell command on this machine.',
+    parameters: { command: 'string' },
+  },
+  {
+    name: 'read_file',
+    description: 'Read a file from disk.',
+    parameters: { path: 'string' },
+  },
+  {
+    name: 'web_search',
+    description: 'Search the web and return ranked results.',
+    parameters: { query: 'string' },
+  },
+  {
+    name: 'calculator',
+    description: 'Evaluate an arithmetic expression.',
+    parameters: { expression: 'string' },
+  },
+  {
+    name: 'fetch_url',
+    description: 'Fetch a URL and extract its text content.',
+    parameters: { url: 'string' },
+  },
+  {
+    name: 'code_eval',
+    description: 'Evaluate a JavaScript expression in a sandbox.',
+    parameters: { code: 'string' },
+  },
+];
 
 /**
  * TUI-side tool executor. Runs on Node/Bun, so it can execute real shell

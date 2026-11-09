@@ -854,7 +854,7 @@ export function StandaloneChatPage() {
           responseFormat: 'mp3',
         });
         if (result.success && result.data) {
-          const url = URL.createObjectURL(result.data);
+          const url = URL.createObjectURL(result.data.audio);
           const audio = new Audio(url);
           audioRef.current = audio;
           setSpeaking(msg.id);

@@ -28,4 +28,9 @@ module.exports = {
   ],
   coverageDirectory: 'test-output/jest/coverage',
   setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
+  // Several suites import the content script in `beforeAll`, which pulls in
+  // the whole app. The default 5s timeout is not enough for that on a
+  // loaded machine, and a timeout there looks like a broken suite rather
+  // than a slow one.
+  testTimeout: 30_000,
 };

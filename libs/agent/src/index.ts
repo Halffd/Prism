@@ -2,6 +2,7 @@ import type {
   AgentRequest,
   AgentResult,
   AgentStep,
+  AgentTool,
   AgentToolDef,
   AgentStrategy,
   AgentMemory,
@@ -32,11 +33,45 @@ import {
   PerplexityLLMService,
 } from '@prism/llm';
 import { evaluateInSandbox } from './sandbox';
+import { loadToolGate } from './toolgate';
 
 export interface AgentService {
   readonly provider: string;
   run(request: AgentRequest): Promise<Result<AgentResult>>;
 }
+
+/**
+ * The built-in tool surface — exactly what `BuiltinToolExecutor` can
+ * run. A session that offers these advertises them, and the tool gate
+ * clamps every other name the model may produce.
+ */
+export const BUILTIN_TOOLS: AgentTool[] = [
+  {
+    name: 'web_search',
+    description: 'Search the web and return ranked results.',
+    parameters: { query: 'string' },
+  },
+  {
+    name: 'calculator',
+    description: 'Evaluate a arithmetic expression.',
+    parameters: { expression: 'string' },
+  },
+  {
+    name: 'fetch_url',
+    description: 'Fetch a URL and extract its text content.',
+    parameters: { url: 'string' },
+  },
+  {
+    name: 'code_eval',
+    description: 'Evaluate a JavaScript expression in a sandbox.',
+    parameters: { code: 'string' },
+  },
+  {
+    name: 'read_file',
+    description: 'Read a file from disk (denied in browser hosts).',
+    parameters: { path: 'string' },
+  },
+];
 
 export interface ToolExecutor {
   execute(toolName: string, input: string): Promise<string>;
@@ -398,6 +433,12 @@ export class ReActAgentService implements AgentService {
       const maxSteps = request.maxSteps || this.maxSteps;
       const temperature = this.config.temperature ?? 0;
       const maxTokens = this.config.maxTokens ?? 1024;
+      // The tool gate: the core's clamp/repair/classify, applied before
+      // a call reaches the executor. A session that advertises no tools
+      // has no advertised surface to clamp against — the executor's own
+      // answer still rejects an unknown name.
+      const gate = await loadToolGate();
+      const advertised = tools.filter((t) => t.enabled).map((t) => t.name);
 
       let currentInput = request.task;
       let totalTokens = 0;
@@ -486,7 +527,26 @@ export class ReActAgentService implements AgentService {
           continue;
         }
 
-        const observation = await executor.execute(action, actionInput);
+        // Clamp first: a tool that is not advertised never reaches a
+        // handler. Then repair the argument, run it, and classify the
+        // observation — the core's `gated_execute` order.
+        const clamped =
+          gate && advertised.length > 0 ? gate.clamp(advertised, action) : null;
+        let observation: string;
+        if (clamped) {
+          observation = clamped;
+        } else {
+          const repaired = gate
+            ? gate.repair(actionInput)
+            : { input: actionInput, notes: [] as string[] };
+          observation = await executor.execute(action, repaired.input);
+          const classified = gate ? gate.classify(observation) : null;
+          if (classified?.detail) {
+            observation = `${observation}\n(${classified.detail}; repair notes: ${
+              repaired.notes.length ? repaired.notes.join(', ') : 'none'
+            })`;
+          }
+        }
         steps.push({ thought, action, observation });
         history.push(
           `Thought: ${thought}\nAction: ${action}(${actionInput})\nObservation: ${observation}`,
