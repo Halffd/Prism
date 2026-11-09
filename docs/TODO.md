@@ -38,7 +38,7 @@ hardware modes, agent memories. See TUI.
 
 | Feature                                  | Status  | Notes                                                                                                                               |
 | ---------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Chat + streaming                         | done    | Ink, shares ai-adapters                                                                                                             |
+| Chat + streaming                         | done    | Ink, core-llm (wasm decoders) + LocalAdapter for capabilities |
 | Status bar                               | done    | provider/model/adapterMode/online + tok/s · latency · ctx · session tokens                                                          |
 | Web/deep/council/multi-send/debate/agent | done    | Ctrl+W/D/V/M/B keybindings                                                                                                          |
 | SillyTavern characters                   | done    | group chat + character select                                                                                                       |
@@ -57,13 +57,13 @@ hardware modes, agent memories. See TUI.
 | Local LLM adapters                     | done    | Inherited via shared settings                               |
 | Agent features (tools/permissions/RAG) | planned | Shares TUI's libs; desktop wrapper around TUI agent runtime |
 
-## Desktop (Rust — apps/egui + apps/slint over crates/prism-core)
+## Desktop (Rust — apps/slint over crates/prism-core)
 
 | Feature                                | Status  | Notes                                                                                          |
 | -------------------------------------- | ------- | ---------------------------------------------------------------------------------------------- |
-| egui dev harness                       | done    | Thin host over prism-core (bridge.rs); no own tests, logic lives in the core                   |
+| egui dev harness                       | done    | DELETED (2026-11-09): apps/egui removed from the workspace — Slint reached feature parity and CI builds it; the harness had no remaining job |
 | Slint UI at egui feature parity        | done    | Streaming, chats sidebar w/ two-step delete, settings (keys/models/sampling/thinking/hardware); shared logic in `apps/slint/src/shared.rs` used by desktop + Android entry points |
-| GUI runtime verification               | pending | Headless box — slint parity check on a display gates egui deletion (plan item 2)               |
+| GUI runtime verification               | pending | Headless box — slint parity check on a display still owed (egui deletion no longer waits on it)|
 | Env-var API keys                       | done    | `ProviderDef.env` (13 remote providers); stored key wins, else env vars in preference order; `Settings::key_for` resolves; TUI mirrors via `apps/tui/src/lib/provider-env.ts`; wasm `providers_json` exports `env` |
 | Prompt history (up/down recall)        | done    | core `prompt_history` JSONL store (cap 50, dedupe, corrupt-line heal) + `host::record_prompt/load_prompt_history`; Slint ↑/↓ cycling with draft restore |
 | Model catalog (models.dev)             | done    | Bundled snapshot (`catalog_snapshot.json`, 12 OpenAI-compat providers, ~650 models) with capabilities/limits/pricing; `prism_core::catalog` (newest non-deprecated default, deprecated-last sorting); Slint picker falls back to catalog when cache empty; model hint shows "name · 128k ctx · tools/reasoning"; regen via `script/update-catalog.py` |
@@ -118,8 +118,8 @@ Expo RN app `apps/Prism` deleted (plan item 7).
 | libs/agent — permissions    | done   | PermissionAwareToolExecutor (allow/deny/ask, ask handler); 7 unit tests                            |
 | libs/rag                    | done   | chunkDocument, embedTexts (ollama/openai), InMemory/Dexie stores, retrieveRagContext; 7 unit tests |
 | libs/logging                | done   | levels×channels, ring buffer, JSONL export; api /metrics (p50/p95/p99)                             |
-| libs/ai-adapters — hardware | done   | HardwareProfile → num_gpu/num_ctx plumbing                                                         |
-| libs/ai-adapters — thinking | done   | Claude native + scratchpad fallback helpers                                                        |
+| libs/ai-core — hardware | done   | HardwareProfile → num_gpu/num_ctx plumbing (settings + core body path) |
+| libs/ai-core — thinking | done   | core apply_thinking/strip_thinking (scratchpad) via ai-core |
 
 ## Tests
 
@@ -136,10 +136,11 @@ Expo RN app `apps/Prism` deleted (plan item 7).
 
 ## Known debt
 
-- `@prism/ai-adapters` imports remain: extension ChatPage (selectAutoModel), tui-client + api-client
-  (AdapterRouter instances for non-chat paths) — deletion target, plan item 8
+- (CLOSED) `@prism/ai-adapters` + `@prism/llm-service` deleted 2026-11-09; all chat paths run on
+  `@prism/ai-core` (core wasm). Replacement note: api-client owns its core-driven chat path,
+  TUI uses LocalAdapter directly, extension uses ai-core's selectAutoModel.
 - Browser bundler-runtime wasm loading (webpack/vite) UNVERIFIED — headless box
-- GUI runtime UNVERIFIED — egui kept as native dev harness until slint parity is confirmed on a display
+- GUI runtime UNVERIFIED (headless box) — egui deleted anyway (parity reached in code; the display check remains owed)
 - Old Electron leftover at `apps/apps/desktop/desktop` — delete after confirming new desktop app is canonical
 - Agent tool-calling is prompt-parsing based (ReAct), not native function calling
 - Extension ChatPage previously grew RAG/agent-runtime UI that belonged in the

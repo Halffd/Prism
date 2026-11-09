@@ -104,6 +104,32 @@
         letter-spacing: normal;
         text-transform: none;
       }
+
+      .hotkey-binding-row {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-md);
+
+        .form-control {
+          flex: 1;
+          min-width: 0;
+          font-family: monospace;
+        }
+      }
+
+      .hotkey-enabled-toggle {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-xs);
+        margin-bottom: 0;
+        text-transform: none;
+        letter-spacing: normal;
+        font-size: var(--font-sm);
+        font-weight: 400;
+        color: var(--on-surface-variant);
+        white-space: nowrap;
+        cursor: pointer;
+      }
     }
 
     .site-list {

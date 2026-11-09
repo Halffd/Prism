@@ -17,6 +17,7 @@ pub use prism_core::native_tools;
 pub use prism_core::conversations::{self, Conversation, ConversationMeta, StoredMessage};
 pub use prism_core::providers::{self, ollama_root_url, PROVIDERS};
 pub use prism_core::settings::{Connection, Settings};
+pub use prism_core::workspace::Workspace;
 pub use prism_core::{host, thinking};
 pub use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 pub use std::cell::RefCell;
@@ -126,6 +127,17 @@ pub struct State {
     pub queue_processing: bool,
     /// Media capability panel state.
     pub media: crate::shared::media::MediaState,
+    /// Surface mode: 0 = Chat, 1 = Agent, 2 = IDE (editor + agent
+    /// sidebar). Mirrors Cursor's composer toggles; the composer's
+    /// routing follows it (`on_send` observes `ui.get_ui_mode()`).
+    pub mode: usize,
+    /// Open IDE workspace folder (None until `ide.workspace.open`).
+    pub workspace: Option<Workspace>,
+    /// Path (workspace-relative) of the file in the editor, if any.
+    pub open_rel: Option<String>,
+    /// Editor buffer contents; `editor_dirty` set when edited.
+    pub editor_text: String,
+    pub editor_dirty: bool,
 }
 
 impl State {
@@ -158,6 +170,11 @@ impl State {
             prompt_queue: Vec::new(),
             queue_processing: false,
             media: crate::shared::media::MediaState::default(),
+            mode: 0,
+            workspace: None,
+            open_rel: None,
+            editor_text: String::new(),
+            editor_dirty: false,
         }
     }
 }
@@ -491,6 +508,139 @@ pub fn run_agent_from_palette(
     _task: &str,
 ) {
     eprintln!("agent feature not enabled");
+}
+
+// ---- IDE surface (three modes like Cursor's composer toggles) ----
+
+/// Composer placeholder per surface mode: the connection to the person
+/// typing changes even though the same LineEdit drives both.
+fn composer_hint(mode: usize) -> &'static str {
+    match mode {
+        1 => "Describe an agent task… (Enter to run)",
+        2 => "Ask the agent about the workspace… (Enter to run)",
+        _ => "Type a message… (Enter to send, ↑/↓ history)",
+    }
+}
+
+/// Switch the surface mode and sync the dependent UI bits.
+pub fn set_mode(ui: &AppWindow, state: &Rc<RefCell<State>>, mode: usize) {
+    let mode = mode.min(2);
+    state.borrow_mut().mode = mode;
+    ui.set_ui_mode(mode as i32);
+    ui.set_composer_hint(composer_hint(mode).into());
+}
+
+/// Open a folder as the IDE workspace; on success the file tree is
+/// refreshed and the status strip reports the topic. Empty arg falls
+/// back to a refresh (the palette arg is the folder).
+pub fn open_workspace(ui: &AppWindow, state: &Rc<RefCell<State>>, arg: &str) {
+    if arg.trim().is_empty() {
+        if let Some(ws) = &state.borrow().workspace {
+            ui.set_ide_status(ws.topic().into());
+            refresh_tree(ui, state);
+            return;
+        }
+        ui.set_ide_status("usage: open workspace <dir>".into());
+        return;
+    }
+    match Workspace::open(arg) {
+        Ok(ws) => {
+            let topic = ws.topic();
+            state.borrow_mut().workspace = Some(ws);
+            ui.set_workspace_path(topic.clone().into());
+            ui.set_ide_status("".into());
+            refresh_tree(ui, state);
+        }
+        Err(e) => ui.set_ide_status(e.into()),
+    }
+}
+
+/// Refresh the file tree from the workspace (no-op status when none).
+pub fn refresh_tree(ui: &AppWindow, state: &Rc<RefCell<State>>) {
+    let Some(ws) = &state.borrow().workspace else {
+        ui.set_ide_status("no workspace open — try: open workspace <dir>".into());
+        return;
+    };
+    match ws.list_files() {
+        Ok(rows) => {
+            let model = Rc::new(VecModel::from(
+                rows.iter()
+                    .map(|r| TreeRow {
+                        rel: r.rel.as_str().into(),
+                        isDir: r.is_dir,
+                        depth: r.depth as i32,
+                    })
+                    .collect::<Vec<_>>(),
+            ));
+            ui.set_tree_rows(ModelRc::from(model));
+            let n = rows.len();
+            ui.set_ide_status(format!("{n} entries — click a file to open it").into());
+        }
+        Err(e) => ui.set_ide_status(e.into()),
+    }
+}
+
+/// Open one workspace file into the editor pane.
+pub fn open_tree_file(ui: &AppWindow, state: &Rc<RefCell<State>>, rel: &str) {
+    let Some(ws) = &state.borrow().workspace else {
+        ui.set_ide_status("open a workspace first (palette: Open workspace folder…)".into());
+        return;
+    };
+    if rel.ends_with('/') {
+        ui.set_ide_status(format!("{rel} — a directory; click file rows").into());
+        return;
+    }
+    match ws.read_file(rel) {
+        Ok(text) => {
+            ui.set_open_rel(rel.into());
+            ui.set_editor_text(text.into());
+            ui.set_editor_dirty(false);
+            ui.set_ide_status(format!("opened {rel}").into());
+            let mut st = state.borrow_mut();
+            st.open_rel = Some(rel.to_string());
+            st.editor_text = ui.get_editor_text().to_string();
+            st.editor_dirty = false;
+        }
+        Err(e) => ui.set_ide_status(e.into()),
+    }
+}
+
+/// Record an edit from the TextEdit: content kept in state, dirty set.
+pub fn editor_changed(ui: &AppWindow, state: &Rc<RefCell<State>>, text: &str) {
+    let mut st = state.borrow_mut();
+    st.editor_text = text.to_string();
+    st.editor_dirty = true;
+    ui.set_editor_dirty(true);
+}
+
+/// Persist the editor buffer back to the workspace file.
+pub fn save_editor(ui: &AppWindow, state: &Rc<RefCell<State>>) {
+    let (rel, text) = {
+        let st = state.borrow();
+        match &st.open_rel {
+            Some(rel) if st.editor_dirty => (rel.clone(), ui.get_editor_text().to_string()),
+            Some(_) => (None, String::new()),
+            None => (None, String::new()),
+        }
+    };
+    let Some(rel) = rel else {
+        ui.set_ide_status(if ui.get_editor_text().is_empty() {
+            "nothing to save".into()
+        } else {
+            "editor unchanged".into()
+        });
+        return;
+    };
+    let Some(ws) = &state.borrow().workspace else { return };
+    match ws.write_file(&rel, &text) {
+        Ok(()) => {
+            ui.set_editor_dirty(false);
+            ui.set_ide_status(format!("saved {rel} ({} bytes)", text.len()).into());
+            refresh_tree(ui, state);
+            ui.set_ide_status(format!("saved {rel} ({} bytes)", text.len()).into());
+        }
+        Err(e) => ui.set_ide_status(e.into()),
+    }
 }
 /// Kick off a live /models fetch for the current provider. Shared by
 /// the settings button and the palette command.

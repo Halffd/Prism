@@ -46,12 +46,16 @@ fn main() -> anyhow::Result<()> {
             }
             "--help" | "-h" => {
                 println!("prism — native terminal harness over prism-core");
-                println!("usage: prism [--version] [--help]");
+                println!("usage: prism [--version] [--help] [sandbox preflight]");
                 println!(
                     "env: PRISM_CONFIG_DIR (config root), PRISM_CONVERSATIONS_DIR (chat storage)"
                 );
+                println!(
+                    "agent: PRISM_AGENT_SANDBOX_POLICY (policy JSON or a path to it — adds the guarded /agent shell tool)"
+                );
                 return Ok(());
             }
+            "sandbox" => return sandbox_cli(std::env::args().skip(2)),
             other => anyhow::bail!("unknown argument: {other} (see prism --help)"),
         }
     }
@@ -96,4 +100,82 @@ fn run_loop(
             return Ok(());
         }
     }
+}
+
+/// `prism sandbox preflight [--policy FILE] [--json]` — probe the host
+/// and (with a policy) report how a spawn would be planned, mirroring
+/// the zugferd helper's `--preflight-only` exit contract:
+/// exit 0 supported, 2 unsupported.
+fn sandbox_cli(mut args: impl Iterator<Item = String>) -> anyhow::Result<()> {
+    let sub = args.next().unwrap_or_else(|| "preflight".into());
+    if sub != "preflight" {
+        anyhow::bail!(
+            "unknown sandbox subcommand: {sub} (usage: prism sandbox preflight [--policy FILE] [--json])"
+        );
+    }
+    let mut policy_file: Option<String> = None;
+    let mut as_json = false;
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--policy" => {
+                policy_file = Some(args.next().context("--policy needs a policy JSON file path")?)
+            }
+            "--json" => as_json = true,
+            other => anyhow::bail!("unknown flag: {other}"),
+        }
+    }
+
+    let report = prism_core::sandbox::preflight();
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "landlock: {}{}",
+            if report.landlock_supported {
+                "supported"
+            } else {
+                "UNSUPPORTED"
+            },
+            report
+                .landlock_abi
+                .map(|abi| format!(" (abi v{abi})"))
+                .unwrap_or_default()
+        );
+        for note in &report.notes {
+            println!("note: {note}");
+        }
+    }
+
+    if let Some(path) = policy_file {
+        let text = std::fs::read_to_string(&path)
+            .with_context(|| format!("read policy {path}"))?;
+        let policy = prism_core::sandbox::parse_policy(&text)
+            .map_err(anyhow::Error::msg)?;
+        let res = prism_core::sandbox::resolve_policy(&policy);
+        let plan = prism_core::sandbox::plan_spawn(&res);
+        if as_json {
+            let plan_json = match &plan {
+                Ok(used) => serde_json::json!({ "sandbox_used": used, "error": serde_json::Value::Null }),
+                Err(outcome) => serde_json::json!({ "sandbox_used": serde_json::Value::Null, "error": outcome }),
+            };
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "policy": policy,
+                    "plan": plan_json,
+                }))?
+            );
+        } else {
+            match &plan {
+                Ok(used) => println!("plan: {used:?}"),
+                Err(outcome) => println!("plan: rejected — {outcome:?}"),
+            }
+        }
+        // Mirror the helper: strict policy on an unsupported host is the
+        // only failing plan (exit 2), so automation can trust the code.
+        if matches!(plan, Err(prism_core::sandbox::SpawnOutcome::SandboxUnsupported { .. })) {
+            std::process::exit(2);
+        }
+    }
+    Ok(())
 }

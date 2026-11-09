@@ -129,16 +129,31 @@ const shadowRoots = new Map<string, ShadowRoot>();
 
 /**
  * Returns the shadow root the extension mounted on the given host, if any.
+ *
+ * The registry entry is only valid while the host element is still in the
+ * document, so a host that the page removed is treated as gone and its
+ * entry is dropped.
  */
 export function getShadowRoot(hostId: string): ShadowRoot | undefined {
-  return shadowRoots.get(hostId);
+  const shadow = shadowRoots.get(hostId);
+  if (!shadow) {
+    return undefined;
+  }
+
+  const host = document.getElementById(hostId);
+  if (!host) {
+    shadowRoots.delete(hostId);
+    return undefined;
+  }
+
+  return shadow;
 }
 
 /**
  * True when the extension has already mounted its UI on the given host.
  */
 export function hasShadowRoot(hostId: string): boolean {
-  return shadowRoots.has(hostId);
+  return getShadowRoot(hostId) !== undefined;
 }
 
 /**
@@ -162,7 +177,9 @@ export function forgetShadowRoot(hostId: string): void {
  */
 export function attachShadowToElement(element: HTMLElement): ShadowRoot {
   const shadow = element.attachShadow({ mode: 'closed' });
-  shadowRoots.set(element.id, shadow);
+  if (element.id) {
+    shadowRoots.set(element.id, shadow);
+  }
   return shadow;
 }
 

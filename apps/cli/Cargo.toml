@@ -8,6 +8,10 @@ description = "Prism native terminal harness (ratatui) over prism-core"
 name = "prism"
 path = "src/main.rs"
 
+[lints.rust]
+# Cross-crate cfg: prism-core gates its native transport on this feature.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("native-transport"))'] }
+
 [dependencies]
 prism-core = { path = "../../crates/prism-core", features = ["native-transport"] }
 anyhow.workspace = true

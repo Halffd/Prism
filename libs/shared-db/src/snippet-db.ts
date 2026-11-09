@@ -6,50 +6,21 @@
  * content script cannot read IndexedDB, so the list is mirrored into
  * `chrome.storage.local` — the same mirroring the prompt shortcuts already
  * use — and the content script reads that mirror.
+ *
+ * The stores live in the shared `PrismDB` database, so this module reuses
+ * the connection from `db.ts` rather than opening a second one. Two clients
+ * on one database have to agree on the version and the schema, and a single
+ * connection avoids the two of them blocking each other.
  */
 
-import { openDB, type IDBPDatabase } from 'idb';
 import type { HotkeyBinding, Snippet } from '@prism/shared-types';
-
-const DB_NAME = 'PrismDB';
-// Matches the version used by db.ts. Both clients open the same database, so
-// the numbers have to agree.
-const DB_VERSION = 50;
+import { getDatabase } from './db';
 
 const SNIPPETS_STORE = 'snippets';
 const HOTKEYS_STORE = 'hotkeys';
 
 const SNIPPETS_STORAGE_KEY = 'prismSnippets';
 const HOTKEYS_STORAGE_KEY = 'prismHotkeys';
-
-let dbInstance: IDBPDatabase | null = null;
-
-async function getDatabase(): Promise<IDBPDatabase> {
-  if (dbInstance) {
-    return dbInstance;
-  }
-
-  dbInstance = await openDB(DB_NAME, DB_VERSION, {
-    async upgrade(db) {
-      if (!db.objectStoreNames.contains(SNIPPETS_STORE)) {
-        const snippetsStore = db.createObjectStore(SNIPPETS_STORE, {
-          keyPath: 'id',
-        });
-        snippetsStore.createIndex('group', 'group', { unique: false });
-        snippetsStore.createIndex('createdAt', 'createdAt', { unique: false });
-      }
-
-      if (!db.objectStoreNames.contains(HOTKEYS_STORE)) {
-        const hotkeysStore = db.createObjectStore(HOTKEYS_STORE, {
-          keyPath: 'id',
-        });
-        hotkeysStore.createIndex('mode', 'mode', { unique: false });
-      }
-    },
-  });
-
-  return dbInstance;
-}
 
 /** The subset of `chrome.storage.local` this module uses. */
 interface ChromeLocalStorage {
@@ -402,6 +373,11 @@ export const DEFAULT_SNIPPETS: Snippet[] = [
  * The `Ctrl+Shift+…` combinations match the ones the popup already
  * advertises for the send-context toggles, so the same shortcut works
  * whether the user is in the popup or on the page.
+ *
+ * The browser reserves `Ctrl+Shift+P` for the extension's own "open the
+ * popup" command, so the page-context hotkey uses `Ctrl+Shift+G` instead —
+ * otherwise the browser would open the popup before the page-level hotkey
+ * could fire.
  */
 export const DEFAULT_HOTKEYS: HotkeyBinding[] = [
   {
@@ -415,7 +391,7 @@ export const DEFAULT_HOTKEYS: HotkeyBinding[] = [
   {
     id: 'hotkey-page-context',
     name: 'Send page contents',
-    combination: 'Ctrl+Shift+P',
+    combination: 'Ctrl+Shift+G',
     kind: 'toggle',
     mode: 'pageContext',
     enabled: true,

@@ -19,6 +19,8 @@ type EditorState = {
   text: string;
   group: string;
   triggerMode: SnippetTriggerMode;
+  /** Keyboard bindings that expand the snippet without typing the trigger. */
+  keyboardShortcuts: string;
 };
 
 /**
@@ -55,6 +57,7 @@ export function SnippetManager({ onClose }: SnippetManagerProps) {
       text: '',
       group: '',
       triggerMode: 'standalone',
+      keyboardShortcuts: '',
     });
     setError(null);
   }, []);
@@ -67,6 +70,7 @@ export function SnippetManager({ onClose }: SnippetManagerProps) {
       text: snippet.text,
       group: snippet.group ?? '',
       triggerMode: snippet.triggerMode ?? 'standalone',
+      keyboardShortcuts: (snippet.keyboardShortcuts ?? []).join(', '),
     });
     setError(null);
   }, []);
@@ -97,6 +101,13 @@ export function SnippetManager({ onClose }: SnippetManagerProps) {
       ? snippets.find((s) => s.id === editor.id)
       : undefined;
 
+    // The bindings are entered as a comma-separated list, so
+    // `Ctrl+Shift+F, Ctrl+Shift+G` becomes two bindings.
+    const keyboardShortcuts = editor.keyboardShortcuts
+      .split(',')
+      .map((combination) => combination.trim())
+      .filter((combination) => combination.length > 0);
+
     const snippet: Snippet = {
       id: editor.id ?? `snippet_${Date.now()}`,
       name,
@@ -105,6 +116,7 @@ export function SnippetManager({ onClose }: SnippetManagerProps) {
       group: editor.group.trim() || undefined,
       triggerMode: editor.triggerMode,
       expansionMode: 'text',
+      keyboardShortcuts: keyboardShortcuts.length ? keyboardShortcuts : undefined,
       builtIn: existing?.builtIn,
       createdAt: existing?.createdAt ?? Date.now(),
     };
@@ -210,6 +222,17 @@ export function SnippetManager({ onClose }: SnippetManagerProps) {
               <option value="anywhere">Anywhere in input</option>
             </select>
           </div>
+          <div className="snippet-editor-row">
+            <input
+              type="text"
+              className="snippet-input"
+              placeholder="Keyboard shortcut (optional, e.g. Ctrl+Shift+F)"
+              value={editor.keyboardShortcuts}
+              onChange={(e) =>
+                setEditor({ ...editor, keyboardShortcuts: e.target.value })
+              }
+            />
+          </div>
           <div className="snippet-editor-actions">
             <button className="snippet-save-btn" onClick={save}>
               Save
@@ -283,6 +306,11 @@ function SnippetRow({ snippet, onEdit, onDelete }: SnippetRowProps) {
               ? 'whole input'
               : 'anywhere'}
           </span>
+          {(snippet.keyboardShortcuts ?? []).map((combination) => (
+            <span key={combination} className="snippet-mode">
+              {combination}
+            </span>
+          ))}
         </div>
         <div className="snippet-item-text">
           {snippet.text.substring(0, 60)}

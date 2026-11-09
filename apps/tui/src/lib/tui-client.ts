@@ -4,7 +4,6 @@ import type {
   AICapability,
   Message,
   AdapterConfig,
-  ServiceConfig,
   LocalSearchProvider,
   HardwareProfile,
   WebSearchRequest,
@@ -25,9 +24,9 @@ import type {
   AgentResult,
   Result,
 } from '@prism/shared-types';
-import { AdapterRouter } from '@prism/ai-adapters';
+import { LocalAdapter } from './local-adapter';
+import { resolveProviderKey } from './provider-env';
 import { coreChat, type CoreConnection } from './core-llm';
-import { providerEnvKey } from './provider-env';
 import { nanoid } from 'nanoid';
 
 export interface TUIClientConfig {
@@ -45,9 +44,8 @@ export interface TUIClientConfig {
 
 export class TUIClient {
   private aiConfig: AIConfig;
-  private adapterRouter: AdapterRouter;
+  private adapter: LocalAdapter;
   private adapterMode: AIMode;
-  private capabilityModes: Partial<Record<AICapability, AIMode>>;
   private localApiUrl?: string;
   private hardware?: HardwareProfile;
   private prismApiUrl?: string;
@@ -56,21 +54,10 @@ export class TUIClient {
   constructor(config: TUIClientConfig) {
     this.aiConfig = config.aiConfig;
     this.adapterMode = config.adapterMode;
-    this.capabilityModes = config.capabilityModes;
     this.localApiUrl = config.localApiUrl;
     this.hardware = config.hardware;
     this.prismApiUrl = config.prismApiUrl;
     this.prismApiKey = config.prismApiKey;
-
-    const serviceConfig: ServiceConfig = {
-      apiKey: resolveProviderKey(
-        (config.aiConfig.providerKeys ?? {})[config.aiConfig.provider],
-        config.aiConfig.provider,
-      ),
-      apiUrl: config.aiConfig.apiUrl,
-      model: config.aiConfig.model,
-      provider: config.aiConfig.provider,
-    };
 
     const adapterConfig: AdapterConfig = {
       mode: this.adapterMode,
@@ -83,13 +70,9 @@ export class TUIClient {
       hardware: config.hardware,
     };
 
-    this.adapterRouter = new AdapterRouter(serviceConfig, adapterConfig);
-
-    for (const [cap, mode] of Object.entries(this.capabilityModes)) {
-      if (mode) {
-        this.adapterRouter.setCapabilityMode(cap as AICapability, mode);
-      }
-    }
+    // LocalAdapter serves every capability directly; routing is a
+    // server concern, not a client one.
+    this.adapter = new LocalAdapter(adapterConfig);
   }
 
   async chat(messages: Message[]): Promise<Message> {
@@ -140,7 +123,7 @@ export class TUIClient {
     maxResults = 5,
   ): Promise<Result<WebSearchResult>> {
     const request: WebSearchRequest = { query, maxResults };
-    return this.adapterRouter.webSearch(request);
+    return this.adapter.webSearch(request);
   }
 
   async deepSearch(
@@ -154,7 +137,7 @@ export class TUIClient {
       maxExtractions: 8,
       onPhaseUpdate,
     };
-    return this.adapterRouter.deepSearch(request);
+    return this.adapter.deepSearch(request);
   }
 
   async council(
@@ -169,7 +152,7 @@ export class TUIClient {
       judgeProvider: this.aiConfig.provider,
       judgeModel: this.aiConfig.model,
     };
-    return this.adapterRouter.council(request);
+    return this.adapter.council(request);
   }
 
   async multiSend(
@@ -183,7 +166,7 @@ export class TUIClient {
       conversationHistory,
       systemPrompt: this.aiConfig.systemPrompt,
     };
-    return this.adapterRouter.multiSend(request);
+    return this.adapter.multiSend(request);
   }
 
   async debate(
@@ -205,18 +188,17 @@ export class TUIClient {
       systemPrompt: this.aiConfig.systemPrompt,
       onTurnUpdate,
     };
-    return this.adapterRouter.debate(request);
+    return this.adapter.debate(request);
   }
 
   async agent(request: AgentRequest): Promise<Result<AgentResult>> {
-    return this.adapterRouter.agent(request);
+    return this.adapter.agent(request);
   }
 
   updateConfig(config: Partial<TUIClientConfig>) {
     if (config.aiConfig) this.aiConfig = config.aiConfig;
     if (config.adapterMode) this.adapterMode = config.adapterMode;
-    if (config.capabilityModes) this.capabilityModes = config.capabilityModes;
-    if (config.hardware) this.adapterRouter.updateHardware(config.hardware);
+    if (config.hardware) this.adapter.setHardware(config.hardware);
   }
 }
 

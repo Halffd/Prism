@@ -17,11 +17,11 @@
       "node"
     ],
     "paths": {
-      "@prism/llm-service": [
-        "libs/llm-service/src/index.ts"
-      ],
       "@prism/shared-types": [
         "libs/shared-types/src/index.ts"
+      ],
+      "@prism/ai-core": [
+        "libs/ai-core/src/index.ts"
       ]
     }
   },
@@ -30,7 +30,7 @@
   ],
   "references": [
     {
-      "path": "../llm-service/tsconfig.lib.json"
+      "path": "../ai-core/tsconfig.lib.json"
     },
     {
       "path": "../shared-types/tsconfig.lib.json"

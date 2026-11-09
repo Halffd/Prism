@@ -35,19 +35,37 @@ describe('Page hotkey engine', () => {
     document.body.innerHTML = '';
   });
 
+  /**
+   * Dispatches a keydown the way a browser does.
+   *
+   * A browser inserts the character into the field after the keydown
+   * handlers run, unless the handler called `preventDefault()`. The test
+   * mirrors that: it inserts the character only when the event was not
+   * prevented.
+   */
   const press = (
     key: string,
     init: KeyboardEventInit = {},
     target: HTMLElement = input,
   ) => {
-    target.dispatchEvent(
-      new KeyboardEvent('keydown', {
-        key,
-        bubbles: true,
-        cancelable: true,
-        ...init,
-      }),
-    );
+    const event = new KeyboardEvent('keydown', {
+      key,
+      bubbles: true,
+      cancelable: true,
+      ...init,
+    });
+
+    target.dispatchEvent(event);
+
+    if (!event.defaultPrevented && key.length === 1) {
+      const field = target as HTMLInputElement;
+      if (typeof field.selectionStart === 'number') {
+        const caret = field.selectionStart;
+        field.value =
+          field.value.slice(0, caret) + key + field.value.slice(caret);
+        field.setSelectionRange(caret + 1, caret + 1);
+      }
+    }
   };
 
   /**
@@ -96,7 +114,8 @@ describe('Page hotkey engine', () => {
       await settle();
     }
 
-    expect(input.value).toBe('');
+    // The text is left alone because it is not a trigger.
+    expect(input.value).toBe('hello');
 
     engine.stop();
   });
@@ -195,6 +214,58 @@ describe('Page hotkey engine', () => {
     await settle();
 
     expect(inserted).toEqual(['Prompt content']);
+
+    engine.stop();
+  });
+
+  test('expands a snippet through its own keyboard binding', async () => {
+    const expanded: Snippet[] = [];
+    const engine = createHotkeyEngine({
+      getSnippets: () => [snippet({ keyboardShortcuts: ['Ctrl+Shift+G'] })],
+      getHotkeys: () => [],
+      onSnippetExpanded: (s) => expanded.push(s),
+    });
+    engine.start();
+
+    press('g', { ctrlKey: true, shiftKey: true });
+    await settle();
+
+    expect(input.value).toBe('Fixed text');
+    expect(expanded).toHaveLength(1);
+
+    engine.stop();
+  });
+
+  test('appends a shortcut-expanded snippet at the caret', async () => {
+    const engine = createHotkeyEngine({
+      getSnippets: () => [snippet({ keyboardShortcuts: ['Ctrl+Shift+G'] })],
+      getHotkeys: () => [],
+    });
+    engine.start();
+
+    input.value = 'before ';
+    input.setSelectionRange(input.value.length, input.value.length);
+
+    press('g', { ctrlKey: true, shiftKey: true });
+    await settle();
+
+    expect(input.value).toBe('before Fixed text');
+
+    engine.stop();
+  });
+
+  test('does not expand a snippet when its binding modifier is missing', async () => {
+    const engine = createHotkeyEngine({
+      getSnippets: () => [snippet({ keyboardShortcuts: ['Ctrl+Shift+G'] })],
+      getHotkeys: () => [],
+    });
+    engine.start();
+
+    press('g', { ctrlKey: true });
+    await settle();
+
+    // The character was typed normally, because the binding did not match.
+    expect(input.value).toBe('g');
 
     engine.stop();
   });

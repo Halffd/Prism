@@ -563,7 +563,7 @@ impl App {
                 if arg.is_empty() {
                     self.push_message(
                         "system",
-                        "usage: /agent <task> — run the core agent loop (calculator + file tools; writes are denied headless)",
+                        "usage: /agent <task> — run the core agent loop (calculator + file tools; writes are denied headless). Set PRISM_AGENT_SANDBOX_POLICY (JSON or policy file) to add the sandboxed shell tool",
                     );
                 } else if self.agent_running {
                     self.push_message("system", "agent already running");

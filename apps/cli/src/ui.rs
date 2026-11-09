@@ -13,6 +13,7 @@ use ratatui::Frame;
 
 pub const HELP_LINES: &[&str] = &[
     "Prism CLI — commands: /help /new /load N /del N /model X /provider X /key X /system X /think /temp X /conn direct|api /search X /agent <task> /quit",
+    "agent shell: PRISM_AGENT_SANDBOX_POLICY (JSON or file) adds the sandboxed `shell` tool · prism sandbox preflight [--policy FILE] [--json] probes the host",
     "keys: Enter send · Esc stop/clear · Ctrl+F search (n/N navigate) · PgUp/PgDn scroll · Ctrl+T thinking · Alt+N new chat · Alt+P/K pick chat · Alt+O open · Ctrl+U clear input · Ctrl+W del word · Ctrl+C quit",
 ];
 

@@ -141,7 +141,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
             setSendPageContents(!sendPageContents);
             setPageContextMode(!pageContextMode);
           }}
-          title="Include page contents in your message (Ctrl+Shift+P or Shift+2)"
+          title="Include page contents in your message (Ctrl+Shift+G or Shift+2)"
         >
           📄
         </button>
@@ -262,7 +262,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
           {(sendPageContents || pageContextMode) && (
             <span
               className="send-option active"
-              title="Ctrl+Shift+P or Shift+2 to toggle"
+              title="Ctrl+Shift+G or Shift+2 to toggle"
             >
               📄
             </span>

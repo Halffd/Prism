@@ -124,6 +124,8 @@ class PrismDexie extends Dexie {
       worldInfoEntries: 'id, worldInfoId, insertionOrder, createdAt, updatedAt',
       customAgents: 'id',
       agentMemories: 'id, agentId, importance, createdAt, updatedAt',
+      snippets: 'id, group, createdAt',
+      hotkeys: 'id, mode',
     });
   }
 }

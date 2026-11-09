@@ -6,7 +6,7 @@ import {
   clearData,
   parseImport,
   downloadEnvelope,
-} from '../../chat/sync';
+} from '../chat/sync';
 import {
   getChatSessions,
   loadChatHistory,

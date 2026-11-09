@@ -40,6 +40,8 @@ pub mod sync;
 pub mod thinking;
 pub mod toolgate;
 pub mod transport;
+#[cfg(feature = "native-transport")]
+pub mod workspace;
 
 pub use client::{
     ApiChatRequest, ChatMessage, ModelsEvent, ModelsRequest, OllamaChatRequest, OllamaLine,

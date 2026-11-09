@@ -1,46 +1,159 @@
 {
   "extends": "../../tsconfig.base.json",
-  "files": [],
-  "include": [],
+  "compilerOptions": {
+    "baseUrl": "../..",
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo",
+    "noEmit": false,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "paths": {
+      "@prism/redux-store": [
+        "libs/redux-store/src/index.ts"
+      ],
+      "@prism/api-client": [
+        "libs/api-client/src/index.ts"
+      ],
+      "@prism/shared-db": [
+        "libs/shared-db/src/index.ts"
+      ],
+      "@prism/shared-types": [
+        "libs/shared-types/src/index.ts"
+      ],
+      "@prism/image-gen": [
+        "libs/image-gen/src/index.ts"
+      ],
+      "@prism/ai-core": [
+        "libs/ai-core/src/index.ts"
+      ],
+      "@prism/firebase-auth": [
+        "libs/firebase-auth/src/index.ts"
+      ],
+      "@prism/supabase-client": [
+        "libs/supabase-client/src/index.ts"
+      ],
+      "@prism/ocr": [
+        "libs/ocr/src/index.ts"
+      ],
+      "@prism/stt": [
+        "libs/stt/src/index.ts"
+      ],
+      "@prism/tts": [
+        "libs/tts/src/index.ts"
+      ],
+      "@prism/inpaint": [
+        "libs/inpaint/src/index.ts"
+      ],
+      "@prism/model-gen": [
+        "libs/model-gen/src/index.ts"
+      ],
+      "@prism/audio-gen": [
+        "libs/audio-gen/src/index.ts"
+      ],
+      "@prism/ai-factory": [
+        "libs/ai-factory/src/index.ts"
+      ],
+      "@prism/ai-builder": [
+        "libs/ai-builder/src/index.ts"
+      ],
+      "@prism/video-gen": [
+        "libs/video-gen/src/index.ts"
+      ],
+      "@prism/llm": [
+        "libs/llm/src/index.ts"
+      ],
+      "@prism/agent": [
+        "libs/agent/src/index.ts"
+      ],
+      "@prism/context-manager": [
+        "libs/context-manager/src/index.ts"
+      ],
+      "@prism/ui-components": [
+        "libs/ui-components/src/index.ts"
+      ],
+      "@prism/web-search": [
+        "libs/web-search/src/index.ts"
+      ],
+      "@prism/logging": [
+        "libs/logging/src/index.ts"
+      ],
+      "@prism/rag": [
+        "libs/rag/src/index.ts"
+      ],
+      "@prism/deepsearch": [
+        "libs/deepsearch/src/index.ts"
+      ],
+      "@prism/council": [
+        "libs/council/src/index.ts"
+      ]
+    },
+    "emitDeclarationOnly": true
+  },
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "**/*.spec.ts"
+  ],
   "references": [
     {
-      "path": "../deepsearch"
+      "path": "../ai-core/tsconfig.lib.json"
     },
     {
-      "path": "../web-search"
+      "path": "../shared-types/tsconfig.lib.json"
     },
     {
-      "path": "../audio-gen"
+      "path": "../ai-factory/tsconfig.lib.json"
     },
     {
-      "path": "../model-gen"
+      "path": "../agent/tsconfig.lib.json"
     },
     {
-      "path": "../inpaint"
+      "path": "../llm/tsconfig.lib.json"
     },
     {
-      "path": "../tts"
+      "path": "../web-search/tsconfig.lib.json"
     },
     {
-      "path": "../stt"
+      "path": "../deepsearch/tsconfig.lib.json"
     },
     {
-      "path": "../ocr"
+      "path": "../council/tsconfig.lib.json"
     },
     {
-      "path": "../ai-factory"
+      "path": "../ocr/tsconfig.lib.json"
     },
     {
-      "path": "../llm-service"
+      "path": "../stt/tsconfig.lib.json"
     },
     {
-      "path": "../shared-types"
+      "path": "../tts/tsconfig.lib.json"
     },
     {
-      "path": "./tsconfig.lib.json"
+      "path": "../inpaint/tsconfig.lib.json"
     },
     {
-      "path": "./tsconfig.spec.json"
+      "path": "../model-gen/tsconfig.lib.json"
+    },
+    {
+      "path": "../audio-gen/tsconfig.lib.json"
+    },
+    {
+      "path": "../video-gen/tsconfig.lib.json"
+    },
+    {
+      "path": "../image-gen/tsconfig.lib.json"
+    },
+    {
+      "path": "../logging/tsconfig.lib.json"
+    },
+    {
+      "path": "../context-manager/tsconfig.lib.json"
+    },
+    {
+      "path": "../supabase-client/tsconfig.lib.json"
     }
   ]
 }

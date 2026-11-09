@@ -45,6 +45,38 @@ const CHAT_POPUP_CONTAINER_ID = 'prism-chat-popup-container';
 /** The id of the chat iframe inside the shadow root. */
 const CHAT_IFRAME_ID = 'prism-chat-iframe';
 
+/**
+ * The characters typed so far towards Prism's `/prompt` sequence.
+ *
+ * The sequence is Prism's own feature and takes priority over snippet
+ * triggers, so the hotkey engine consults this buffer and stays out of the
+ * way while a sequence is in progress.
+ */
+let promptSequenceBuffer = '';
+
+/** The characters typed so far towards the page-wide `prompt` sequence. */
+let globalSequenceBuffer = '';
+
+/** The sequence typed inside an input to open the chat iframe. */
+const PROMPT_SEQUENCE = '/prompt';
+
+/** The sequence typed anywhere on the page to open the chat iframe. */
+const GLOBAL_PROMPT_SEQUENCE = 'prompt';
+
+/**
+ * True when Prism's own sequence handling has claimed the keystrokes typed
+ * so far.
+ *
+ * Only a genuine partial match counts: the buffer has to be a prefix of one
+ * of the sequences, so ordinary typing never blocks the snippet engine.
+ */
+function isSequenceInProgress(): boolean {
+  return (
+    promptSequenceBuffer.length > 0 ||
+    PROMPT_SEQUENCE.startsWith(globalSequenceBuffer)
+  );
+}
+
 // True when a same-origin descendant frame currently owns the focus. Used to
 // let the focused frame answer selection requests instead of the top frame.
 function hasFocusedDescendantFrame(doc: Document): boolean {
@@ -1187,8 +1219,6 @@ async function refreshEngineData(): Promise<void> {
     enginePromptShortcuts = Array.isArray(promptShortcuts)
       ? (promptShortcuts as PromptShortcut[])
       : [];
-
-    await hotkeyEngine.refresh();
   } catch (error) {
     console.error('Failed to refresh snippet and hotkey data:', error);
   }
@@ -1217,7 +1247,7 @@ async function getModeState(mode: string): Promise<boolean> {
  */
 const hotkeyEngine = createHotkeyEngine({
   getSnippets: () => engineSnippets,
-  getHotkeys: () => engineHotkeys,
+  getHotkeys: () => engineHotkeys.filter((binding) => binding.enabled),
   getPromptShortcuts: async () => {
     // Prompt shortcuts are read fresh so a shortcut added in the popup works
     // immediately, without waiting for the next storage-change event.
@@ -1232,6 +1262,7 @@ const hotkeyEngine = createHotkeyEngine({
     }
   },
   getModeState,
+  isClaimedByOtherFeature: isSequenceInProgress,
   onPromptShortcut: (content) => {
     void Promise.resolve(
       chrome.runtime.sendMessage({ type: 'INSERT_PROMPT_SHORTCUT', content }),
@@ -1266,7 +1297,9 @@ hotkeyEngine.start();
 void refreshEngineData();
 
 // Keep the engine in step with edits made in the popup or settings.
-chrome.storage.onChanged.addListener((changes, areaName) => {
+// The listener is optional: not every environment that loads the content
+// script exposes storage change notifications.
+chrome.storage.onChanged?.addListener((changes, areaName) => {
   if (areaName !== 'local') {
     return;
   }
@@ -1492,8 +1525,7 @@ function setupHotkeyListener() {
   ); // Use capture phase to intercept keys before the website
 
   // Listen for prompt sequence shortcuts in capture phase
-  let inputBuffer = '';
-  const PROMPT_SHORTCUT = '/prompt'; // The sequence to trigger
+  const PROMPT_SHORTCUT = PROMPT_SEQUENCE;
   const PARTIAL_TRIGGER = '/p'; // Start blocking propagation at this point
   void PARTIAL_TRIGGER;
 
@@ -1514,31 +1546,30 @@ function setupHotkeyListener() {
       const char = event.key;
 
       // 1. Check for Partial Match to block Search Bar interference
-      const potentialBuffer = inputBuffer + char;
+      const potentialBuffer = promptSequenceBuffer + char;
 
       if (PROMPT_SHORTCUT.startsWith(potentialBuffer)) {
         // This stops YouTube/X from seeing the key and triggering their own shortcuts
         event.stopPropagation();
-        inputBuffer = potentialBuffer;
+        promptSequenceBuffer = potentialBuffer;
 
         // 2. Check for Full Match
-        if (inputBuffer === PROMPT_SHORTCUT) {
+        if (promptSequenceBuffer === PROMPT_SHORTCUT) {
           event.preventDefault(); // Stop the last character from being typed
 
           deleteTypedSequence(target, PROMPT_SHORTCUT.length - 1); // Delete the prefix
           launchIframe();
-          inputBuffer = ''; // Reset
+          promptSequenceBuffer = ''; // Reset
         }
       } else {
-        inputBuffer = ''; // Reset if user types something else
+        promptSequenceBuffer = ''; // Reset if user types something else
       }
     },
     true,
   ); // The 'true' here is CRITICAL: it enables the Capture Phase
 
   // Global sequence detection for anywhere on the page
-  let keyBuffer = '';
-  const GLOBAL_SHORTCUT = 'prompt'; // No slash needed if you want it purely global
+  const GLOBAL_SHORTCUT = GLOBAL_PROMPT_SEQUENCE; // No slash needed if you want it purely global
   const MAX_BUFFER_LENGTH = 20;
 
   document.addEventListener(
@@ -1549,31 +1580,36 @@ function setupHotkeyListener() {
 
       // 2. Handle Backspace (optional: allows users to correct typos in the sequence)
       if (event.key === 'Backspace') {
-        keyBuffer = keyBuffer.slice(0, -1);
+        globalSequenceBuffer = globalSequenceBuffer.slice(0, -1);
         return;
       }
 
-      keyBuffer += event.key.toLowerCase();
+      globalSequenceBuffer += event.key.toLowerCase();
 
       // 3. Keep buffer lean
-      if (keyBuffer.length > MAX_BUFFER_LENGTH) {
-        keyBuffer = keyBuffer.substring(keyBuffer.length - MAX_BUFFER_LENGTH);
+      if (globalSequenceBuffer.length > MAX_BUFFER_LENGTH) {
+        globalSequenceBuffer = globalSequenceBuffer.substring(
+          globalSequenceBuffer.length - MAX_BUFFER_LENGTH,
+        );
       }
 
       // 4. Check for Partial Match to block site hotkeys
       // If the user starts typing "pro...", we stop the site from reacting.
-      if (GLOBAL_SHORTCUT.startsWith(keyBuffer) && keyBuffer.length > 0) {
+      if (
+        GLOBAL_SHORTCUT.startsWith(globalSequenceBuffer) &&
+        globalSequenceBuffer.length > 0
+      ) {
         event.stopPropagation();
 
         // 5. Check for Full Match
-        if (keyBuffer === GLOBAL_SHORTCUT) {
+        if (globalSequenceBuffer === GLOBAL_SHORTCUT) {
           event.preventDefault();
           launchIframe();
-          keyBuffer = ''; // Reset
+          globalSequenceBuffer = ''; // Reset
         }
       } else {
         // If the sequence is broken (e.g., they typed "prx"), reset
-        keyBuffer = event.key.toLowerCase();
+        globalSequenceBuffer = event.key.toLowerCase();
       }
     },
     true,

@@ -39,14 +39,11 @@
       "@prism/redux-store": [
         "../../libs/redux-store/src/index.ts"
       ],
-      "@prism/llm-service": [
-        "../../libs/llm-service/src/index.ts"
-      ],
-      "@prism/ai-adapters": [
-        "../../libs/ai-adapters/src/index.ts"
-      ],
       "@prism/llm": [
         "../../libs/llm/src/index.ts"
+      ],
+      "@prism/ai-core": [
+        "../../libs/ai-core/src/index.ts"
       ]
     },
     "types": [

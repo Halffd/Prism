@@ -9,10 +9,17 @@
  * 2. Runs hotkey bindings — `Ctrl+Shift+T` and friends — anywhere on the
  *    page, not just inside the extension popup.
  *
- * The engine deliberately mirrors Blaze's approach: listeners are attached
- * in the capture phase so the extension sees the keystroke before the page
- * does, and a partially-typed trigger suppresses the page's own handling so
+ * The engine mirrors Blaze's approach: listeners are attached in the
+ * capture phase so the extension sees the keystroke before the page does,
+ * and a partially-typed trigger suppresses the page's own handling so
  * sites like YouTube or Gmail do not react to the same characters.
+ *
+ * Matching works on the field's actual content rather than on an
+ * accumulated keystroke buffer. A keydown handler runs before the browser
+ * inserts the character, so the content a trigger is matched against is
+ * the field's current content with the new character inserted at the
+ * caret. This is what makes a trigger expand when it is typed in the
+ * middle of a sentence, and not just at the start of a field.
  */
 
 import {
@@ -44,6 +51,14 @@ export interface HotkeyEngineOptions {
   onSnippetExpanded?: (snippet: Snippet) => void;
   /** Called when a prompt shortcut's keyboard binding fires. */
   onPromptShortcut?: (content: string) => void;
+  /**
+   * True when another feature has already claimed the keystroke — for
+   * example Prism's own `/prompt` sequence.
+   *
+   * The engine then leaves the keystroke alone, so the two features do not
+   * fight over the same characters.
+   */
+  isClaimedByOtherFeature?: () => boolean;
   /** Returns the snippets currently known to the engine. */
   getSnippets: () => Snippet[];
   /** Returns the hotkey bindings currently known to the engine. */
@@ -72,12 +87,7 @@ interface HotkeyEngine {
   start(): void;
   /** Detaches the engine's listeners. */
   stop(): void;
-  /** Re-reads the snippets and hotkeys the engine works from. */
-  refresh(): Promise<void>;
 }
-
-/** How long a partially-typed trigger is remembered, in milliseconds. */
-const PARTIAL_TRIGGER_TIMEOUT = 5000;
 
 /**
  * Creates the page-level hotkey and snippet engine.
@@ -85,31 +95,6 @@ const PARTIAL_TRIGGER_TIMEOUT = 5000;
 export function createHotkeyEngine(
   options: HotkeyEngineOptions,
 ): HotkeyEngine {
-  let snippets: Snippet[] = [];
-  let hotkeys: HotkeyBinding[] = [];
-
-  /**
-   * The trigger the user is part-way through typing. A trigger is only
-   * committed when it matches a snippet, so ordinary typing never builds
-   * state.
-   */
-  let partialTrigger = '';
-  let partialTriggerTimer: ReturnType<typeof setTimeout> | undefined;
-
-  const clearPartialTrigger = () => {
-    partialTrigger = '';
-    clearTimeout(partialTriggerTimer);
-    partialTriggerTimer = undefined;
-  };
-
-  const armPartialTimer = () => {
-    clearTimeout(partialTriggerTimer);
-    partialTriggerTimer = setTimeout(
-      clearPartialTrigger,
-      PARTIAL_TRIGGER_TIMEOUT,
-    );
-  };
-
   /** Reads the current text of an editable element. */
   const readText = (element: HTMLElement): string => {
     if (isInputElement(element) || isTextAreaElement(element)) {
@@ -118,100 +103,55 @@ export function createHotkeyEngine(
     return element.textContent ?? '';
   };
 
+  /** True for the controls whose value and caret can be set directly. */
+  const isPlainTextControl = (
+    element: HTMLElement,
+  ): element is HTMLInputElement | HTMLTextAreaElement =>
+    isInputElement(element) || isTextAreaElement(element);
+
   /**
-   * Replaces the trigger text with the snippet payload.
+   * Returns the field content as it will be once the given character has
+   * been inserted at the caret.
    *
-   * The shared insertion helper inserts at the caret, so the trigger text is
-   * selected and replaced rather than overwritten wholesale. That keeps the
-   * surrounding content — and the caret position — intact, and works the
-   * same way in plain inputs, textareas and rich editors.
+   * A keydown handler runs before the browser inserts the character, so the
+   * trigger has to be matched against the content the field is about to
+   * hold — otherwise the last character of a trigger is never seen.
    */
-  const expandSnippet = async (
-    editable: HTMLElement,
-    snippet: Snippet,
-  ): Promise<boolean> => {
-    const triggerMode = snippet.triggerMode ?? 'standalone';
-    const replacement =
-      snippet.expansionMode === 'html' && snippet.html
-        ? snippet.html
-        : snippet.text;
+  const withCharacterAtCaret = (
+    element: HTMLElement,
+    character: string,
+  ): string => {
+    const current = readText(element);
 
-    const current = readText(editable);
-
-    // The text that has to disappear: the whole field for a standalone
-    // trigger, just the trigger itself for an `anywhere` trigger.
-    const toRemove =
-      triggerMode === 'standalone'
-        ? current
-        : (() => {
-            const index = current.indexOf(snippet.shortcut);
-            return index === -1 ? '' : snippet.shortcut;
-          })();
-
-    if (!toRemove) {
-      return false;
+    if (isPlainTextControl(element)) {
+      const caret = element.selectionStart ?? current.length;
+      return current.slice(0, caret) + character + current.slice(caret);
     }
 
-    // Select the trigger text so the insertion replaces exactly it.
-    const removed = await replaceText(editable, toRemove, '');
-    if (!removed) {
-      return false;
-    }
-
-    const inserted = await insertTextIntoEditable(editable, replacement, {
-      html:
-        snippet.expansionMode === 'html' && snippet.html
-          ? snippet.html
-          : undefined,
-    });
-
-    return inserted.ok;
+    // For rich editors the caret offset within the text is not tracked
+    // here, so the character is appended. The browser inserts it at the
+    // caret afterwards, and the trigger is matched against the resulting
+    // content.
+    return current + character;
   };
 
   /**
-   * Replaces the first occurrence of `searchText` in the editable with
-   * `replacementText`.
+   * True when the text ends part-way through a trigger.
    *
-   * Plain text controls are handled directly; rich editors go through the
-   * shared range-based replacement helper.
+   * The trigger may be preceded by other text — `/fix` typed in the middle
+   * of a sentence is still part-way through a trigger — so every suffix of
+   * the text is checked.
    */
-  const replaceText = async (
-    editable: HTMLElement,
-    searchText: string,
-    replacementText: string,
-  ): Promise<boolean> => {
-    if (isInputElement(editable) || isTextAreaElement(editable)) {
-      const value = editable.value;
-      const index = value.indexOf(searchText);
-      if (index === -1) {
-        return false;
+  const endsWithPartialTrigger = (
+    text: string,
+    snippets: readonly Snippet[],
+  ): boolean => {
+    for (let length = 1; length < text.length; length += 1) {
+      if (isPartialTrigger(text.slice(text.length - length), snippets)) {
+        return true;
       }
-
-      const next =
-        value.slice(0, index) +
-        replacementText +
-        value.slice(index + searchText.length);
-
-      try {
-        editable.value = next;
-      } catch {
-        return false;
-      }
-
-      const caret = index + replacementText.length;
-      if (isCursorManipulableInput(editable)) {
-        try {
-          editable.setSelectionRange(caret, caret);
-        } catch {
-          // Some controls reject setSelectionRange; the value is still set.
-        }
-      }
-
-      notifyInput(editable);
-      return true;
     }
-
-    return replaceRangeWithText(editable, searchText, replacementText);
+    return false;
   };
 
   /**
@@ -229,6 +169,135 @@ export function createHotkeyEngine(
   };
 
   /**
+   * Expands a snippet that was triggered by a keyboard binding.
+   *
+   * No trigger text was typed in this case, so nothing is removed from the
+   * field — the payload is appended at the caret.
+   */
+  const expandSnippetByShortcut = async (
+    editable: HTMLElement,
+    snippet: Snippet,
+  ): Promise<boolean> => {
+    const replacement =
+      snippet.expansionMode === 'html' && snippet.html
+        ? snippet.html
+        : snippet.text;
+
+    if (isPlainTextControl(editable)) {
+      const caret = editable.selectionStart ?? editable.value.length;
+      const desired =
+        editable.value.slice(0, caret) +
+        replacement +
+        editable.value.slice(caret);
+
+      try {
+        editable.value = desired;
+      } catch {
+        return false;
+      }
+
+      const nextCaret = Math.min(caret + replacement.length, editable.value.length);
+      if (isCursorManipulableInput(editable)) {
+        try {
+          editable.setSelectionRange(nextCaret, nextCaret);
+        } catch {
+          // Some controls reject setSelectionRange; the value is still set.
+        }
+      }
+
+      notifyInput(editable);
+      return true;
+    }
+
+    const inserted = await insertTextIntoEditable(editable, replacement, {
+      html:
+        snippet.expansionMode === 'html' && snippet.html
+          ? snippet.html
+          : undefined,
+    });
+
+    return inserted.ok;
+  };
+
+  /**
+   * Replaces the trigger text with the snippet payload.
+   *
+   * `candidate` is the field content as it will be once the triggering
+   * keystroke has landed. Because the engine consumed that keystroke, the
+   * field itself still holds the content from before it — so the trigger
+   * is removed from the candidate and the result is written back.
+   */
+  const expandSnippet = async (
+    editable: HTMLElement,
+    snippet: Snippet,
+    candidate: string,
+  ): Promise<boolean> => {
+    const triggerMode = snippet.triggerMode ?? 'standalone';
+    const replacement =
+      snippet.expansionMode === 'html' && snippet.html
+        ? snippet.html
+        : snippet.text;
+
+    if (isPlainTextControl(editable)) {
+      let desired: string;
+
+      if (triggerMode === 'standalone') {
+        // The whole field is the trigger, so the field becomes the payload.
+        desired = replacement;
+      } else {
+        const index = candidate.lastIndexOf(snippet.shortcut);
+        if (index === -1) {
+          return false;
+        }
+        desired =
+          candidate.slice(0, index) +
+          replacement +
+          candidate.slice(index + snippet.shortcut.length);
+      }
+
+      try {
+        editable.value = desired;
+      } catch {
+        return false;
+      }
+
+      const caret = Math.min(desired.length, editable.value.length);
+      if (isCursorManipulableInput(editable)) {
+        try {
+          editable.setSelectionRange(caret, caret);
+        } catch {
+          // Some controls reject setSelectionRange; the value is still set.
+        }
+      }
+
+      notifyInput(editable);
+      return true;
+    }
+
+    // Rich editors keep their own markup, so the trigger is removed from
+    // the DOM and the payload inserted in its place. The keystroke that
+    // completed the trigger was consumed, so the field still holds the
+    // trigger minus its final character.
+    const typedSoFar = snippet.shortcut.slice(0, -1);
+    const removed = typedSoFar
+      ? replaceRangeWithText(editable, typedSoFar, '')
+      : replaceRangeWithText(editable, snippet.shortcut, '');
+
+    if (!removed) {
+      return false;
+    }
+
+    const inserted = await insertTextIntoEditable(editable, replacement, {
+      html:
+        snippet.expansionMode === 'html' && snippet.html
+          ? snippet.html
+          : undefined,
+    });
+
+    return inserted.ok;
+  };
+
+  /**
    * Handles a keystroke inside an editable.
    *
    * Returns true when the engine consumed the keystroke, in which case the
@@ -238,16 +307,14 @@ export function createHotkeyEngine(
     event: KeyboardEvent,
     target: HTMLElement,
   ): Promise<boolean> => {
-    // Modifier-only keys and non-printable keys do not contribute to a
-    // trigger.
-    if (event.key.length !== 1 && event.key !== 'Backspace') {
-      return false;
-    }
-
-    // A hotkey takes precedence over snippet expansion.
-    const binding = hotkeys.find((candidate) =>
-      combinationMatchesEvent(candidate.combination, event),
-    );
+    // A hotkey takes precedence over snippet expansion. Hotkeys are matched
+    // before the printable-key guard below, because a binding such as
+    // `Ctrl+Shift+F` does not produce a single-character key.
+    const binding = options
+      .getHotkeys()
+      .find((candidate) =>
+        combinationMatchesEvent(candidate.combination, event),
+      );
     if (binding) {
       event.preventDefault();
       event.stopPropagation();
@@ -255,21 +322,53 @@ export function createHotkeyEngine(
       return true;
     }
 
-    if (event.key === 'Backspace') {
-      partialTrigger = partialTrigger.slice(0, -1);
+    const editable = findEditableHost(target);
+    const snippets = options.getSnippets();
+
+    // Another feature — Prism's own `/prompt` sequence — may already own
+    // this keystroke. In that case the engine stays out of the way.
+    if (options.isClaimedByOtherFeature?.()) {
       return false;
     }
 
-    const typed = partialTrigger + event.key;
-
-    const match = matchSnippet(typed, snippets);
-    if (match) {
+    // A snippet can carry its own keyboard binding, which expands it
+    // without the trigger ever being typed.
+    const boundSnippet = snippets.find((snippet) =>
+      (snippet.keyboardShortcuts ?? []).some((combination) =>
+        combinationMatchesEvent(combination, event),
+      ),
+    );
+    if (boundSnippet) {
       event.preventDefault();
       event.stopPropagation();
-      clearPartialTrigger();
 
-      const editable = findEditableHost(target);
-      const expanded = await expandSnippet(editable, match.snippet);
+      const expanded = await expandSnippetByShortcut(editable, boundSnippet);
+      if (expanded) {
+        options.onSnippetExpanded?.(boundSnippet);
+      }
+      return true;
+    }
+
+    // Modifier-only keys and non-printable keys do not contribute to a
+    // trigger.
+    if (event.key.length !== 1 && event.key !== 'Backspace') {
+      return false;
+    }
+
+    if (event.key === 'Backspace') {
+      return false;
+    }
+
+    const candidate = withCharacterAtCaret(editable, event.key);
+
+    const match = matchSnippet(candidate, snippets);
+    if (match) {
+      // The keystroke is consumed here, so the character is never inserted
+      // by the browser and the expansion owns the field's contents.
+      event.preventDefault();
+      event.stopPropagation();
+
+      const expanded = await expandSnippet(editable, match.snippet, candidate);
       if (expanded) {
         options.onSnippetExpanded?.(match.snippet);
       }
@@ -277,18 +376,12 @@ export function createHotkeyEngine(
     }
 
     // The user is part-way through a trigger. Stop the page from seeing the
-    // keystroke so sites with their own shortcuts do not react, and remember
-    // the partial text so the trigger can be completed.
-    if (isPartialTrigger(typed, snippets)) {
+    // keystroke so sites with their own shortcuts do not react.
+    if (endsWithPartialTrigger(candidate, snippets)) {
       event.stopPropagation();
-      partialTrigger = typed;
-      armPartialTimer();
       return true;
     }
 
-    if (partialTrigger) {
-      clearPartialTrigger();
-    }
     return false;
   };
 
@@ -334,9 +427,11 @@ export function createHotkeyEngine(
    * expand into.
    */
   const handleDocumentKey = async (event: KeyboardEvent) => {
-    const binding = hotkeys.find((candidate) =>
-      combinationMatchesEvent(candidate.combination, event),
-    );
+    const binding = options
+      .getHotkeys()
+      .find((candidate) =>
+        combinationMatchesEvent(candidate.combination, event),
+      );
     if (binding) {
       event.preventDefault();
       event.stopPropagation();
@@ -364,19 +459,12 @@ export function createHotkeyEngine(
     void handleDocumentKey(event);
   };
 
-  const refresh = async () => {
-    snippets = options.getSnippets();
-    hotkeys = options.getHotkeys();
-  };
-
   return {
     start() {
       document.addEventListener('keydown', onKeyDown, true);
     },
     stop() {
       document.removeEventListener('keydown', onKeyDown, true);
-      clearPartialTrigger();
     },
-    refresh,
   };
 }

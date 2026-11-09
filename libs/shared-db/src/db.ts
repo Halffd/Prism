@@ -1,4 +1,4 @@
-import { openDB, IDBPDatabase } from 'idb';
+import { openDB, unwrap, IDBPDatabase } from 'idb';
 import type {
   Message,
   CharacterCard,
@@ -46,6 +46,8 @@ const SETTINGS_STORE = 'settings';
 const SITE_FILTERS_STORE = 'siteFilters';
 const IMAGE_GEN_CONFIGS_STORE = 'imageGenConfigs';
 const AGENT_MEMORIES_STORE = 'agentMemories';
+const SNIPPETS_STORE = 'snippets';
+const HOTKEYS_STORE = 'hotkeys';
 
 let dbInstance: IDBPDatabase | null = null;
 
@@ -201,13 +203,41 @@ export async function getDatabase(): Promise<IDBPDatabase> {
         memoriesStore.createIndex('updatedAt', 'updatedAt', { unique: false });
       }
 
+      // Blaze-style snippets and the page-level hotkey bindings.
+      if (!db.objectStoreNames.contains(SNIPPETS_STORE)) {
+        const snippetsStore = db.createObjectStore(SNIPPETS_STORE, {
+          keyPath: 'id',
+        });
+        snippetsStore.createIndex('group', 'group', { unique: false });
+        snippetsStore.createIndex('createdAt', 'createdAt', { unique: false });
+      }
+
+      if (!db.objectStoreNames.contains(HOTKEYS_STORE)) {
+        const hotkeysStore = db.createObjectStore(HOTKEYS_STORE, {
+          keyPath: 'id',
+        });
+        hotkeysStore.createIndex('mode', 'mode', { unique: false });
+      }
+
       // V2 -> V3 migration: Add group chat fields to existing sessions.
       // The Dexie client numbers its versions in steps of ten, so its
       // version 3 is the native version 30.
+      //
+      // The cursor is driven through the native request's callbacks rather
+      // than `await`: awaiting between cursor steps lets the upgrade
+      // transaction auto-commit, which strands the rest of the migration.
+      // `idb` wraps the native request in a promise that has no `onsuccess`
+      // hook, so the raw request is unwrapped first.
       if (oldVersion < 30 && transaction) {
         const sessionsStore = transaction.objectStore(SESSIONS_STORE);
-        let cursor = await (sessionsStore as any).openCursor();
-        while (cursor) {
+        const request = unwrap(sessionsStore.openCursor());
+        request.onsuccess = (event: Event) => {
+          const cursor = (event.target as IDBRequest<
+            IDBCursorWithValue
+          >).result;
+          if (!cursor) {
+            return;
+          }
           const session = cursor.value;
           // Add new fields with defaults for existing sessions
           if (!session.characterIds) {
@@ -216,9 +246,11 @@ export async function getDatabase(): Promise<IDBPDatabase> {
           if (!session.groupChatMode) {
             session.groupChatMode = undefined; // single character mode by default
           }
-          await cursor.update(session);
-          cursor = await cursor.continue();
-        }
+          // The cursor may only advance once the update has landed,
+          // otherwise the write is lost.
+          const update = cursor.update(session);
+          update.onsuccess = () => cursor.continue();
+        };
       }
 
       // V4 -> V5 migration: bring the database up to the schema that both
@@ -769,6 +801,8 @@ export async function clearAllData(): Promise<void> {
       WORLD_INFO_STORE,
       WORLD_INFO_ENTRIES_STORE,
       CUSTOM_AGENTS_STORE,
+      SNIPPETS_STORE,
+      HOTKEYS_STORE,
     ],
     'readwrite',
   );
@@ -783,6 +817,8 @@ export async function clearAllData(): Promise<void> {
   await tx.objectStore(WORLD_INFO_STORE).clear();
   await tx.objectStore(WORLD_INFO_ENTRIES_STORE).clear();
   await tx.objectStore(CUSTOM_AGENTS_STORE).clear();
+  await tx.objectStore(SNIPPETS_STORE).clear();
+  await tx.objectStore(HOTKEYS_STORE).clear();
 
   await tx.done;
 }

@@ -1,7 +1,9 @@
 import { Router, Request, Response } from 'express';
-import { wasm } from '../../wasm-pkg/prism_wasm.js';
-
-const router = Router();
+// The wasm pkg is a CJS module with a single default export object.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const wasm = require('../../wasm-pkg/prism_wasm.js') as {
+  providers_json: () => string;
+};
 
 interface ProviderEntry {
   id: string;
@@ -12,75 +14,16 @@ interface ProviderEntry {
   env: string[];
 }
 
-interface ModelEntry {
-  id: string;
-  name: string;
-  reasoning: boolean;
-  tool_call: boolean;
-  attachment: boolean;
-  temperature: boolean;
-  limit_context: number | null;
-  limit_output: number | null;
-  cost_in: number | null;
-  cost_out: number | null;
-  modalities_in: string[];
-  status: string | null;
-  release_date: string | null;
-}
+const router = Router();
 
 function parseProvidersJson(): ProviderEntry[] {
-  const raw = wasm.providers_json();
-  return JSON.parse(raw) as ProviderEntry[];
+  // providers_json returns an array, not { providers: ... }.
+  return JSON.parse(wasm.providers_json()) as ProviderEntry[];
 }
 
-function parseModelsJson(providerId: string): ModelEntry[] {
-  const providers = parseProvidersJson();
-  const p = providers.find(p => p.id === providerId);
-  if (!p || !p.models) return [];
-  return Object.entries(p.models).map(([id, m]) => ({ id, ...m }));
-}
-
-/** GET /api/model — list all models for all providers, or filter by provider query. */
-router.get('/model', (req: Request, res: Response) => {
-  const providerId = req.query.provider as string | undefined;
-  const providers = parseProvidersJson();
-
-  let models: ModelEntry[] = [];
-  if (providerId) {
-    const p = providers.find(p => p.id === providerId);
-    if (!p) {
-      return res.status(404).json({ success: false, error: 'Provider not found' });
-    }
-    models = Object.entries(p.models).map(([id, m]) => ({ id, ...m }));
-  } else {
-    for (const p of providers) {
-      models.push(...Object.entries(p.models).map(([id, m]) => ({ id, provider: p.id, ...m })));
-    }
-  }
-  res.json({ success: true, models });
-});
-
-/** GET /api/model/default — returns the default model for a provider. */
-router.get('/model/default', (req: Request, res: Response) => {
-  const providerId = req.query.provider as string | undefined;
-  if (!providerId) {
-    return res.status(400).json({ success: false, error: 'provider query required' });
-  }
-  const providers = parseProvidersJson();
-  const p = providers.find(p => p.id === providerId);
-  if (!p) {
-    return res.status(404).json({ success: false, error: 'Provider not found' });
-  }
-  const defaultModel = p.default_model || (p.models ? Object.keys(p.models)[0] : '');
-  if (!defaultModel) {
-    return res.status(404).json({ success: false, error: 'No default model for provider' });
-  }
-  res.json({ success: true, provider: providerId, default_model: defaultModel });
-});
-
-/** GET /api/provider — list all providers. */
-router.get('/provider', (req: Request, res: Response) => {
-  const providers = parseProvidersJson().map(p => ({
+/** GET /api/provider — list every provider the core knows. */
+router.get('/provider', (_req: Request, res: Response) => {
+  const providers = parseProvidersJson().map((p) => ({
     id: p.id,
     label: p.label,
     base_url: p.base_url,
@@ -91,14 +34,13 @@ router.get('/provider', (req: Request, res: Response) => {
   res.json({ success: true, providers });
 });
 
-/** GET /api/provider/:id — single provider detail. */
+/** GET /api/provider/:id — one provider's detail. */
 router.get('/provider/:id', (req: Request, res: Response) => {
-  const providers = parseProvidersJson();
-  const p = providers.find(p => p.id === req.params.id);
+  const p = parseProvidersJson().find((x) => x.id === req.params.id);
   if (!p) {
     return res.status(404).json({ success: false, error: 'Provider not found' });
   }
-  res.json({
+  return res.json({
     success: true,
     provider: {
       id: p.id,
@@ -107,21 +49,57 @@ router.get('/provider/:id', (req: Request, res: Response) => {
       default_model: p.default_model,
       needs_key: p.needs_key,
       env: p.env,
-      models: Object.keys(p.models).map(id => {
-        const m = p.models[id];
-        return {
-          id,
-          name: m.name,
-          reasoning: m.reasoning,
-          tool_call: m.tool_call,
-          attachment: m.attachment,
-          limit_context: m.limit_context,
-          cost_in: m.cost_in,
-          cost_out: m.cost_out,
-          status: m.status,
-        };
-      }),
     },
+  });
+});
+
+/**
+ * GET /api/model — model ids the server can serve today: the provider
+ * defaults. The per-provider /models list requires a live provider key
+ * and lives on the client (which holds the key); this endpoint is the
+ * credential-free catalog.
+ */
+router.get('/model', (req: Request, res: Response) => {
+  const providerId = req.query.provider as string | undefined;
+  const providers = parseProvidersJson();
+  if (providerId) {
+    const p = providers.find((x) => x.id === providerId);
+    if (!p) {
+      return res.status(404).json({ success: false, error: 'Provider not found' });
+    }
+    return res.json({
+      success: true,
+      models: p.default_model ? [p.default_model] : [],
+      provider: p.id,
+    });
+  }
+  const models = providers
+    .filter((p) => p.default_model)
+    .map((p) => ({ id: p.default_model, provider: p.id }));
+  return res.json({ success: true, models });
+});
+
+/** GET /api/model/default — a provider's default model id. */
+router.get('/model/default', (req: Request, res: Response) => {
+  const providerId = req.query.provider as string | undefined;
+  if (!providerId) {
+    return res
+      .status(400)
+      .json({ success: false, error: 'provider query required' });
+  }
+  const p = parseProvidersJson().find((x) => x.id === providerId);
+  if (!p) {
+    return res.status(404).json({ success: false, error: 'Provider not found' });
+  }
+  if (!p.default_model) {
+    return res
+      .status(404)
+      .json({ success: false, error: 'No default model for provider' });
+  }
+  return res.json({
+    success: true,
+    provider: providerId,
+    default_model: p.default_model,
   });
 });
 

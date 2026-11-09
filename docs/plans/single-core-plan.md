@@ -99,9 +99,10 @@ doc-first-suite-later (the documented drift trap).
    panel with per-provider keys / fetch-models / sampling / system
    prompt / thinking / hardware cycles, Ollama native path, conversation
    autosave). Host glue hoisted to `prism-core::host`, shared with egui.
-   GUI runtime UNVERIFIED (headless box) — egui remains as the native
-   dev harness until parity is confirmed on a display; deletion
-   deferred to that point.
+   GUI runtime still UNVERIFIED (headless box), but egui is now
+   DELETED (2026-11-09) — the desktop + Android Slint app has full
+   feature parity and the CI workflow builds it, so the harness has no
+   remaining job; `apps/egui` removed from the workspace.
 3. ~~WASM target + bindings; conformance green on both targets.~~
    **DONE** — `crates/prism-wasm` (cdylib): JSON-string boundary,
    exported SSE/NDJSON decoders (Uint8Array in, event-JSON out),
@@ -160,6 +161,17 @@ doc-first-suite-later (the documented drift trap).
    Remaining non-core host surfaces (by design): search/capability
    orchestration, auto-model selection, vision paths, exotic model-list
    getters, transformers/claude/poe/cloudflare/cohere native adapters.
+   **CLOSED (2026-11-09)** — `libs/llm-service` and `libs/ai-adapters`
+   are DELETED. Replacement: `libs/ai-core` (wasm bindings only — body
+   builders, decoders, provider table, `streamSseText`); surfaces drive
+   their own HTTP. Ports: api-client owns its own core-driven chat path
+   (`coreChatCompletion`/`coreGetModels`); extension ChatPage uses
+   `selectAutoModel` from ai-core; TUI tui-client calls LocalAdapter
+   directly for the capability set (chat already used core-llm).
+   Dropped with the old packages: the TS per-provider switch
+   (claude/transformers/poe/cloudflare-workers/zai) and the
+   AdapterRouter's server/local mode routing — the core is
+   OpenAI-compatible-only by the "must compile for BOTH targets" rule.
 
 ### 7. "Fast" = streaming everywhere + measurable budgets
 

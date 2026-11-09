@@ -32,6 +32,12 @@ export struct PaletteRow {
     group: string,    // section label
 }
 
+export struct TreeRow {
+    rel: string,      // workspace-relative path (shown indented by depth)
+    isDir: bool,
+    depth: int,
+}
+
 export component AppWindow inherits Window {
     title: "Prism";
     preferred-width: 1150px;
@@ -108,6 +114,17 @@ export component AppWindow inherits Window {
     in property <string> media-result-url;
     in property <bool> media-busy: false;
     in property <bool> media-pending: false;
+    // ---- IDE (three surface modes, like Cursor's composer toggles) ----
+    // 0 = Chat, 1 = Agent (input drives the agent loop), 2 = IDE
+    // (workspace editor + the agent in a sidebar column).
+    in-out property <int> ui-mode: 0;
+    in property <string> composer-hint;
+    in property <string> workspace-path;
+    in property <string> ide-status;
+    in property <[TreeRow]> tree-rows;
+    in property <string> open-rel;
+    in-out property <string> editor-text;
+    in-out property <bool> editor-dirty: false;
 
     // ---- callbacks ----
     callback send(string);
@@ -152,6 +169,13 @@ export component AppWindow inherits Window {
     callback media-provider-selected(int);
     callback media-generate();
     callback media-poll();
+    // ---- IDE ----
+    callback mode-selected(int);       // Chat(0) / Agent(1) / IDE(2)
+    callback workspace-open(string);   // workspace root (from the palette query)
+    callback workspace-refresh();
+    callback tree-open(string);        // relative path of a tree row
+    callback editor-changed(string);
+    callback editor-save();
 
     changed connection-idx => { set-connection(self.connection-idx); }
     changed provider-idx => { set-provider(self.provider-idx); }
@@ -237,6 +261,37 @@ export component AppWindow inherits Window {
                     width: 180px;
                 }
                 Rectangle { horizontal-stretch: 1; }
+                // Surface modes, like Cursor's composer counts: Chat is
+                // the plain client, Agent routes the composer into the
+                // agent loop, IDE puts the workspace editor beside it.
+                Rectangle {
+                    width: 210px;
+                    HorizontalLayout {
+                        spacing: 2px;
+                        for m[i] in ["Chat", "Agent", "IDE"] : Rectangle {
+                            height: 26px;
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                Text {
+                                    text: m;
+                                    color: ui-mode == i ? #bfffdd : #8b95a1;
+                                    font-size: 12px;
+                                    font-weight: 700;
+                                    vertical-alignment: center;
+                                }
+                                TouchArea {
+                                    clicked => { mode-selected(i); }
+                                    mouse-cursor: pointer;
+                                }
+                            }
+                            background: ui-mode == i ? #1f3130 : transparent;
+                            border-width: 1px;
+                            border-color: ui-mode == i ? #2f6b4f : #232a31;
+                            radius: 4px;
+                        }
+                    }
+                }
                 if streaming : Text {
                     text: "…responding";
                     color: #f5d76e;
@@ -245,6 +300,101 @@ export component AppWindow inherits Window {
                 Button { checkable: true; checked <=> show-settings; text: "Settings"; }
             }
 
+            HorizontalLayout {
+                spacing: 8px;
+                // IDE pane — side-by-side with the agent column; hidden
+                // outside IDE mode by the mode condition.
+                if ui-mode == 2 : Rectangle {
+                    horizontal-stretch: 3;
+                    background: #141a20;
+                    border-width: 1px;
+                    border-color: #232a31;
+                    VerticalLayout {
+                        padding: 6px;
+                        spacing: 6px;
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Text {
+                                text: workspace-path == "" ? "No workspace — Win: open via palette (Ctrl+K) → Open workspace folder…" : workspace-path;
+                                color: #9fb0bd;
+                                font-size: 12px;
+                                overflow: elide;
+                                horizontal-stretch: 1;
+                                vertical-alignment: center;
+                            }
+                            Button {
+                                text: "Refresh";
+                                enabled: workspace-path != "";
+                                clicked => { workspace-refresh(); }
+                            }
+                            Button {
+                                text: "Save";
+                                enabled: editor-dirty && open-rel != "";
+                                clicked => { editor-save(); }
+                            }
+                            Text {
+                                text: ide-status;
+                                color: #8b95a1;
+                                font-size: 11px;
+                                width: 200px;
+                                overflow: elide;
+                                vertical-alignment: center;
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            VerticalLayout {
+                                width: 240px;
+                                spacing: 4px;
+                                Text { text: "Files"; color: #8b95a1; font-size: 11px; }
+                                ListView {
+                                    for t in tree-rows : Rectangle {
+                                        height: 24px;
+                                        HorizontalLayout {
+                                            padding-left: 8px + t.depth * 14px;
+                                            spacing: 4px;
+                                            TouchArea {
+                                                clicked => { tree-open(t.rel); }
+                                                mouse-cursor: pointer;
+                                            }
+                                            Text {
+                                                text: t.isDir ? t.rel + "/" : t.rel;
+                                                color: t.isDir ? #82aaff : #cfd8dc;
+                                                font-size: 12px;
+                                                vertical-alignment: center;
+                                                overflow: elide;
+                                                horizontal-stretch: 1;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 4px;
+                                Text {
+                                    text: open-rel == "" ? "No file open" : open-rel;
+                                    color: #cfd8dc;
+                                    font-size: 12px;
+                                    overflow: elide;
+                                }
+                                TextEdit {
+                                    horizontal-stretch: 1;
+                                    text <=> editor-text;
+                                    enabled: open-rel != "";
+                                    edited(t) => { editor-changed(t); }
+                                }
+                            }
+                        }
+                    }
+                }
+                // Agent / chat column: the transcript plus composer. In
+                // Chat mode it is the whole surface; in Agent mode the
+                // composer routes into the agent loop; in IDE mode it
+                // becomes Cursor-style agent sidebar beside the editor.
+                VerticalLayout {
+                    horizontal-stretch: 2;
+                    spacing: 4px;
             if transcript.length == 0 : Text {
                 text: "Pick a provider in Settings, then say hello.";
                 color: #66707a;
@@ -346,7 +496,7 @@ export component AppWindow inherits Window {
                     VerticalLayout {
                         LineEdit {
                             text <=> input-text;
-                            placeholder-text: "Type a message… (Enter to send, ↑/↓ history)";
+                            placeholder-text: composer-hint;
                             enabled: !streaming;
                             accepted(t) => {
                                 send(t);
@@ -356,7 +506,9 @@ export component AppWindow inherits Window {
                     }
                 }
             }
+                }
         }
+            }
 
         // ---- settings panel ----
         if show-settings : Rectangle {

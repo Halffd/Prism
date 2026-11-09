@@ -242,7 +242,6 @@ use std::rc::Rc;
 pub struct JsTool {
     name: String,
     description: String,
-    #[wasm_bindgen(skip_typescript)]
     execute: js_sys::Function,
 }
 

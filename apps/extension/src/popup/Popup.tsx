@@ -1056,7 +1056,10 @@ export function Popup() {
         if (e.key.toLowerCase() === 't') {
           e.preventDefault();
           setSendSelectedText((prev) => !prev);
-        } else if (e.key.toLowerCase() === 'p') {
+        } else if (e.key.toLowerCase() === 'g') {
+          // The browser reserves `Ctrl+Shift+P` for the extension's own
+          // "open the popup" command, so the page-context toggle uses
+          // `Ctrl+Shift+G` — the same combo the page-level hotkey uses.
           e.preventDefault();
           setSendPageContents((prev) => !prev);
         } else if (e.key.toLowerCase() === 's') {
@@ -1299,7 +1302,7 @@ export function Popup() {
           responseFormat: 'mp3',
         });
         if (result.success && result.data) {
-          const url = URL.createObjectURL(result.data);
+          const url = URL.createObjectURL(result.data.audio);
           const audio = new Audio(url);
           audioRef.current = audio;
           setSpeaking(msg.id);
