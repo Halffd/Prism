@@ -1,10 +1,11 @@
 /**
- * The agent console — the agentd insights as the extension sees them.
+ * The agent console — the core's agent answers as the extension sees
+ * them.
  *
- * Cursor's `agentd` keeps three contracts in front of its agent loop:
- * a sandbox policy that fails closed, a tool-call gate (clamp, repair,
- * classify) and a subagent registry with a forced-model order. The core
- * owns all three; this module is the extension's view of them.
+ * Three contracts sit in front of the agent loop: a sandbox policy
+ * that fails closed, a tool-call gate (clamp, repair, classify) and a
+ * subagent registry with a forced-model order. The core owns all
+ * three; this module is the extension's view of them.
  *
  * Nothing here decides policy: every answer comes from the core wasm
  * (`@prism/ai-core`), so the extension, the CLI, the desktop app and

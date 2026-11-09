@@ -4,7 +4,7 @@ import { createContextProcessor } from '../services/context.service';
 import { LLMCoreService } from '../services/llm-core.service';
 import { AuthenticatedRequest } from '../middleware/auth';
 
-// SSE backpressure queue (opencode pattern: dropping queue, cap 4096)
+// SSE backpressure queue (dropping-queue pattern, cap 4096)
 const MAX_QUEUE_SIZE = 4096;
 interface QueueEntry {
   data: string;
@@ -30,7 +30,8 @@ async function processQueue() {
 
 function enqueueWrite(res: Response, data: string): Promise<void> {
   if (eventQueue.length >= MAX_QUEUE_SIZE) {
-    // Drop oldest non-error entry (opencode behavior)
+    // Drop oldest non-error entry so new frames never stall behind an
+    // overflowing queue
     const idx = eventQueue.findIndex(e => !e.data.includes('"error"'));
     if (idx >= 0) eventQueue.splice(idx, 1);
     else eventQueue.shift();
@@ -44,7 +45,7 @@ function enqueueWrite(res: Response, data: string): Promise<void> {
   return new Promise((resolve, reject) => {
     eventQueue.push({ data, resolve, reject });
     processQueue();
-  }
+  });
 }
 
 // Initialize services
@@ -274,7 +275,8 @@ export const streamMessage = async (
       context,
     )) {
       full += delta;
-      res.write(
+      await enqueueWrite(
+        res,
         `data: ${JSON.stringify({ choices: [{ delta: { content: delta } }] })}\n\n`,
       );
     }
@@ -285,12 +287,13 @@ export const streamMessage = async (
       context,
     });
 
-    res.write('data: [DONE]\n\n');
+    await enqueueWrite(res, 'data: [DONE]\n\n');
     res.end();
     return;
   } catch (error: unknown) {
     console.error('Error in streamMessage:', error);
-    res.write(
+    await enqueueWrite(
+      res,
       `data: ${JSON.stringify({ error: 'Failed to stream response' })}\n\n`,
     );
     res.end();

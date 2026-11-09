@@ -26,6 +26,10 @@ extension has no business ingesting documents or running tool loops.
 | Auto model selection                         | partial | Auto button exists; refined per-task routing lives in TUI/desktop            |
 | Media capabilities (image/inpaint/video/3D) | done    | MediaPanel in Popup + standalone chat; per-capability provider + key in Settings (`media-capabilities.ts`) |
 | Multi-image (vision) chat input             | done    | Attached images ride the core vision wire format; OpenAI-compatible providers go through the core, Gemini/Claude keep their native payload |
+| Blaze-style snippets (trigger expansion)   | done    | `Snippet` model in shared-types; typed triggers expand in any editor on the page (standalone/anywhere modes); optional per-snippet keyboard binding; SnippetManager in the Popup; 10 built-in snippets |
+| Page-level hotkeys                         | done    | `hotkey-engine.ts` in the content script; `Ctrl+Shift+…` works anywhere on the page, not just in the popup; rebindable in Settings; page-context uses `Ctrl+Shift+G` because the browser reserves `Ctrl+Shift+P` for the extension's own popup command |
+| Emoji / shape picker                       | done    | Searchable palette (emoji + Unicode shapes) in the prompt input; inserts at the caret |
+| Closed shadow DOM for the in-page iframe    | done    | Matches Blaze: `mode: 'closed'` root, `all: initial` host reset, extension-owned id registry |
 
 **Not in the extension** (by design): tools/permissions, RAG, personalities,
 hardware modes, agent memories. See TUI.
@@ -71,7 +75,7 @@ hardware modes, agent memories. See TUI.
 | Custom providers (config-driven)       | done    | `Settings.custom_providers` — canonical alias (clone built-in defaults, override base URL) or bare OpenAI-compat endpoint; `resolve_provider` unifies built-in/alias/bare for base URL, needs-key, label, env; key precedence stored > custom env > canonical env; Slint add/remove UI + combined dropdown; 6 settings tests |
 | Queue/steer (send while streaming)     | done    | `State.prompt_queue` + `queue_processing`; send() queues when streaming; drain_events steers next on completion; Slint shows "Queued" toast; 1 core test |
 | API: /api/model / /api/provider        | done    | `apps/api/src/app/routes/model.provider.routes.ts` backed by wasm `providers_json`; GET /api/model, /model/default, /provider, /provider/:id |
-| SSE backpressure (4096 dropping queue) | done    | per-subscriber dropping queue (cap 4096) on /api/chat/stream; overflow sends error frame + drops oldest non-error; `enqueueWrite` + `processQueue`; opencode pattern |
+| SSE backpressure (4096 dropping queue) | done    | per-subscriber dropping queue (cap 4096) on /api/chat/stream; overflow sends error frame + drops oldest non-error; `enqueueWrite` + `processQueue` |
 | Media capabilities (core + Slint)     | done    | `prism_core::media`: image/inpaint/video/3D request bodies, response parsing (media URL + task id), async provider polling; `host::spawn_media`/`spawn_media_poll`; Slint media panel (capability + provider + prompt/image/mask/seed/duration/format) with ready/pending/failed states |
 | Multi-image (vision) chat request      | done    | `ChatMessage.images`; `stream_request_body` emits the OpenAI vision shape (text part + one `image_url` part per image, empty text part omitted); messages without images keep the plain string shape; `thinking::apply_thinking_to_messages` preserves the attachments |
 | Portable data sync (↔ extension)        | done    | One envelope both sides read/write: `SyncEnvelope{v1, conversations, prompts, settings}` in `libs/shared-types/src/lib/sync.ts` + `prism_core::sync`; host glue export/import/clear (`<config>/prism-data.json`); Slint settings "Data sync" panel + extension Settings section; roles/timestamps shared, messages carry both id/timestamp and thinking |

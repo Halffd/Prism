@@ -178,7 +178,7 @@ implementation in the monorepo.
 
 ## Env-var keys + prompt history (2026-10-31)
 
-Adopted from the opencode survey (features #1 of the ranked list):
+Adopted from the adjacent-implementation survey (feature #1 of the ranked list):
 
 - **Env-var API keys**: `providers::ProviderDef.env` lists each remote
   provider's env-var names (e.g. openai → `OPENAI_API_KEY`, gemini →
@@ -193,7 +193,7 @@ Adopted from the opencode survey (features #1 of the ranked list):
   next write). Host glue `host::record_prompt` / `load_prompt_history`.
   Slint: ↑/↓ cycles history, forward-past-newest restores the draft.
 
-## Model catalog (2026-10-31, opencode survey #2)
+## Model catalog (2026-10-31, review #2)
 
 - **Bundled snapshot**: `crates/prism-core/src/catalog_snapshot.json` —
   12 OpenAI-compatible providers mapped onto Prism ids (google→gemini,
@@ -210,11 +210,11 @@ Adopted from the opencode survey (features #1 of the ranked list):
   per-provider cache is empty (live /models fetch stays authoritative);
   empty-model-field hint shows "name · 128k ctx · tools/reasoning".
 - **Regen**: `python3 script/update-catalog.py` (stdlib-only fetcher).
-- Deferred from opencode's design: live refresh with TTL cache
+- Deferred from the surveyed design: live refresh with TTL cache
   (snapshot is regenerated manually for now — one command, no daemon);
   reasoning-effort variants; context-tiered pricing.
 
-## Command registry + Slint palette (2026-11-02, opencode survey #3)
+## Command registry + Slint palette (2026-11-02, review #3)
 
 - **Core registry**: `prism_core::commands` — static `COMMANDS` table
   (21 commands, 5 groups: Chat/Models/Settings/Hardware/View) of
@@ -236,7 +236,7 @@ Adopted from the opencode survey (features #1 of the ranked list):
   schema decision), keybinding remaps, fuzzy scoring (substring is
   enough at 21 entries).
 
-## Custom providers (2026-11-02, opencode survey #4)
+## Custom providers (2026-11-02, review #4)
 
 - **Schema**: `Settings.custom_providers: HashMap<String,
   ConfigProvider>` with `ConfigProvider { canonical, label, base_url,

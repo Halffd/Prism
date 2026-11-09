@@ -1,6 +1,6 @@
 //! Prompt input history: append-only JSONL, capped and deduped.
 //!
-//! Mirrors the TUI/editor pattern (opencode `prompt/history.tsx`): the
+//! The editor-history pattern: the
 //! last N sent prompts are persisted so every surface can offer up/down
 //! cycling. Storage is one JSONL file via the `Storage` trait — one
 //! prompt per line, newest last. Corruption recovery is line-level: a

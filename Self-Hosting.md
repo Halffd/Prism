@@ -305,4 +305,4 @@ docker compose up -d
 ## Support
 
 - [GitHub Issues](https://github.com/anomalyco/Prism/issues)
-- [Documentation](https://opencode.ai)
+- [Documentation](https://anomalyco.github.io/Prism)

@@ -1,5 +1,5 @@
 //! Model catalog: per-provider model metadata from a models.dev-style
-//! snapshot (opencode `models-dev.ts` pattern).
+//! snapshot.
 //!
 //! The snapshot is a bundled JSON file (12 OpenAI-compatible providers,
 //! ~650 models) with capability flags, context/output limits, pricing

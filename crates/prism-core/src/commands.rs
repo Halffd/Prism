@@ -1,7 +1,6 @@
 //! Command registry: one static table describing every user-invokable
 //! action, so any surface can build a command palette (Ctrl+K) or slash
-//! menu from it (opencode `KeymapCommand` pattern, reduced to what a
-//! chat client needs).
+//! menu from it (reduced to what a chat client needs).
 //!
 //! The registry describes; the surface dispatches. Commands carry an
 //! id + human text only — execution stays in the surface's callback
@@ -18,6 +17,7 @@ pub enum CommandGroup {
     Hardware,
     Agent,
     View,
+    Ide,
 }
 
 impl CommandGroup {
@@ -30,6 +30,7 @@ impl CommandGroup {
             CommandGroup::Hardware => "Hardware",
             CommandGroup::Agent => "Agent",
             CommandGroup::View => "View",
+            CommandGroup::Ide => "IDE",
         }
     }
 }
@@ -80,6 +81,14 @@ pub const COMMANDS: &[CommandDef] = &[
     // Agent
     CommandDef { id: "agent.run", title: "Run agent on the system prompt", group: CommandGroup::Agent, takes_arg: false, while_streaming: false },
     CommandDef { id: "agent.sandbox", title: "Agent sandbox preflight (probe host, plan policy)", group: CommandGroup::Agent, takes_arg: false, while_streaming: false },
+    // IDE — three session types: normal chat, agent chat,
+    // and the agent working from inside an editor surface.
+    CommandDef { id: "ide.mode.chat", title: "Mode: Chat", group: CommandGroup::Ide, takes_arg: false, while_streaming: false },
+    CommandDef { id: "ide.mode.agent", title: "Mode: Agent (input drives the agent loop)", group: CommandGroup::Ide, takes_arg: false, while_streaming: false },
+    CommandDef { id: "ide.mode.agent_sidebar", title: "Mode: IDE (editor + agent sidebar)", group: CommandGroup::Ide, takes_arg: false, while_streaming: false },
+    CommandDef { id: "workspace.open", title: "Open workspace folder…", group: CommandGroup::Ide, takes_arg: true, while_streaming: false },
+    CommandDef { id: "workspace.refresh", title: "Refresh workspace file tree", group: CommandGroup::Ide, takes_arg: false, while_streaming: true },
+    CommandDef { id: "workspace.save", title: "Save the open editor file", group: CommandGroup::Ide, takes_arg: false, while_streaming: true },
 ];
 
 /// Look up a command by id.
@@ -89,7 +98,7 @@ pub fn find_command(id: &str) -> Option<&'static CommandDef> {
 
 /// Filter commands by a case-insensitive substring over id + title +
 /// group label. Empty query returns all. Simple substring filter —
-/// fuzzy scoring is a surface concern (opencode's threshold scoring is
+/// fuzzy scoring is a surface concern (finer threshold scoring is
 /// overkill while the table is ~20 entries).
 pub fn filter_commands(query: &str) -> Vec<&'static CommandDef> {
     let q = query.trim().to_lowercase();
@@ -135,6 +144,7 @@ mod tests {
                 CommandGroup::Hardware => "hardware",
                 CommandGroup::Agent => "agent",
                 CommandGroup::View => "view",
+                CommandGroup::Ide => "ide",
             };
             assert_eq!(prefix, expected, "{} group/prefix mismatch", c.id);
         }

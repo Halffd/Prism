@@ -53,8 +53,8 @@ impl HardwareSettings {
     }
 }
 
-/// User-defined provider (opencode `ConfigProvider` pattern, trimmed
-/// to what the OpenAI-compat transport needs). Two shapes:
+/// User-defined provider (trimmed to what the OpenAI-compat transport
+/// needs). Two shapes:
 ///
 /// - **Canonical alias**: `canonical` names a built-in provider; the
 ///   custom entry clones its defaults (label, default model) and only
@@ -134,9 +134,9 @@ pub struct Settings {
     pub prism_api_url: String,
     /// Bearer JWT for the Prism API server (server mode).
     pub prism_api_token: String,
-    /// User-defined providers (opencode `canonical` pattern): alias a
-    /// built-in provider onto a custom base URL, or add a bare
-    /// OpenAI-compatible endpoint. Keyed by provider id.
+    /// User-defined providers: alias a built-in provider onto a custom
+    /// base URL, or add a bare OpenAI-compatible endpoint. Keyed by
+    /// provider id.
     pub custom_providers: HashMap<String, ConfigProvider>,
 }
 

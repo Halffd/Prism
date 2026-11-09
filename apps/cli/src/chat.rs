@@ -123,6 +123,7 @@ pub mod agent_job {
         run_agent, AgentResult, CalculatorTool, StepMessage, ToolRegistry,
     };
     use prism_core::native_tools::{self};
+    use prism_core::sandbox::{resolve_policy, ResolvedSandbox, SandboxPolicy};
     use prism_core::transport::{HttpRequest, ReqwestTransport, Transport};
 
     struct FilelessLlmStep<'a> {
@@ -176,6 +177,24 @@ pub mod agent_job {
         }
     }
 
+    /// Load the sandbox policy: a path to a policy JSON file, or inline
+    /// JSON (`PRISM_AGENT_SANDBOX_POLICY` accepts both).
+    fn load_sandbox_policy(source: &str) -> Result<ResolvedSandbox, String> {
+        let text = match std::fs::read_to_string(source) {
+            Ok(text) => text,
+            Err(_) if source.contains('{') => source.to_string(),
+            Err(e) => {
+                return Err(match std::fs::exists(source) {
+                    Ok(true) => format!("sandbox policy {source}: {e}"),
+                    _ => format!("sandbox policy: could not open {source} ({e})"),
+                })
+            }
+        };
+        let policy: SandboxPolicy =
+            prism_core::sandbox::parse_policy(&text).map_err(|e| format!("policy: {e}"))?;
+        Ok(resolve_policy(&policy))
+    }
+
     /// Spawn the agent loop; `tx` receives `Event::Stream` updates keyed
     /// as system lines (step thoughts/actions) plus the final answer.
     pub fn spawn(
@@ -205,6 +224,27 @@ pub mod agent_job {
         };
         let task = task.to_string();
         let tx = tx.clone();
+        // Sandbox posture before anything spawns: `PRISM_AGENT_SANDBOX_POLICY`
+        // carries either inline policy JSON or a path to it (`--policy`
+        // shape). A strict policy that this host cannot
+        // enforce fails the job instead of silently weakening; `auto` keeps
+        // running with the record kept in each shell observation.
+        let sandbox = match std::env::var("PRISM_AGENT_SANDBOX_POLICY") {
+            Ok(source) => {
+                let resolved = load_sandbox_policy(&source)?;
+                match prism_core::sandbox::plan_spawn(&resolved) {
+                    Ok(used) => Some((resolved, used)),
+                    // strict on an unsupported host: fail the job with the
+                    // reason instead of silently weakening (`Err` surfaces
+                    // on the /agent line).
+                    Err(outcome) => {
+                        let reason = prism_core::sandbox::outcome_str(&outcome);
+                        return Err(format!("sandbox preflight: {reason}"));
+                    }
+                }
+            }
+            Err(_) => None,
+        };
 
         // Agent loop runs on its own thread (blocking LLM steps), tools
         // scoped to the workspace root. Mutating tools stay on Ask =>
@@ -213,6 +253,23 @@ pub mod agent_job {
             let registry = ToolRegistry::new();
             registry.register(std::sync::Arc::new(CalculatorTool));
             native_tools::register_all(&registry, &workspace_root);
+
+            // Opted-in guarded shell: the sandbox policy is the permission
+            // boundary, so the tool registers at the default Allow and
+            // every call runs guard → denylist → enforced subprocess.
+            #[cfg(all(target_os = "linux", feature = "native-transport"))]
+            if let Some((res, _used)) = &sandbox {
+                registry.register(std::sync::Arc::new(
+                    prism_core::sandbox::GuardedShellTool { res: res.clone() },
+                ));
+            }
+            #[cfg(not(all(target_os = "linux", feature = "native-transport")))]
+            {
+                // Policy posture was validated before spawn; neither the
+                // guard nor the enforcement layer exists on this host, so
+                // no shell tool is registered.
+                let _ = sandbox;
+            }
 
             let result: AgentResult = {
                 let mut step_fn = |system: &str, hist: &[StepMessage]| {

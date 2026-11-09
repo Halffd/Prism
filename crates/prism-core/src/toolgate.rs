@@ -1,17 +1,16 @@
-//! Tool-call gate: the MCP-layer insights from the Cursor `agentd`
-//! analysis, as one reusable boundary in front of the agent loop's
+//! Tool-call gate: one reusable boundary in front of the agent loop's
 //! registry.
 //!
-//! Three pieces, each mirroring a named daemon module:
+//! Three pieces:
 //!
-//! - **Clamp advertised tools** (`mcp/clamp-advertised-tools`) — a call
-//!   for a tool that is not advertised never reaches a handler; the
-//!   caller gets the closed list instead.
-//! - **Dynamic tool argument repair** (`mcp/dynamic-tool-argument-repair`)
-//!   — models spill arguments as JSON envelopes, code fences, wrappers or
-//!   trailing commas; the repair layer normalizes them to the plain
-//!   string input the core tools take and reports what it changed.
-//! - **Tool error classification** (`mcp/mcp-tool-error-detail`) — the
+//! - **Clamp advertised tools** — a call for a tool that is not
+//!   advertised never reaches a handler; the caller gets the closed
+//!   list instead.
+//! - **Dynamic tool argument repair** — models spill arguments as JSON
+//!   envelopes, code fences, wrappers or trailing commas; the repair
+//!   layer normalizes them to the plain string input the core tools
+//!   take and reports what it changed.
+//! - **Tool error classification** — the
 //!   observation text is mapped onto a closed `ToolErrorKind` with a
 //!   stable, actionable `detail()` the model can act on (retry with a
 //!   different path vs. ask for permission vs. stop).

@@ -1,20 +1,15 @@
 //! Agent sandbox: policy model, preflight, and enforcement for shell tools.
 //!
-//! Ported from the Cursor `agentd` (agent-host-daemon 6.8.0) analysis: the
-//! daemon routes every shell command through a policy object
-//! (`AgentExecPermissions` / `AutoRunSandboxingControls` protos) and a
-//! dedicated sandbox helper (`agent_host_sandbox_helper.v1`, known in-tree
-//! as `cursorsandbox`, "Everysphere shell-exec"). Spawn results are a
+//! Prism's sandbox follows a proven pattern for agent-owned shell tools:
+//! every command routes through a policy object, spawn results are a
 //! closed enum — `success | error | rejected | permission_denied |
-//! sandbox_unsupported` (the `BackgroundShellSpawnResult` union) — and an
-//! unsupported host degrades to a *recorded* fallback, never a silent
-//! bypass.
+//! sandbox_unsupported` — and an unsupported host degrades to a
+//! *recorded* fallback, never a silent bypass.
 //!
 //! Prism's port:
 //!
-//! - [`SandboxPolicy`] — the JSON policy object (the helper's unified
-//!   `--policy <POLICY>` file shape: filesystem boundary + network filter
-//!   + strict flag).
+//! - [`SandboxPolicy`] — the JSON policy object (`--policy <POLICY>`
+//!   file shape: filesystem boundary + network filter + strict flag).
 //! - [`resolve_policy`] — policy → enforceable roots/denylist.
 //! - [`shell_guard`] — fail-closed command check before any spawn
 //!   (admin denylist, then static workspace-escape detection).

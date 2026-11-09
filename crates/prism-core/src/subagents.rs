@@ -1,19 +1,16 @@
 //! Subagent registry: named, task-specific agent profiles and the
 //! forced-model resolution order.
 //!
-//! Ported from the Cursor `agentd` analysis (`agent/dist/tools/subagent*`):
-//! the daemon keeps a registry of named subagents (explore,
-//! security-review, bugbot, ci-investigator, browser-use, …) and resolves
-//! the model per subagent in a documented forced order
-//! (`subagent-forced-model-resolution` / `subagent-model-force-policy`):
+//! A named subagent is a registry entry, not a prompt: a profile with
+//! its own identity and model resolution order
 //!
 //! 1. the subagent's own `forced_model` wins (policy override),
 //! 2. then the session's host model,
 //! 3. then the provider default (`resolve_provider` fallback).
 //!
 //! Structure not model: a SubagentSpec also carries a tool allowlist
-//! (mirroring `mcp/clamp-advertised-tools` per-agent application) and the
-//! canonical task-tool name (`task_<name>`) the loop advertises.
+//! (the clamp applied per-agent) and the canonical task-tool name
+//! (`task_<name>`) the loop advertises.
 
 use serde::{Deserialize, Serialize};
 

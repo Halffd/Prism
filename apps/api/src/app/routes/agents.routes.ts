@@ -15,8 +15,8 @@ const wasm = require('../../wasm-pkg/prism_wasm.js') as {
 };
 
 /**
- * Agent-surface endpoints — the agentd insights as a JSON API over the
- * prism-core wasm:
+ * Agent-surface endpoints — the core's agent answers as a JSON API over
+ * the prism-core wasm:
  *   - GET  /agents/subagents            shipped subagent registry
  *   - POST /agents/subagents/:name/model  forced-model resolution
  *   - POST /agents/tools/repair       model-argument normalisation

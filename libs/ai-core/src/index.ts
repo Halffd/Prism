@@ -294,7 +294,7 @@ export function parseModels(core: WasmCore, body: string): string[] {
 
 // ---- custom providers -----------------------------------------------------
 
-// A custom provider (opencode `canonical` pattern) is a base URL that
+// A custom provider is a base URL that
 // aliases a built-in: same body shape, different endpoint + key. The
 // core already builds the body; the host only needs the resolution:
 export const CORE_PROVIDER_IDS: string[] = [
