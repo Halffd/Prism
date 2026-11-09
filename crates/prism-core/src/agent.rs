@@ -194,6 +194,10 @@ pub fn run_agent(
         content: format!("Task: {task}"),
     }];
     let mut steps: Vec<AgentStep> = Vec::new();
+    // The tool gate: the advertised surface, the argument repair and the
+    // error classification, applied to every call before it reaches a
+    // handler.
+    let advertised = crate::toolgate::AdvertisedTools::from_registry(registry);
 
     for _ in 0..max_steps {
         let raw = match step_fn(&system, &history) {
@@ -239,7 +243,13 @@ pub fn run_agent(
             };
         }
 
-        let observation = registry.execute(&decision.action, &decision.action_input, ask);
+        let observation = crate::toolgate::gated_execute(
+            registry,
+            &advertised,
+            &decision.action,
+            &decision.action_input,
+            ask,
+        );
         steps.push(AgentStep {
             thought: decision.thought.clone(),
             action: decision.action.clone(),
@@ -444,7 +454,15 @@ mod tests {
             r#"{"thought":"ok","action":"Final Answer","action_input":"gave up"}"#,
         ]);
         let r = run_agent("task", &mut step, &reg, 5, &|_, _| true);
-        assert_eq!(r.steps[0].observation, "[echo] Permission denied: this tool is blocked. Continue without it.");
+        // The gate appends the actionable reason to a denied call.
+        assert!(
+            r.steps[0]
+                .observation
+                .starts_with("[echo] Permission denied: this tool is blocked."),
+            "{}",
+            r.steps[0].observation
+        );
+        assert!(r.steps[0].observation.contains("reason: blocked by policy"));
         assert_eq!(r.answer, "gave up");
     }
 
@@ -466,10 +484,42 @@ mod tests {
             r#"{"thought":"done","action":"Final Answer","action_input":"end"}"#,
         ]);
         let r = run_agent("task", &mut step, &reg, 5, &|_, _| false);
-        assert_eq!(
-            r.steps[0].observation,
-            "[echo] Permission denied by user. Continue without it."
+        assert!(
+            r.steps[0]
+                .observation
+                .starts_with("[echo] Permission denied by user. Continue without it."),
+            "{}",
+            r.steps[0].observation
         );
+        assert!(r.steps[0].observation.contains("reason: blocked by policy"));
+    }
+
+    #[test]
+    fn gate_clamps_and_repairs_tool_calls() {
+        let reg = ToolRegistry::new();
+        reg.register(Arc::new(EchoTool));
+
+        // A spilled argument is repaired down to the plain string the
+        // tool takes, and a clean observation stays clean.
+        let mut step = script_step(&[
+            r#"{"thought":"try","action":"echo","action_input":"{\"input\":\"hi\"}"}"#,
+            r#"{"thought":"ok","action":"Final Answer","action_input":"done"}"#,
+        ]);
+        let r = run_agent("task", &mut step, &reg, 5, &|_, _| true);
+        assert_eq!(r.steps[0].observation, "echo:hi");
+
+        // A tool that is not advertised never reaches a handler.
+        let mut step = script_step(&[
+            r#"{"thought":"try","action":"ghost","action_input":"x"}"#,
+            r#"{"thought":"ok","action":"Final Answer","action_input":"done"}"#,
+        ]);
+        let r = run_agent("task", &mut step, &reg, 5, &|_, _| true);
+        assert!(
+            r.steps[0].observation.starts_with("tool_clamped"),
+            "{}",
+            r.steps[0].observation
+        );
+        assert!(r.steps[0].observation.contains("echo"));
     }
 
     #[test]
