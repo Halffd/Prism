@@ -1,0 +1,113 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": "../..",
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/tsconfig.lib.tsbuildinfo",
+    "emitDeclarationOnly": false,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "forceConsistentCasingInFileNames": true,
+    "lib": [
+      "es2022",
+      "dom"
+    ],
+    "types": [
+      "node"
+    ],
+    "paths": {
+      "@prism/redux-store": [
+        "libs/redux-store/src/index.ts"
+      ],
+      "@prism/api-client": [
+        "libs/api-client/src/index.ts"
+      ],
+      "@prism/shared-db": [
+        "libs/shared-db/src/index.ts"
+      ],
+      "@prism/shared-types": [
+        "libs/shared-types/src/index.ts"
+      ],
+      "@prism/image-gen": [
+        "libs/image-gen/src/index.ts"
+      ],
+      "@prism/ai-core": [
+        "libs/ai-core/src/index.ts"
+      ],
+      "@prism/firebase-auth": [
+        "libs/firebase-auth/src/index.ts"
+      ],
+      "@prism/supabase-client": [
+        "libs/supabase-client/src/index.ts"
+      ],
+      "@prism/ocr": [
+        "libs/ocr/src/index.ts"
+      ],
+      "@prism/stt": [
+        "libs/stt/src/index.ts"
+      ],
+      "@prism/tts": [
+        "libs/tts/src/index.ts"
+      ],
+      "@prism/inpaint": [
+        "libs/inpaint/src/index.ts"
+      ],
+      "@prism/model-gen": [
+        "libs/model-gen/src/index.ts"
+      ],
+      "@prism/audio-gen": [
+        "libs/audio-gen/src/index.ts"
+      ],
+      "@prism/ai-factory": [
+        "libs/ai-factory/src/index.ts"
+      ],
+      "@prism/ai-builder": [
+        "libs/ai-builder/src/index.ts"
+      ],
+      "@prism/video-gen": [
+        "libs/video-gen/src/index.ts"
+      ],
+      "@prism/llm": [
+        "libs/llm/src/index.ts"
+      ],
+      "@prism/agent": [
+        "libs/agent/src/index.ts"
+      ],
+      "@prism/context-manager": [
+        "libs/context-manager/src/index.ts"
+      ],
+      "@prism/ui-components": [
+        "libs/ui-components/src/index.ts"
+      ],
+      "@prism/web-search": [
+        "libs/web-search/src/index.ts"
+      ],
+      "@prism/logging": [
+        "libs/logging/src/index.ts"
+      ],
+      "@prism/rag": [
+        "libs/rag/src/index.ts"
+      ],
+      "@prism/deepsearch": [
+        "libs/deepsearch/src/index.ts"
+      ],
+      "@prism/council": [
+        "libs/council/src/index.ts"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*.ts"
+  ],
+  "references": [
+    {
+      "path": "../shared-types/tsconfig.lib.json"
+    }
+  ],
+  "exclude": [
+    "jest.config.ts",
+    "src/**/*.spec.ts",
+    "src/**/*.test.ts"
+  ]
+}

@@ -4,6 +4,6 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "dependencies": {
-    "@prism/llm-service": "*"
+    "@prism/ai-core": "*"
   }
 }

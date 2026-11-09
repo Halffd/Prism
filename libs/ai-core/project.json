@@ -1,0 +1,20 @@
+{
+  "name": "@prism/ai-core",
+  "projectType": "library",
+  "sourceRoot": "libs/ai-core/src",
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "options": {
+        "tsConfig": "libs/ai-core/tsconfig.lib.json"
+      }
+    },
+    "typecheck": {
+      "executor": "@nx/js:tsc",
+      "options": {
+        "tsConfig": "libs/ai-core/tsconfig.lib.json"
+      }
+    }
+  },
+  "tags": ["scope:shared", "type:lib"]
+}

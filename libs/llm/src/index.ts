@@ -5,7 +5,7 @@ import type {
   Result,
   ServiceConfig,
 } from '@prism/shared-types';
-import { loadCore, type WasmCore } from '@prism/llm-service';
+import { loadCore, type WasmCore } from '@prism/ai-core';
 
 export interface LLMService {
   readonly provider: string;

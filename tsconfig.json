@@ -19,7 +19,7 @@
       "path": "./libs/api-client"
     },
     {
-      "path": "./libs/llm-service"
+      "path": "./libs/ai-core"
     },
     {
       "path": "./libs/context-manager"

@@ -1,4 +1,16 @@
-import { AIService, ChatCompletionRequest } from '@prism/llm-service';
+import {
+  loadCore,
+  applyThinking,
+  stripThinking,
+  buildStreamBody,
+  buildOllamaBody,
+  parseModels,
+  streamSseText,
+  findProvider,
+  type WasmCore,
+  type WireMessage,
+  type ChatConfig,
+} from '@prism/ai-core';
 import {
   Message,
   ContextData,
@@ -6,13 +18,8 @@ import {
   AIConfig,
   ChatSession,
   PromptShortcut,
-  AudioTranscriptionResponse,
-  TTSOptions,
-  AudioServiceConfig,
   AICapability,
   ServiceConfig,
-  AIMode,
-  AdapterConfig,
   OCRRequest,
   OCRResult,
   STTRequest,
@@ -52,7 +59,6 @@ import {
   resolveRequestConfig,
 } from '@prism/shared-types';
 import { AIFactory } from '@prism/ai-factory';
-import { AdapterRouter } from '@prism/ai-adapters';
 import type { OCRService } from '@prism/ocr';
 import type { STTService } from '@prism/stt';
 import type { TTSService } from '@prism/tts';
@@ -85,8 +91,17 @@ export interface UnifiedAIClientOptions {
   prismApiKey?: string;
 }
 
+/** Providers that answer on the user's own machine; they get the
+ *  warmer default temperature. */
+const LOCAL_PROVIDERS = new Set([
+  'ollama',
+  'llamacpp',
+  'sglang',
+  'koboldcpp',
+  'transformers',
+]);
+
 export class UnifiedAIClient {
-  private aiService?: AIService;
   private prismApiUrl?: string;
   private prismApiKey?: string;
   private aiConfig?: AIConfig;
@@ -102,7 +117,8 @@ export class UnifiedAIClient {
   private webSearchService?: WebSearchService;
   private deepSearchService?: DeepSearchService;
   private councilService?: CouncilService;
-  private adapterRouter?: AdapterRouter;
+  private core?: WasmCore;
+  private corePromise?: Promise<WasmCore | null>;
 
   constructor(options: UnifiedAIClientOptions = {}) {
     // A selected custom model is resolved right here, so that the client
@@ -121,10 +137,26 @@ export class UnifiedAIClient {
     if (this.aiConfig) {
       // Ensure proper configuration for local providers
       const configForService = this.prepareConfigForService(this.aiConfig);
-      this.aiService = new AIService(configForService);
       this.initCapabilityServices(configForService);
-      this.initAdapterRouter(configForService);
     }
+  }
+
+  /** The core wasm, loaded once per client. A host that cannot
+   *  instantiate it (no wasm support, blocked asset) falls back to the
+   *  hosted API instead of the local-model path. */
+  private async ensureCore(): Promise<WasmCore | null> {
+    if (!this.corePromise) {
+      this.corePromise = loadCore()
+        .then((core) => {
+          this.core = core;
+          return core;
+        })
+        .catch((e) => {
+          console.warn('core wasm unavailable, using hosted API:', e);
+          return null;
+        });
+    }
+    return this.corePromise;
   }
 
   private toServiceConfig(config: AIConfig): ServiceConfig {
@@ -197,19 +229,6 @@ export class UnifiedAIClient {
     }
   }
 
-  private initAdapterRouter(config: AIConfig): void {
-    const sc = this.toServiceConfig(config);
-    const adapterConfig: AdapterConfig = {
-      mode: config.mode || 'api',
-      prismApiUrl: this.prismApiUrl,
-      prismApiKey: this.prismApiKey,
-      localApiUrl: config.localApiUrl,
-      providerKeys: config.providerKeys,
-      hardware: config.hardware,
-    };
-    this.adapterRouter = new AdapterRouter(sc, adapterConfig);
-  }
-
   setCapabilityProvider(
     capability: AICapability,
     provider: string,
@@ -263,19 +282,137 @@ export class UnifiedAIClient {
         this.deepSearchService = service as DeepSearchService;
         break;
     }
-    this.adapterRouter?.setProvider(capability, provider, sc);
   }
 
-  setMode(mode: AIMode): void {
-    this.adapterRouter?.setMode(mode);
+  /** Host configuration -> the core's request config. The endpoint
+   *  travels as `baseUrl` (a custom model's own URL or a local
+   *  server's URL) and the bearer token as `apiKey`; the core only
+   *  sees the resolved target, never the provider's UI settings. */
+  private toCoreConfig(config: AIConfig): ChatConfig {
+    const provider = config.provider as string;
+    return {
+      provider,
+      model: config.model,
+      apiKey: config.providerKeys?.[config.provider] || config.apiKey || '',
+      baseUrl: (config.localApiUrl || config.apiUrl || '').trim(),
+      localBaseUrl: config.localApiUrl,
+      // The core requires a temperature; local servers get the warmer
+      // default, hosted providers the cooler one.
+      temperature:
+        config.temperature ?? (LOCAL_PROVIDERS.has(provider) ? 0.8 : 0.7),
+      maxTokens: config.maxTokens ?? null,
+      topP: config.topP ?? null,
+      frequencyPenalty: config.frequencyPenalty ?? null,
+      presencePenalty: config.presencePenalty ?? null,
+      thinkingMode: config.thinkingMode ?? null,
+    };
   }
 
-  setCapabilityMode(capability: AICapability, mode: AIMode): void {
-    this.adapterRouter?.setCapabilityMode(capability, mode);
+  /** Core-owned chat completion: body built by the core wasm, HTTP
+   *  driven here, bytes decoded by the core SSE decoder. */
+  private async coreChatCompletion(request: {
+    messages: Message[];
+    context?: ContextData;
+    config: AIConfig;
+  }): Promise<{
+    content: string;
+    thinking?: string;
+    tokensUsed?: number;
+  }> {
+    const core = await this.ensureCore();
+    if (!core) {
+      throw new Error('core wasm unavailable');
+    }
+    // The endpoint travels with the request: a custom model's own URL,
+    // a local server's URL, or the provider table's default.
+    const cfg = this.toCoreConfig(request.config);
+    if (!cfg.model) {
+      cfg.model = findProvider(core, cfg.provider)?.default_model ?? '';
+    }
+    const provider = cfg.provider;
+    const isOllama = provider === 'ollama';
+    let messages: WireMessage[] = request.messages.map((m) => ({
+      role: m.role,
+      content: m.content,
+      ...(m.images?.length ? { images: m.images } : {}),
+    }));
+    const thinking = cfg.thinkingMode?.enabled === true;
+    if (thinking) messages = applyThinking(core, messages);
+
+    // Ollama speaks its native API; everything else is
+    // OpenAI-compatible.
+    const ollamaRoot = core.ollama_root_url(
+      cfg.localBaseUrl || 'http://localhost:11434',
+    );
+    const base = isOllama
+      ? ollamaRoot
+      : (cfg.baseUrl ||
+          findProvider(core, provider)?.base_url ||
+          'https://api.openai.com/v1').replace(/\/+$/, '');
+    const url = isOllama
+      ? `${base}/api/chat`
+      : `${base}/chat/completions`;
+    const apiKey = (cfg.apiKey ?? '').trim();
+    const body = isOllama
+      ? buildOllamaBody(core, {
+          base_url: base,
+          model: cfg.model ?? '',
+          temperature: cfg.temperature,
+          messages,
+          max_tokens: cfg.maxTokens,
+        })
+      : buildStreamBody(core, {
+          base_url: base,
+          api_key: apiKey,
+          model: cfg.model ?? '',
+          temperature: cfg.temperature,
+          max_tokens: cfg.maxTokens,
+          top_p: cfg.topP,
+          frequency_penalty: cfg.frequencyPenalty,
+          presence_penalty: cfg.presencePenalty,
+          messages,
+        });
+
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (!isOllama && apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok || !resp.body) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(`${provider} HTTP ${resp.status}: ${text.slice(0, 200)}`);
+    }
+
+    let content = '';
+    for await (const ev of streamSseText(core, resp.body as ReadableStream<Uint8Array>)) {
+      content += ev.delta;
+    }
+
+    if (thinking) {
+      const [clean, reasoning] = stripThinking(core, content);
+      return { content: clean, thinking: reasoning ?? undefined };
+    }
+    return { content };
   }
 
-  getAdapterRouter(): AdapterRouter | undefined {
-    return this.adapterRouter;
+  /** Model list for a provider via the OpenAI-compatible /models endpoint. */
+  private async coreGetModels(providerId?: string): Promise<string[]> {
+    const core = await this.ensureCore();
+    if (!core) {
+      return [];
+    }
+    const provider = providerId ?? (this.aiConfig?.provider as string | undefined) ?? 'openai';
+    const def = findProvider(core, provider);
+    if (!def) return [];
+    const apiKey = (this.aiConfig?.apiKey ?? '').trim();
+    const resp = await fetch(`${def.base_url}/models`, {
+      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+    });
+    if (!resp.ok) return [];
+    return parseModels(core, await resp.text());
   }
 
   private prepareConfigForService(config: AIConfig): AIConfig {
@@ -351,7 +488,8 @@ export class UnifiedAIClient {
     const isOnline = networkStatusService.isCurrentlyOnline();
 
     // If we have an AI service (local models) or we're offline, use the local AI service
-    if (this.aiService && this.aiConfig) {
+    const core = await this.ensureCore();
+    if (core && this.aiConfig) {
       try {
         // Check if provider is a local model or if we're offline
         const isLocalProvider = this.isLocalModelProvider(
@@ -379,14 +517,14 @@ export class UnifiedAIClient {
             ? [...conversationHistory, userMessage]
             : [userMessage];
 
-          const request: ChatCompletionRequest = {
+          const request = {
             messages: messagesToSend,
             context,
             config: this.aiConfig,
           };
 
           const startTime = Date.now();
-          const response = await this.aiService.chatCompletion(request);
+          const response = await this.coreChatCompletion(request);
           const latencyMs = Date.now() - startTime;
 
           const promptTokens = response.tokensUsed
@@ -516,7 +654,7 @@ export class UnifiedAIClient {
     }
 
     // If all online methods fail, try local models again as last resort
-    if (this.aiService && this.aiConfig) {
+    if (core && this.aiConfig) {
       try {
         const userMessage: Message = {
           id: Date.now().toString(),
@@ -527,13 +665,13 @@ export class UnifiedAIClient {
           timestamp: Date.now(),
         };
 
-        const request: ChatCompletionRequest = {
+        const request = {
           messages: [userMessage],
           context,
           config: this.aiConfig,
         };
 
-        const response = await this.aiService.chatCompletion(request);
+        const response = await this.coreChatCompletion(request);
 
         const assistantMessage: Message = {
           id: `assistant-${Date.now()}`,
@@ -760,12 +898,8 @@ export class UnifiedAIClient {
     // that happens to be selected in the provider list.
     const resolvedConfig = resolveRequestConfig(config);
     this.aiConfig = resolvedConfig;
-    if (this.aiService) {
-      const configForService = this.prepareConfigForService(resolvedConfig);
-      this.aiService.updateConfig(configForService);
-    } else {
-      const configForService = this.prepareConfigForService(resolvedConfig);
-      this.aiService = new AIService(configForService);
+    if (!this.core) {
+      void this.ensureCore();
     }
 
     // Update the network status service with the API URL if it's in the provider keys
@@ -779,8 +913,9 @@ export class UnifiedAIClient {
   }
 
   async getAvailableModels(): Promise<string[]> {
-    if (this.aiService) {
-      return await this.aiService.getAvailableModels();
+    const core = await this.ensureCore();
+    if (core) {
+      return await this.coreGetModels();
     }
     // Return default models if service is not initialized
     switch (this.aiConfig?.provider) {
@@ -883,14 +1018,14 @@ export class UnifiedAIClient {
       case 'grok':
         return ['grok-3', 'grok-2'];
       case 'openrouter':
-        if (!this.aiService) {
+        if (!core) {
           return [
             'openchat/openchat-7b',
             'neversleep/noromaid-mixtral-8x7b',
             'microsoft/wizardlm-2-8x22b',
           ];
         }
-        return await (this.aiService as any).getOpenrouterModels();
+        return await this.coreGetModels('openrouter');
       case 'poe':
         return ['poe', 'sage', 'dragonfruit', 'citrine'];
       default:
@@ -1178,53 +1313,60 @@ export class UnifiedAIClient {
     }
   }
 
+  /** Speech-to-text via the dedicated STT capability service. */
   async transcribeAudio(
-    audioBlob: Blob,
-  ): Promise<ApiResponse<AudioTranscriptionResponse>> {
-    try {
-      if (!this.aiService) {
-        return { success: false, error: 'AI service not initialized' };
-      }
-
-      const config = this.getAudioServiceConfig();
-      const result = await this.aiService.transcribeAudio(audioBlob, config);
-      return { success: true, data: result };
-    } catch (error: any) {
-      return { success: false, error: error.message || 'Transcription failed' };
-    }
-  }
-
-  async textToSpeech(
-    text: string,
-    options?: TTSOptions,
-  ): Promise<ApiResponse<Blob>> {
-    try {
-      if (!this.aiService) {
-        return { success: false, error: 'AI service not initialized' };
-      }
-
-      const config = this.getAudioServiceConfig();
-      const audioBlob = await this.aiService.textToSpeech(
-        text,
-        options || {},
-        config,
-      );
-      return { success: true, data: audioBlob };
-    } catch (error: any) {
+    audio: Blob,
+    language?: string,
+    mimeType?: string,
+  ): Promise<ApiResponse<{ text: string }>> {
+    if (!this.sttService) {
       return {
         success: false,
-        error: error.message || 'Text-to-speech failed',
+        error:
+          'STT service not initialized — use setCapabilityProvider("stt", provider)',
+      };
+    }
+    try {
+      const result = await this.sttService.transcribe({
+        audio,
+        ...(language ? { language } : {}),
+        ...(mimeType ? { mimeType } : {}),
+      });
+      return this.capabilityResultToApiResponse(result);
+    } catch (error: unknown) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Transcription failed',
       };
     }
   }
 
-  private getAudioServiceConfig(): AudioServiceConfig {
-    const config = this.aiConfig || ({} as AIConfig);
-    return {
-      apiKey: config.providerKeys?.['openai'] || config.apiKey || '',
-      apiUrl: config.apiUrl || 'https://api.openai.com/v1',
-      provider: config.provider,
-    };
+  /** Text-to-speech via the dedicated TTS capability service. */
+  async textToSpeech(
+    text: string,
+    options?: {
+      voice?: string;
+      speed?: number;
+      model?: string;
+      responseFormat?: 'mp3' | 'opus' | 'aac' | 'flac' | 'wav' | 'pcm';
+    },
+  ): Promise<ApiResponse<{ audio: Blob; format: string }>> {
+    if (!this.ttsService) {
+      return {
+        success: false,
+        error:
+          'TTS service not initialized — use setCapabilityProvider("tts", provider)',
+      };
+    }
+    try {
+      const result = await this.ttsService.synthesize({ text, ...(options ?? {}) });
+      return this.capabilityResultToApiResponse(result);
+    } catch (error: unknown) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Text-to-speech failed',
+      };
+    }
   }
 
   private capabilityResultToApiResponse<T>(result: Result<T>): ApiResponse<T> {
@@ -1235,11 +1377,6 @@ export class UnifiedAIClient {
   }
 
   async ocr(request: OCRRequest): Promise<ApiResponse<OCRResult>> {
-    if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(
-        await this.adapterRouter.ocr(request),
-      );
-    }
     if (!this.ocrService) {
       return {
         success: false,
@@ -1257,11 +1394,6 @@ export class UnifiedAIClient {
   }
 
   async stt(request: STTRequest): Promise<ApiResponse<STTResult>> {
-    if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(
-        await this.adapterRouter.stt(request),
-      );
-    }
     if (!this.sttService) {
       return {
         success: false,
@@ -1279,11 +1411,6 @@ export class UnifiedAIClient {
   }
 
   async tts(request: TTSRequest): Promise<ApiResponse<TTSResult>> {
-    if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(
-        await this.adapterRouter.tts(request),
-      );
-    }
     if (!this.ttsService) {
       return {
         success: false,
@@ -1301,11 +1428,6 @@ export class UnifiedAIClient {
   }
 
   async inpaint(request: InpaintRequest): Promise<ApiResponse<InpaintResult>> {
-    if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(
-        await this.adapterRouter.inpaint(request),
-      );
-    }
     if (!this.inpaintService) {
       return {
         success: false,
@@ -1325,11 +1447,6 @@ export class UnifiedAIClient {
   async modelGen(
     request: ModelGenRequest,
   ): Promise<ApiResponse<ModelGenResult>> {
-    if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(
-        await this.adapterRouter.modelGen(request),
-      );
-    }
     if (!this.modelGenService) {
       return {
         success: false,
@@ -1352,11 +1469,6 @@ export class UnifiedAIClient {
   async audioGen(
     request: AudioGenRequest,
   ): Promise<ApiResponse<AudioGenResult>> {
-    if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(
-        await this.adapterRouter.audioGen(request),
-      );
-    }
     if (!this.audioGenService) {
       return {
         success: false,
@@ -1379,11 +1491,6 @@ export class UnifiedAIClient {
   async videoGen(
     request: VideoGenRequest,
   ): Promise<ApiResponse<VideoGenResult>> {
-    if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(
-        await this.adapterRouter.videoGen(request),
-      );
-    }
     if (!this.videoGenService) {
       return {
         success: false,
@@ -1404,11 +1511,6 @@ export class UnifiedAIClient {
   }
 
   async llm(request: LLMRequest): Promise<ApiResponse<LLMResult>> {
-    if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(
-        await this.adapterRouter.llm(request),
-      );
-    }
     if (!this.llmService) {
       return {
         success: false,
@@ -1429,11 +1531,6 @@ export class UnifiedAIClient {
   }
 
   async agent(request: AgentRequest): Promise<ApiResponse<AgentResult>> {
-    if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(
-        await this.adapterRouter.agent(request),
-      );
-    }
     if (!this.agentService) {
       return {
         success: false,
@@ -1456,11 +1553,6 @@ export class UnifiedAIClient {
   async webSearch(
     request: WebSearchRequest,
   ): Promise<ApiResponse<WebSearchResult>> {
-    if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(
-        await this.adapterRouter.webSearch(request),
-      );
-    }
     if (!this.webSearchService) {
       return {
         success: false,
@@ -1480,11 +1572,6 @@ export class UnifiedAIClient {
   async deepSearch(
     request: DeepSearchRequest,
   ): Promise<ApiResponse<DeepSearchResult>> {
-    if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(
-        await this.adapterRouter.deepSearch(request),
-      );
-    }
     if (!this.deepSearchService) {
       return {
         success: false,
@@ -1504,11 +1591,6 @@ export class UnifiedAIClient {
   async council(
     request: CouncilRequest,
   ): Promise<ApiResponse<CouncilResponse>> {
-    if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(
-        await this.adapterRouter.council(request),
-      );
-    }
     if (!this.councilService) {
       return {
         success: false,
@@ -1531,11 +1613,6 @@ export class UnifiedAIClient {
   async multiSend(
     request: MultiSendRequest,
   ): Promise<ApiResponse<MultiSendResponse>> {
-    if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(
-        await this.adapterRouter.multiSend(request),
-      );
-    }
     return {
       success: false,
       error:
@@ -1555,11 +1632,6 @@ export class UnifiedAIClient {
   }
 
   async debate(request: DebateRequest): Promise<ApiResponse<DebateResult>> {
-    if (this.adapterRouter) {
-      return this.capabilityResultToApiResponse(
-        await this.adapterRouter.debate(request),
-      );
-    }
     return {
       success: false,
       error:

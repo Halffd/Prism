@@ -33,12 +33,12 @@ export default defineConfig({
         // request/response only (sendMessage relay); no stream state
         // ever lives in the service worker.
         cpSync(
-          resolve(__dirname, '../../libs/llm-service/src/wasm-pkg-web'),
+          resolve(__dirname, '../../libs/ai-core/src/wasm-pkg-web'),
           resolve(__dirname, '../../dist/apps/extension/assets/wasm-pkg-web'),
           { recursive: true },
         );
         cpSync(
-          resolve(__dirname, '../../libs/llm-service/src/wasm-pkg-web'),
+          resolve(__dirname, '../../libs/ai-core/src/wasm-pkg-web'),
           resolve(__dirname, '../../dist/apps/extension/wasm-pkg-web'),
           { recursive: true },
         );
