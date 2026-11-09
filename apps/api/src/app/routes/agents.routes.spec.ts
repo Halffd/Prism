@@ -104,6 +104,32 @@ describe('agents.routes (prism-core wasm bindings)', () => {
     expect(clean.detail).toBeNull();
   });
 
+  it('POST /tools/clamp fails closed for a tool that is not advertised', async () => {
+    const allowed = await post(base, '/tools/clamp', {
+      advertised: ['calculator', 'read_file'],
+      tool: 'calculator',
+    });
+    expect(allowed.status).toBe(200);
+    expect((await allowed.json()).ok).toBe(true);
+
+    const refused = await post(base, '/tools/clamp', {
+      advertised: ['calculator', 'read_file'],
+      tool: 'shell_exec',
+    });
+    const body = await refused.json();
+    expect(refused.status).toBe(409);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain('tool_clamped');
+    expect(body.error).toContain('calculator');
+  });
+
+  it('POST /tools/clamp rejects a malformed request', async () => {
+    const res = await post(base, '/tools/clamp', { advertised: 'calculator', tool: 'x' });
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error).toContain('advertised');
+  });
+
   it('POST /sandbox/preflight plans auto mode without spawning', async () => {
     const j = await (
       await post(base, '/sandbox/preflight', {

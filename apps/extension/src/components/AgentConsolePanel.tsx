@@ -5,6 +5,7 @@ import {
   type AgentConsole,
   type ClassifiedObservation,
   type SandboxPosture,
+  type SubagentEntry,
 } from '../chat/agentConsole';
 
 interface Props {
@@ -12,6 +13,8 @@ interface Props {
   steps: AgentStep[];
   /** The posture of the host that runs the agent. */
   posture?: SandboxPosture | null;
+  /** The session's model — the tier the subagent resolution falls back to. */
+  sessionModel?: string;
 }
 
 /**
@@ -21,7 +24,7 @@ interface Props {
  * classified into the closed taxonomy, and the reason the core would
  * append to it is shown next to it. The panel never guesses.
  */
-export function AgentConsolePanel({ steps, posture }: Props) {
+export function AgentConsolePanel({ steps, posture, sessionModel }: Props) {
   const [console_, setConsole] = useState<AgentConsole | null>(null);
 
   useEffect(() => {
@@ -46,7 +49,16 @@ export function AgentConsolePanel({ steps, posture }: Props) {
       .map((s) => console_.classifyObservation(s.observation));
   }, [console_, steps]);
 
-  if (!posture && classified.length === 0) {
+  // The shipped subagent registry, with the model each one resolves to.
+  const subagents = useMemo<SubagentEntry[]>(() => {
+    if (!console_) return [];
+    return console_
+      .listSubagents()
+      .map((spec) => console_.resolveSubagentModel(spec.name, sessionModel ?? ''))
+      .filter((entry): entry is SubagentEntry => entry !== null);
+  }, [console_, sessionModel]);
+
+  if (!posture && classified.length === 0 && subagents.length === 0) {
     return null;
   }
 
@@ -72,6 +84,29 @@ export function AgentConsolePanel({ steps, posture }: Props) {
               </li>
             ))}
         </ul>
+      )}
+
+      {subagents.length > 0 && (
+        <details className="st-agent-console-subagents">
+          <summary>{subagents.length} subagents</summary>
+          <ul>
+            {subagents.map((entry) => (
+              <li key={entry.spec.name}>
+                <span className="st-agent-console-subagent">{entry.spec.name}</span>
+                <span className="st-agent-console-detail">
+                  {entry.resolution
+                    ? `${entry.resolution.model} (${entry.resolution.tier})`
+                    : (entry.error ?? 'no model')}
+                </span>
+                {entry.spec.tool_allowlist.length > 0 && (
+                  <span className="st-agent-console-detail">
+                    tools: {entry.spec.tool_allowlist.join(', ')}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
     </div>
   );

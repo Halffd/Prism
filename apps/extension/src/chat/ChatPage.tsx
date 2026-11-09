@@ -1402,6 +1402,7 @@ export function ChatPage() {
           <AgentConsolePanel
             steps={agentResult?.steps ?? []}
             posture={agentPosture}
+            sessionModel={reduxAIConfig?.model}
           />
         </>
       )}

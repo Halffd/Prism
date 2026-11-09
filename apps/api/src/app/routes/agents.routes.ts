@@ -5,6 +5,7 @@ const wasm = require('../../wasm-pkg/prism_wasm.js') as {
   agent_sandbox_policy_check: (policyJson: string) => string;
   agent_tool_repair: (rawInput: string) => string;
   agent_tool_classify: (observation: string) => string;
+  agent_tool_clamp: (reqJson: string) => string;
   agent_subagents_list: () => string;
   agent_subagent_resolve_model: (
     name: string,
@@ -19,6 +20,7 @@ const wasm = require('../../wasm-pkg/prism_wasm.js') as {
  *   - GET  /agents/subagents            shipped subagent registry
  *   - POST /agents/subagents/:name/model  forced-model resolution
  *   - POST /agents/tools/repair       model-argument normalisation
+ *   - POST /agents/tools/clamp        advertised-surface clamp
  *   - POST /agents/tools/classify     closed tool-error classification
  *   - POST /agents/sandbox/preflight  sandbox plan without spawning
  *
@@ -98,6 +100,39 @@ router.post('/tools/repair', (req: Request, res: Response) => {
       notes: string[];
     }),
   });
+});
+
+/** POST /api/agents/tools/clamp
+ *  body: { advertised: string[], tool: string } — the advertised-surface
+ *  clamp: a tool that is not advertised fails closed with the list. */
+router.post('/tools/clamp', (req: Request, res: Response) => {
+  const { advertised, tool } = (req.body ?? {}) as {
+    advertised?: unknown;
+    tool?: unknown;
+  };
+  if (!Array.isArray(advertised) || !advertised.every((t) => typeof t === 'string')) {
+    return res.status(400).json({
+      success: false,
+      error: 'advertised (string[]) is required',
+    } satisfies ToolResponse);
+  }
+  if (!tool || typeof tool !== 'string') {
+    return res.status(400).json({
+      success: false,
+      error: 'tool (string) is required',
+    } satisfies ToolResponse);
+  }
+  const result = parseWasmJson(
+    wasm.agent_tool_clamp(JSON.stringify({ advertised, tool })),
+    'tool clamp',
+  ) as { ok?: boolean; error?: string };
+  if (!result.ok) {
+    return res.status(409).json({
+      success: false,
+      error: result.error ?? 'tool_clamped',
+    } satisfies ToolResponse);
+  }
+  return res.json({ success: true, ok: true });
 });
 
 /** POST /api/agents/tools/classify

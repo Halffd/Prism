@@ -1773,3 +1773,34 @@ $ne-spacing-xl: 24px;
   flex-direction: column;
   gap: 4px;
 }
+
+.st-agent-console-subagents {
+  summary {
+    color: var(--on-surface-variant);
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+  }
+
+  ul {
+    list-style: none;
+    margin: 4px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  li {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+}
+
+.st-agent-console-subagent {
+  font-family: monospace;
+  font-size: 0.6875rem;
+  color: var(--primary);
+}
