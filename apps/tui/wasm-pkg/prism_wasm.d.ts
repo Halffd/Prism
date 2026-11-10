@@ -65,10 +65,11 @@ export class SseDecoder {
 /**
  * One complete agent run. `llm_step` is a JS function
  * `(system: string, historyJson: string) => string` returning the raw
- * model response (throw/reject to signal an error). Returns JSON
- * `AgentResult` (`{answer, steps, completed, error}`).
+ * model response (throw/reject to signal an error). `strategy` is
+ * "react" (default) or "plan-and-execute". Returns JSON `AgentResult`
+ * (`{answer, steps, completed, error}`).
  */
-export function agent_run(task: string, registry: AgentRegistry, llm_step: Function, max_steps: number): string;
+export function agent_run(task: string, registry: AgentRegistry, llm_step: Function, max_steps: number, strategy: string): string;
 
 /**
  * Preflight + plan a sandbox policy without spawning anything. Input:

@@ -231,7 +231,7 @@ pub fn build_api_chat_body(req_json: &str) -> String {
 
 // ---- agent loop (extension system) ------------------------------------
 
-use prism_core::agent::{run_agent, AgentResult, Permission, StepMessage, ToolRegistry};
+use prism_core::agent::{run_with_strategy, AgentResult, AgentStrategy, Permission, StepMessage, ToolRegistry};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -323,18 +323,23 @@ impl AgentRegistry {
 
 /// One complete agent run. `llm_step` is a JS function
 /// `(system: string, historyJson: string) => string` returning the raw
-/// model response (throw/reject to signal an error). Returns JSON
-/// `AgentResult` (`{answer, steps, completed, error}`).
+/// model response (throw/reject to signal an error). `strategy` is
+/// "react" (default) or "plan-and-execute". Returns JSON `AgentResult`
+/// (`{answer, steps, completed, error}`).
 #[wasm_bindgen]
 pub fn agent_run(
     task: &str,
     registry: &AgentRegistry,
     llm_step: js_sys::Function,
     max_steps: usize,
+    strategy: &str,
 ) -> String {
+    let strategy = match strategy {
+        "plan-and-execute" => AgentStrategy::PlanAndExecute,
+        _ => AgentStrategy::React,
+    };
     let result: std::result::Result<AgentResult, String> = (|| {
-        let history: RefCell<Vec<StepMessage>> = RefCell::new(Vec::new());
-        let mut step_fn = |_system: &str, hist: &[StepMessage]| -> Result<String, String> {
+        let step_fn = |_system: &str, hist: &[StepMessage]| -> Result<String, String> {
             let hist_json = serde_json::to_string(hist).unwrap_or_else(|_| "[]".into());
             let this = wasm_bindgen::JsValue::NULL;
             let r = llm_step.call2(
@@ -349,13 +354,14 @@ pub fn agent_run(
                 Err(e) => Err(e.as_string().unwrap_or_else(|| String::from("llm_step threw"))),
             }
         };
-        let _ = &history;
-        Ok(run_agent(
+        let mut step_fn = step_fn;
+        Ok(run_with_strategy(
             task,
             &mut step_fn,
             &registry.inner.borrow(),
             max_steps,
             &|_, _| false, // headless: ask-permission tools deny unless host flips to allow
+            strategy,
         ))
     })();
     match result {

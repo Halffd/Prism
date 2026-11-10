@@ -80,7 +80,8 @@ hardware modes, agent memories. See TUI.
 | Media capabilities (core + Slint)     | done    | `prism_core::media`: image/inpaint/video/3D request bodies, response parsing (media URL + task id), async provider polling; `host::spawn_media`/`spawn_media_poll`; Slint media panel (capability + provider + prompt/image/mask/seed/duration/format) with ready/pending/failed states |
 | Multi-image (vision) chat request      | done    | `ChatMessage.images`; `stream_request_body` emits the OpenAI vision shape (text part + one `image_url` part per image, empty text part omitted); messages without images keep the plain string shape; `thinking::apply_thinking_to_messages` preserves the attachments |
 | Portable data sync (↔ extension)        | done    | One envelope both sides read/write: `SyncEnvelope{v1, conversations, prompts, settings}` in `libs/shared-types/src/lib/sync.ts` + `prism_core::sync`; host glue export/import/clear (`<config>/prism-data.json`); Slint settings "Data sync" panel + extension Settings section; roles/timestamps shared, messages carry both id/timestamp and thinking |
-| Agent features (tools/permissions/RAG) | planned | Stays per-surface until core proven (single-core plan scope)                                   |
+| Agent strategies (react + plan-and-execute) | done | Core `prism_core::agent`: `AgentStrategy` + `run_with_strategy`; plan phase parses numbered plans (falls back to the task when unparseable), execute phase runs each step with a per-step tool loop, synthesize phase answers; `AgentStep.phase` tags plan/execute/react for rendering; wasm `agent_run(task, registry, llm_step, max_steps, strategy)` |
+| Agent features (tools/permissions/RAG) | planned | Tool-calling + permission gating shipped in core; RAG and multi-agent remain per-surface per single-core scope |
 
 ## CLI (apps/cli)
 

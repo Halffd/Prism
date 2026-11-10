@@ -128,13 +128,38 @@ pub struct StepMessage {
     pub content: String,
 }
 
-/// One recorded step of a run.
+/// One recorded step of a run. `phase` says which strategy phase
+/// produced it ("react" | "plan" | "execute") so surfaces can render
+/// plan vs execution distinctly.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentStep {
     pub thought: String,
     pub action: String,
     pub action_input: String,
     pub observation: String,
+    #[serde(default = "default_phase")]
+    pub phase: String,
+}
+
+fn default_phase() -> String {
+    "react".into()
+}
+
+/// Which loop the agent runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AgentStrategy {
+    /// ReAct: think → act → observe until Final Answer.
+    React,
+    /// Plan-and-execute: first produce a numbered plan, then execute
+    /// each planned step, then synthesize.
+    PlanAndExecute,
+}
+
+impl Default for AgentStrategy {
+    fn default() -> Self {
+        AgentStrategy::React
+    }
 }
 
 /// Final result of an agent run.
@@ -160,6 +185,51 @@ Available tools:
 
 Begin!"#;
 
+const PLAN_SYSTEM: &str = r#"You are a planning agent. First produce a plan, then execute it.
+
+Phase 1 — PLAN. Respond with a numbered list only:
+Plan: 1. <step> 2. <step> …
+
+Phase 2 — EXECUTE. Each turn, respond with EXACTLY:
+{"thought":"<reasoning>","action":"<tool_name>","action_input":"<input>"}
+
+Phase 3 — ANSWER. When all steps are done:
+{"thought":"<reasoning>","action":"Final Answer","action_input":"<your answer>"}
+
+Available tools:
+{tools}
+
+Begin!"#;
+
+/// Parse a numbered plan ("1. foo / 2. bar", or "1) foo"). Tolerates a
+/// header glued to the first item ("Plan: 1. foo"). Returns [] when no
+/// numbered items exist — the caller decides the fallback.
+pub fn parse_plan(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let mut t = line.trim();
+        // Tolerate a header glued to the first item: "Plan: 1. foo".
+        if let Some(colon) = t.find(':') {
+            let (head, tail) = t.split_at(colon);
+            if head.chars().all(|c| c.is_alphabetic() || c.is_whitespace())
+                && !tail[1..].trim().is_empty()
+            {
+                t = tail[1..].trim();
+            }
+        }
+        let stripped = t
+            .strip_prefix(|_: char| t.chars().next().is_some_and(|c| c.is_ascii_digit()))
+            .map(|r| r.trim_start())
+            .and_then(|r| r.strip_prefix('.').or_else(|| r.strip_prefix(')')))
+            .map(str::trim)
+            .unwrap_or("");
+        if !stripped.is_empty() && stripped != t {
+            out.push(stripped.to_string());
+        }
+    }
+    out
+}
+
 /// Parsed model response for one step.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StepDecision {
@@ -178,10 +248,43 @@ fn parse_decision(raw: &str) -> Option<StepDecision> {
     serde_json::from_str(slice).ok()
 }
 
-/// Run the ReAct loop. `max_steps` bounds the cycle; `ask` gates
-/// ask-permission tools (an interactive surface passes a prompt fn; a
-/// headless one passes `|_, _| false` to deny).
+/// Run the agent. `strategy` selects the loop (ReAct or
+/// plan-and-execute); everything else is identical.
 pub fn run_agent(
+    task: &str,
+    step_fn: &mut StepFn,
+    registry: &ToolRegistry,
+    max_steps: usize,
+    ask: &dyn Fn(&str, &str) -> bool,
+) -> AgentResult {
+    run_with_strategy(
+        task,
+        step_fn,
+        registry,
+        max_steps,
+        ask,
+        AgentStrategy::default(),
+    )
+}
+
+/// Run with an explicit strategy.
+pub fn run_with_strategy(
+    task: &str,
+    step_fn: &mut StepFn,
+    registry: &ToolRegistry,
+    max_steps: usize,
+    ask: &dyn Fn(&str, &str) -> bool,
+    strategy: AgentStrategy,
+) -> AgentResult {
+    match strategy {
+        AgentStrategy::React => run_react(task, step_fn, registry, max_steps, ask),
+        AgentStrategy::PlanAndExecute => {
+            run_plan_and_execute(task, step_fn, registry, max_steps, ask)
+        }
+    }
+}
+
+fn run_react(
     task: &str,
     step_fn: &mut StepFn,
     registry: &ToolRegistry,
@@ -219,6 +322,7 @@ pub fn run_agent(
                 action: "Final Answer".into(),
                 action_input: raw.clone(),
                 observation: String::new(),
+                phase: "react".into(),
             });
             return AgentResult {
                 answer: raw,
@@ -234,6 +338,7 @@ pub fn run_agent(
                 action: decision.action.clone(),
                 action_input: decision.action_input.clone(),
                 observation: String::new(),
+                phase: "react".into(),
             });
             return AgentResult {
                 answer: decision.action_input,
@@ -255,6 +360,7 @@ pub fn run_agent(
             action: decision.action.clone(),
             action_input: decision.action_input.clone(),
             observation: observation.clone(),
+            phase: "react".into(),
         });
         history.push(StepMessage {
             role: "assistant".into(),
@@ -372,6 +478,157 @@ impl Tool for WebSearchStubTool {
     }
 }
 
+/// Plan-and-execute loop: one model call for the plan, a bounded tool
+/// loop per planned step, then one call to synthesize. Every phase
+/// counts against `max_steps`. An unparseable plan degrades to a single
+/// synthetic step (the task itself) rather than dead-ending.
+fn run_plan_and_execute(
+    task: &str,
+    step_fn: &mut StepFn,
+    registry: &ToolRegistry,
+    max_steps: usize,
+    ask: &dyn Fn(&str, &str) -> bool,
+) -> AgentResult {
+    let system = PLAN_SYSTEM.replace("{tools}", &registry.descriptions());
+    let mut steps: Vec<AgentStep> = Vec::new();
+    let mut used = 0usize;
+    let mut spend = || -> bool {
+        used += 1;
+        used <= max_steps
+    };
+
+    // ---- Phase 1: the plan (one call) ----
+    let plan_raw = match step_fn(
+        &system,
+        &[StepMessage {
+            role: "user".into(),
+            content: format!("Task: {task}\nPlan:"),
+        }],
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            return AgentResult { answer: String::new(), steps, completed: false, error: Some(e) }
+        }
+    };
+    let plan = parse_plan(&plan_raw);
+    let plan: Vec<String> = if plan.is_empty() {
+        vec![task.to_string()] // synthetic fallback
+    } else {
+        plan
+    };
+    steps.push(AgentStep {
+        thought: "plan".into(),
+        action: "Plan".into(),
+        action_input: plan.join(" | "),
+        observation: format!("{} steps", plan.len()),
+        phase: "plan".into(),
+    });
+
+    // ---- Phase 2: execute each planned step ----
+    let mut observations: Vec<String> = Vec::new();
+    for (idx, step) in plan.iter().enumerate() {
+        let prompt = format!(
+            "Task: {task}\nPlan: {}\nExecute step {}/{}: {}\nPrior observations:\n{}",
+            plan.join(" | "),
+            idx + 1,
+            plan.len(),
+            step,
+            observations.join("\n"),
+        );
+        let mut step_done = false;
+        while !step_done {
+            if !spend() {
+                return AgentResult {
+                    answer: String::new(),
+                    steps,
+                    completed: false,
+                    error: Some("Agent exceeded maximum steps during execution".into()),
+                };
+            }
+            let raw = match step_fn(
+                &system,
+                &[StepMessage { role: "user".into(), content: prompt.clone() }],
+            ) {
+                Ok(r) => r,
+                Err(e) => {
+                    return AgentResult {
+                        answer: String::new(),
+                        steps,
+                        completed: false,
+                        error: Some(e),
+                    }
+                }
+            };
+            let Some(decision) = parse_decision(&raw) else {
+                // Non-JSON: this step's whole reply is its result.
+                steps.push(AgentStep {
+                    thought: format!("step {}/{}", idx + 1, plan.len()),
+                    action: "Step".into(),
+                    action_input: step.clone(),
+                    observation: raw.clone(),
+                    phase: "execute".into(),
+                });
+                observations.push(raw);
+                step_done = true;
+                continue;
+            };
+            if decision.action == "Final Answer" {
+                steps.push(AgentStep {
+                    thought: decision.thought.clone(),
+                    action: "Step".into(),
+                    action_input: step.clone(),
+                    observation: decision.action_input.clone(),
+                    phase: "execute".into(),
+                });
+                observations.push(decision.action_input.clone());
+                step_done = true;
+                continue;
+            }
+            let observation = registry.execute(&decision.action, &decision.action_input, ask);
+            steps.push(AgentStep {
+                thought: decision.thought.clone(),
+                action: decision.action.clone(),
+                action_input: decision.action_input.clone(),
+                observation: observation.clone(),
+                phase: "execute".into(),
+            });
+            observations.push(observation);
+        }
+    }
+
+    // ---- Phase 3: synthesize ----
+    if !spend() {
+        return AgentResult {
+            answer: String::new(),
+            steps,
+            completed: false,
+            error: Some("Agent exceeded maximum steps before synthesizing".into()),
+        };
+    }
+    let prompt = format!(
+        "Task: {task}\nPlan: {}\nObservations:\n{}\nGive the final answer.",
+        plan.join(" | "),
+        observations.join("\n"),
+    );
+    match step_fn(&system, &[StepMessage { role: "user".into(), content: prompt }]) {
+        Ok(raw) => {
+            let answer = parse_decision(&raw)
+                .filter(|d| d.action == "Final Answer")
+                .map(|d| d.action_input)
+                .unwrap_or(raw);
+            steps.push(AgentStep {
+                thought: "synthesize".into(),
+                action: "Final Answer".into(),
+                action_input: answer.clone(),
+                observation: String::new(),
+                phase: "execute".into(),
+            });
+            AgentResult { answer, steps, completed: true, error: None }
+        }
+        Err(e) => AgentResult { answer: String::new(), steps, completed: false, error: Some(e) },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,6 +655,122 @@ mod tests {
             i.set(idx + 1);
             Ok(responses.get(idx).map(|s| s.to_string()).unwrap_or_default())
         }
+    }
+
+    #[test]
+    fn parse_plan_strips_numbering() {
+        assert_eq!(
+            parse_plan("Plan: 1. read the file\n2. patch it\n3. verify"),
+            vec!["read the file", "patch it", "verify"]
+        );
+        assert_eq!(parse_plan("1) alpha\n2) beta"), vec!["alpha", "beta"]);
+    }
+
+    #[test]
+    fn parse_plan_empty_when_no_steps() {
+        assert!(parse_plan("").is_empty());
+        assert!(parse_plan("   \n  ").is_empty());
+    }
+
+    #[test]
+    fn plan_and_execute_runs_plan_then_steps_then_answer() {
+        let reg = ToolRegistry::new();
+        reg.register(Arc::new(EchoTool));
+        let responses: Vec<String> = vec![
+            // plan
+            "Plan: 1. gather\n2. report".into(),
+            // step 1 tool call
+            r#"{"thought":"gather","action":"echo","action_input":"data"}"#.into(),
+            // step 1 done
+            r#"{"thought":"have it","action":"Final Answer","action_input":"gathered"}"#.into(),
+            // step 2 tool call
+            r#"{"thought":"report","action":"echo","action_input":"gathered"}"#.into(),
+            // step 2 done
+            r#"{"thought":"ok","action":"Final Answer","action_input":"reported"}"#.into(),
+            // synthesize
+            r#"{"thought":"done","action":"Final Answer","action_input":"final report"}"#.into(),
+        ];
+        let idx = std::cell::Cell::new(0usize);
+        let mut step = |_sys: &str, _hist: &[StepMessage]| -> Result<String, String> {
+            let i = idx.get();
+            idx.set(i + 1);
+            Ok(responses[i.min(responses.len() - 1)].clone())
+        };
+        let r = run_with_strategy(
+            "summarize",
+            &mut step,
+            &reg,
+            12,
+            &|_, _| true,
+            AgentStrategy::PlanAndExecute,
+        );
+        assert!(r.completed, "err={:?}", r.error);
+        assert_eq!(r.answer, "final report");
+        // Phase tags: one plan, two executes, one synthesis.
+        assert_eq!(r.steps.iter().filter(|s| s.phase == "plan").count(), 1);
+        assert!(r
+            .steps
+            .iter()
+            .any(|s| s.phase == "execute" && s.observation == "echo:data"));
+        let last = r.steps.last().unwrap();
+        assert_eq!(last.action, "Final Answer");
+        assert_eq!(last.action_input, "final report");
+    }
+
+    #[test]
+    fn plan_and_execute_falls_back_when_plan_unparseable() {
+        let reg = ToolRegistry::new();
+        let responses: Vec<String> = vec![
+            "I have no idea how to plan this.".into(),
+            // Single synthetic step: the model answers directly.
+            "The answer is four.".into(),
+            // Synthesis.
+            "four".into(),
+        ];
+        let idx = std::cell::Cell::new(0usize);
+        let mut step = |_sys: &str, _hist: &[StepMessage]| -> Result<String, String> {
+            let i = idx.get();
+            idx.set(i + 1);
+            Ok(responses[i.min(responses.len() - 1)].clone())
+        };
+        let r = run_with_strategy(
+            "compute",
+            &mut step,
+            &reg,
+            12,
+            &|_, _| true,
+            AgentStrategy::PlanAndExecute,
+        );
+        assert!(r.completed, "err={:?}", r.error);
+        // The synthetic step is the task itself.
+        assert!(r.steps.iter().any(|s| s.phase == "plan" && s.action_input == "compute"));
+        assert_eq!(r.answer, "four");
+    }
+
+    #[test]
+    fn plan_and_execute_respects_max_steps() {
+        let reg = ToolRegistry::new();
+        reg.register(Arc::new(EchoTool));
+        let responses: Vec<String> = vec![
+            "Plan: 1. loop forever".into(),
+            r#"{"thought":"again","action":"echo","action_input":"x"}"#.into(),
+        ];
+        let idx = std::cell::Cell::new(0usize);
+        let mut step = |_sys: &str, _hist: &[StepMessage]| -> Result<String, String> {
+            let i = idx.get();
+            idx.set(i + 1);
+            Ok(responses[i.min(responses.len() - 1)].clone())
+        };
+        let r = run_with_strategy(
+            "spin",
+            &mut step,
+            &reg,
+            3,
+            &|_, _| true,
+            AgentStrategy::PlanAndExecute,
+        );
+        assert!(!r.completed);
+        assert!(r.error.as_deref().unwrap().contains("maximum steps"));
     }
 
     #[test]
