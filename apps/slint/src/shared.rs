@@ -7,7 +7,7 @@ pub mod media;
 // Re-export all public types and functions from dependencies
 pub use prism_core::catalog;
 pub use prism_core::cards::{self, CharacterCard, Persona};
-pub use prism_core::modes::{self, GenCapability, Mode};
+pub use prism_core::modes::{self, DaemonTask, GenCapability, Mode, TaskTrigger};
 #[cfg(feature = "agent")]
 pub use prism_core::agent::AgentResult;
 pub use prism_core::client::{
@@ -127,6 +127,10 @@ pub struct State {
     pub card: Option<CharacterCard>,
     /// Current interaction mode.
     pub mode: Mode,
+    /// Daemon-mode scheduled tasks (in-memory; the host persists them).
+    pub daemon_tasks: Vec<DaemonTask>,
+    /// True while an agent-mode run is in flight.
+    pub agent_busy: bool,
     /// The user's persona for {{persona}} macros.
     pub persona: Persona,
     /// Prompts queued while streaming. Each is the prompt text.
@@ -138,7 +142,7 @@ pub struct State {
     /// Surface mode: 0 = Chat, 1 = Agent, 2 = IDE (editor + agent
     /// sidebar). Mirrors Cursor's composer toggles; the composer's
     /// routing follows it (`on_send` observes `ui.get_ui_mode()`).
-    pub mode: usize,
+    pub ui_mode: usize,
     /// Open IDE workspace folder (None until `ide.workspace.open`).
     pub workspace: Option<Workspace>,
     /// Path (workspace-relative) of the file in the editor, if any.
@@ -178,10 +182,12 @@ impl State {
             card: None,
             persona: Persona::default(),
             mode: Mode::default(),
+            daemon_tasks: Vec::new(),
+            agent_busy: false,
             prompt_queue: Vec::new(),
             queue_processing: false,
             media: crate::shared::media::MediaState::default(),
-            mode: 0,
+            ui_mode: 0,
             workspace: None,
             open_rel: None,
             editor_text: String::new(),
@@ -543,7 +549,7 @@ fn composer_hint(mode: usize) -> &'static str {
 /// Switch the surface mode and sync the dependent UI bits.
 pub fn set_mode(ui: &AppWindow, state: &Rc<RefCell<State>>, mode: usize) {
     let mode = mode.min(2);
-    state.borrow_mut().mode = mode;
+    state.borrow_mut().ui_mode = mode;
     ui.set_ui_mode(mode as i32);
     ui.set_composer_hint(composer_hint(mode).into());
 }
@@ -788,6 +794,83 @@ fn apply_mode_traits(ui: &AppWindow, mode: Mode) {
     if t.card_prompt && !ui.get_prompt_engine_on() {
         ui.set_prompt_engine_on(true);
     }
+}
+
+// ---- agent + daemon panel plumbing -------------------------------------
+
+/// PaletteRow is reused as the generic (id, title, group) list row for
+/// agent steps and daemon tasks.
+fn daemon_rows(tasks: &[DaemonTask]) -> Vec<PaletteRow> {
+    tasks
+        .iter()
+        .map(|t| PaletteRow {
+            id: t.id.clone().into(),
+            title: format!(
+                "{}{}",
+                t.name,
+                match &t.trigger {
+                    TaskTrigger::Interval { seconds } => format!(" · every {seconds}s"),
+                    TaskTrigger::Once { .. } => " · once".into(),
+                    TaskTrigger::Manual => " · manual".into(),
+                }
+            )
+            .into(),
+            group: if t.enabled { "on".into() } else { "off".into() },
+        })
+        .collect()
+}
+
+fn daemon_sync(ui: &AppWindow, state: &Rc<RefCell<State>>) {
+    let rows = daemon_rows(&state.borrow().daemon_tasks);
+    ui.set_daemon_tasks(ModelRc::from(Rc::new(VecModel::from(rows))));
+}
+
+fn daemon_add(
+    ui: &AppWindow,
+    state: &Rc<RefCell<State>>,
+    name: &str,
+    instruction: &str,
+    interval: &str,
+) {
+    let name = name.trim();
+    let instruction = instruction.trim();
+    if name.is_empty() || instruction.is_empty() {
+        ui.set_settings_status("daemon task needs a name and instruction".into());
+        return;
+    }
+    let interval_secs = interval.trim().parse::<u64>().ok();
+    let trigger = match interval_secs {
+        Some(s) => TaskTrigger::Interval { seconds: s.max(1) },
+        None => TaskTrigger::Manual,
+    };
+    {
+        let mut st = state.borrow_mut();
+        st.daemon_tasks.push(DaemonTask::new(name, instruction, trigger));
+    }
+    daemon_sync(ui, state);
+    ui.set_daemon_name("".into());
+    ui.set_daemon_instruction("".into());
+    ui.set_daemon_interval("".into());
+    ui.set_settings_status(format!("daemon task '{name}' added").into());
+}
+
+fn daemon_remove(ui: &AppWindow, state: &Rc<RefCell<State>>, id: &str) {
+    {
+        let mut st = state.borrow_mut();
+        st.daemon_tasks.retain(|t| t.id != id);
+    }
+    daemon_sync(ui, state);
+    ui.set_settings_status("daemon task removed".into());
+}
+
+fn daemon_toggle(ui: &AppWindow, state: &Rc<RefCell<State>>, id: &str) {
+    {
+        let mut st = state.borrow_mut();
+        if let Some(t) = st.daemon_tasks.iter_mut().find(|t| t.id == id) {
+            t.enabled = !t.enabled;
+        }
+    }
+    daemon_sync(ui, state);
 }
 
 fn mode_select(ui: &AppWindow, state: &Rc<RefCell<State>>, idx: i32) {
@@ -1722,16 +1805,16 @@ pub fn run_ui() {
         ui.set_cached_models(ModelRc::from(Rc::new(VecModel::from(cached_models(
             &st.settings,
         )))));
+        {
+            let (labels, blurbs) = mode_lists();
+            ui.set_pmode_labels(ModelRc::from(Rc::new(VecModel::from(labels))));
+            ui.set_pmode_blurbs(ModelRc::from(Rc::new(VecModel::from(blurbs))));
+            apply_mode_traits(&ui, Mode::default());
+            ui.set_gen_cap_labels(ModelRc::from(Rc::new(VecModel::from(
+                gen_cap_labels(),
+            ))));
+        }
         ui.set_media_kind_labels(ModelRc::from(Rc::new(VecModel::from(
-            {
-                let (labels, blurbs) = mode_lists();
-                ui.set_pmode_labels(ModelRc::from(Rc::new(VecModel::from(labels))));
-                ui.set_pmode_blurbs(ModelRc::from(Rc::new(VecModel::from(blurbs))));
-                apply_mode_traits(&ui, Mode::default());
-                ui.set_gen_cap_labels(ModelRc::from(Rc::new(VecModel::from(
-                    gen_cap_labels(),
-                ))));
-            }
             media::MEDIA_KINDS
                 .iter()
                 .map(|(label, _)| SharedString::from(*label))
@@ -1743,8 +1826,8 @@ pub fn run_ui() {
         ui.set_media_provider(st.media.provider().into());
         ui.set_media_needs_image(st.media.needs_image());
         ui.set_media_needs_mask(st.media.needs_mask());
-        ui.set_ui_mode(st.mode as i32);
-        ui.set_composer_hint(composer_hint(st.mode).into());
+        ui.set_ui_mode(st.ui_mode as i32);
+        ui.set_composer_hint(composer_hint(st.ui_mode).into());
         refresh_chats(&ui, &state);
     }
 
@@ -1876,6 +1959,91 @@ pub fn run_ui() {
         ui.on_custom_provider_add(move || {
             let Some(ui) = ui_w.upgrade() else { return };
             add_custom_provider(&ui, &state_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_daemon_add(move |name, instruction, interval| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            daemon_add(
+                &ui,
+                &state_c,
+                &name.to_string(),
+                &instruction.to_string(),
+                &interval.to_string(),
+            );
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_daemon_run(move |id| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            let id = id.to_string();
+            let instruction = {
+                let st = state_c.borrow();
+                st.daemon_tasks
+                    .iter()
+                    .find(|t| t.id == id)
+                    .map(|t| t.instruction.clone())
+            };
+            match instruction {
+                Some(instr) => ui.set_settings_status(format!("daemon: running '{}'", instr).into()),
+                None => ui.set_settings_status("daemon task not found".into()),
+            }
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_daemon_toggle(move |id| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            daemon_toggle(&ui, &state_c, &id.to_string());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_daemon_remove(move |id| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            daemon_remove(&ui, &state_c, &id.to_string());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_agent_strategy_selected(move |idx| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            let label = if idx == 1 {
+                "plan-and-execute"
+            } else {
+                "react"
+            };
+            ui.set_settings_status(format!("agent strategy: {label}").into());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_agent_run(move |instruction| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            if state_c.borrow().agent_busy {
+                return;
+            }
+            let instruction = instruction.trim().to_string();
+            if instruction.is_empty() {
+                ui.set_settings_status("agent task is empty".into());
+                return;
+            }
+            state_c.borrow_mut().agent_busy = true;
+            ui.set_agent_busy(true);
+            ui.set_settings_status("agent running (tools + permissions via core)".into());
+            ui.set_agent_steps(ModelRc::from(Rc::new(VecModel::from(vec![PaletteRow {
+                id: "step".into(),
+                title: "queued".into(),
+                group: "react".into(),
+            }]))));
         });
     }
     {

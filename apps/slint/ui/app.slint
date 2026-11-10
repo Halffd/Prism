@@ -88,6 +88,17 @@ export component AppWindow inherits Window {
     in property <[string]> pmode-labels;
     in property <[string]> pmode-blurbs;
     in property <[string]> gen-cap-labels;
+    // ---- agent mode ----
+    in-out property <int> agent-strategy-idx: 0;
+    in-out property <string> agent-task;
+    in property <bool> agent-busy;
+    in property <string> agent-status;
+    in property <[PaletteRow]> agent-steps;
+    // ---- daemon mode ----
+    in property <[PaletteRow]> daemon-tasks;
+    in-out property <string> daemon-name;
+    in-out property <string> daemon-instruction;
+    in-out property <string> daemon-interval;
     // ---- character cards / persona ----
     in-out property <string> card-path;        // path to a V2/V1 card JSON
     in-out property <string> persona-name;
@@ -156,6 +167,12 @@ export component AppWindow inherits Window {
     callback palette-move(int);       // arg: index delta (+1/-1)
     callback pmode-selected(int);   // mode index
     callback gen-cap-selected(int); // generative capability index
+    callback agent-strategy-selected(int);
+    callback agent-run(string);       // instruction text
+    callback daemon-add(string, string, string); // name, instruction, interval-seconds
+    callback daemon-run(string);       // task id
+    callback daemon-toggle(string);    // task id
+    callback daemon-remove(string);   // task id
     callback card-load();     // read card-path, attach for prompt assembly
     callback card-clear();
     callback persona-edited(string, string); // name, description
@@ -235,7 +252,7 @@ export component AppWindow inherits Window {
                         padding: 4px;
                         spacing: 2px;
                         Text {
-                            text: pmode[i];
+                            text: pmode;
                             color: pmode-idx == i ? #7ee787 : #9fb0bd;
                             font-size: 12px;
                             font-weight: 600;
@@ -805,6 +822,95 @@ export component AppWindow inherits Window {
                             text: "Use the core prompt engine";
                             checked <=> prompt-engine-on;
                             toggled => { prompt-engine-toggle(); }
+                        }
+                    }
+
+                    // ---- agent mode: tools are gated by permissions on
+                    //      the core side; the surface picks strategy + task
+                    if mode-tools : VerticalLayout {
+                        spacing: 6px;
+                        Text { text: "Agent"; color: #9fb0bd; font-weight: 700; }
+                        ComboBox {
+                            model: ["ReAct", "Plan & execute"];
+                            current-index <=> agent-strategy-idx;
+                        }
+                        TextEdit {
+                            height: 60px;
+                            text <=> agent-task;
+                            placeholder-text: "Task for the agent (tools available)";
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Button {
+                                text: agent-busy ? "Running…" : "Run agent";
+                                enabled: !agent-busy;
+                                clicked => { agent-run(agent-task); }
+                            }
+                        }
+                        if agent-status != "" : Text {
+                            text: agent-status;
+                            color: #8b95a1;
+                            font-size: 11px;
+                            wrap: word-wrap;
+                        }
+                        for step in agent-steps : Rectangle {
+                            height: 26px;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: step.group;
+                                    color: #66707a;
+                                    font-size: 10px;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: step.title;
+                                    color: #cfd8dc;
+                                    font-size: 11px;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                    horizontal-stretch: 1;
+                                }
+                            }
+                        }
+                    }
+
+                    // ---- daemon mode: scheduled tasks on the agent loop ----
+                    if mode-tasks : VerticalLayout {
+                        spacing: 6px;
+                        Text { text: "Daemon tasks"; color: #9fb0bd; font-weight: 700; }
+                        LineEdit {
+                            text <=> daemon-name;
+                            placeholder-text: "Task name";
+                        }
+                        LineEdit {
+                            text <=> daemon-interval;
+                            placeholder-text: "Interval seconds (empty = manual)";
+                        }
+                        TextEdit {
+                            height: 50px;
+                            text <=> daemon-instruction;
+                            placeholder-text: "Instruction the agent runs";
+                        }
+                        Button {
+                            text: "Add task";
+                            clicked => { daemon-add(daemon-name, daemon-instruction, daemon-interval); }
+                        }
+                        for t in daemon-tasks : Rectangle {
+                            height: 28px;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: t.title;
+                                    color: #cfd8dc;
+                                    font-size: 11px;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                    horizontal-stretch: 1;
+                                }
+                                Button { text: "run"; clicked => { daemon-run(t.id); } }
+                                Button { text: "x"; clicked => { daemon-remove(t.id); } }
+                            }
                         }
                     }
 
