@@ -20,6 +20,7 @@ import {
   loadConversation,
   persistChat,
 } from '../lib/core-store';
+import { mcpConfigPath, mcpSessionOnce } from '../lib/mcp';
 import { nanoid } from 'nanoid';
 import type {
   Message,
@@ -284,6 +285,46 @@ export function ChatScreen() {
   const handleSend = useCallback(async () => {
     const content = chat.input.trim();
     if (content.length === 0) return;
+
+    // /mcp — report the connected MCP servers and the tools they add
+    // to the agent's advertised surface (connect once per process).
+    if (content === '/mcp' || content.startsWith('/mcp ')) {
+      chat.setInput('');
+      const { session, errors } = await mcpSessionOnce();
+      const filePath = mcpConfigPath();
+      if (!session) {
+        chat.addMessage({
+          id: `msg_${nanoid()}`,
+          role: 'assistant',
+          content:
+            errors.length > 0
+              ? `[mcp] no server reachable (${filePath}):\n${errors.join('\n')}`
+              : `[mcp] no configuration — add an "mcpServers" entry to ${filePath}`,
+          timestamp: Date.now(),
+        });
+        return;
+      }
+      const byServer = new Map<string, string[]>();
+      for (const [advertised, ref] of Object.entries(session.toolMap)) {
+        const list = byServer.get(ref.server) ?? [];
+        list.push(advertised);
+        byServer.set(ref.server, list);
+      }
+      const lines = [`[mcp] ${byServer.size} server(s), ${session.tools.length} tool(s):`];
+      for (const [server, toolsAdvertised] of byServer) {
+        lines.push(`  ${server}: ${toolsAdvertised.join(', ')}`);
+      }
+      for (const e of errors) {
+        lines.push(`  failed: ${e}`);
+      }
+      chat.addMessage({
+        id: `msg_${nanoid()}`,
+        role: 'assistant',
+        content: lines.join('\n'),
+        timestamp: Date.now(),
+      });
+      return;
+    }
 
     // /vault <help|list|save|open <id>|delete <id>> — the shared
     // conversation vault (the core's store; Slint and the CLI read the
