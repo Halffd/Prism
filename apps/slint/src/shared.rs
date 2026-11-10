@@ -7,6 +7,7 @@ pub mod media;
 // Re-export all public types and functions from dependencies
 pub use prism_core::catalog;
 pub use prism_core::cards::{self, CharacterCard, Persona};
+pub use prism_core::modes::{self, GenCapability, Mode};
 #[cfg(feature = "agent")]
 pub use prism_core::agent::AgentResult;
 pub use prism_core::client::{
@@ -124,6 +125,8 @@ pub struct State {
     pub history_draft: Option<String>,
     /// Loaded character card (SillyTavern V2/V1 JSON on disk).
     pub card: Option<CharacterCard>,
+    /// Current interaction mode.
+    pub mode: Mode,
     /// The user's persona for {{persona}} macros.
     pub persona: Persona,
     /// Prompts queued while streaming. Each is the prompt text.
@@ -174,6 +177,7 @@ impl State {
             history_draft: None,
             card: None,
             persona: Persona::default(),
+            mode: Mode::default(),
             prompt_queue: Vec::new(),
             queue_processing: false,
             media: crate::shared::media::MediaState::default(),
@@ -754,6 +758,53 @@ fn card_clear(ui: &AppWindow, state: &Rc<RefCell<State>>) {
     state.borrow_mut().card = None;
     ui.set_card_loaded(false);
     ui.set_card_summary("".into());
+}
+
+// ---- interaction modes ----
+
+/// Labels + blurbs for the mode rail (same order as `Mode::all()`).
+fn mode_lists() -> (Vec<SharedString>, Vec<SharedString>) {
+    let labels = Mode::all().iter().map(|m| SharedString::from(m.label())).collect();
+    let blurbs = Mode::all().iter().map(|m| SharedString::from(m.blurb())).collect();
+    (labels, blurbs)
+}
+
+fn gen_cap_labels() -> Vec<SharedString> {
+    GenCapability::all()
+        .iter()
+        .map(|c| SharedString::from(c.label()))
+        .collect()
+}
+
+/// Apply a mode's traits to every mode-derived UI property.
+fn apply_mode_traits(ui: &AppWindow, mode: Mode) {
+    let t = mode.traits();
+    ui.set_mode_tools(t.tools);
+    ui.set_mode_cards(t.card_prompt);
+    ui.set_mode_media(t.media);
+    ui.set_mode_tasks(t.tasks);
+    ui.set_mode_strategy(t.strategy);
+    // Creative mode implies the prompt engine; daemon/agent too.
+    if t.card_prompt && !ui.get_prompt_engine_on() {
+        ui.set_prompt_engine_on(true);
+    }
+}
+
+fn mode_select(ui: &AppWindow, state: &Rc<RefCell<State>>, idx: i32) {
+    let Some(mode) = Mode::all().get(idx as usize).copied() else {
+        return;
+    };
+    state.borrow_mut().mode = mode;
+    ui.set_pmode_idx(idx);
+    apply_mode_traits(ui, mode);
+    let extra = match mode {
+        Mode::Daemon => "daemon mode: tasks + tools + strategy",
+        Mode::Generative => "generative mode: media screens",
+        Mode::Creative => "creative mode: cards + personas + lore",
+        Mode::Agent => "agent mode: tools + permissions + subagents",
+        Mode::Chat => "chat mode: no tools",
+    };
+    ui.set_settings_status(extra.into());
 }
 
 fn persona_edit(state: &Rc<RefCell<State>>, name: &str, desc: &str) {
@@ -1672,6 +1723,15 @@ pub fn run_ui() {
             &st.settings,
         )))));
         ui.set_media_kind_labels(ModelRc::from(Rc::new(VecModel::from(
+            {
+                let (labels, blurbs) = mode_lists();
+                ui.set_pmode_labels(ModelRc::from(Rc::new(VecModel::from(labels))));
+                ui.set_pmode_blurbs(ModelRc::from(Rc::new(VecModel::from(blurbs))));
+                apply_mode_traits(&ui, Mode::default());
+                ui.set_gen_cap_labels(ModelRc::from(Rc::new(VecModel::from(
+                    gen_cap_labels(),
+                ))));
+            }
             media::MEDIA_KINDS
                 .iter()
                 .map(|(label, _)| SharedString::from(*label))
@@ -1816,6 +1876,26 @@ pub fn run_ui() {
         ui.on_custom_provider_add(move || {
             let Some(ui) = ui_w.upgrade() else { return };
             add_custom_provider(&ui, &state_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_pmode_selected(move |idx| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            mode_select(&ui, &state_c, idx);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_gen_cap_selected(move |idx| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            let cap = GenCapability::all()
+                .get(idx as usize)
+                .map(|c| c.label())
+                .unwrap_or("unknown");
+            ui.set_settings_status(format!("generative: {cap}").into());
         });
     }
     {
