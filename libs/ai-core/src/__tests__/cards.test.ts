@@ -15,7 +15,6 @@ import {
   validateLoreEntry,
   type CoreCharacterCard,
   type CoreCharacterBook,
-  type CoreLoreEntry,
   type CorePersona,
 } from '../index';
 

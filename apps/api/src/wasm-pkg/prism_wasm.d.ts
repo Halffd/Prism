@@ -81,12 +81,11 @@ export function agent_run(task: string, registry: AgentRegistry, llm_step: Funct
 export function agent_sandbox_policy_check(policy_json: string): string;
 
 /**
- * Forced-model resolution for one subagent — the daemon's documented
- * order: the spec's `forced_model`, then the session host model, then
- * the provider default. Returns `{model, tier: subagent_forced|session|
- * provider_default}` or JSON error when nothing resolves.
+ * Effective tool surface for one subagent — the core's clamp: the
+ * allowlist intersected with the advertised surface. An empty
+ * allowlist means "the full surface"; a total miss is a JSON error.
  */
-export function agent_subagent_resolve_model(name: string, session_model: string, provider_default?: string | null): string;
+export function agent_subagent_clamp_tools(name: string, advertised: string[]): string;
 
 /**
  * List the shipped subagent registry (names + tool allowlists). The

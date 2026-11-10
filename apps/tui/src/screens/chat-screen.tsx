@@ -21,6 +21,12 @@ import {
   persistChat,
 } from '../lib/core-store';
 import { mcpConfigPath, mcpSessionOnce } from '../lib/mcp';
+import {
+  BackgroundAgentManager,
+  jobLine,
+  subagentRegistry,
+} from '../lib/background-agents';
+import { runSubagentTask } from '../lib/tui-agent';
 import { nanoid } from 'nanoid';
 import type {
   Message,
@@ -49,6 +55,11 @@ export function ChatScreen() {
   const vaultDirRef = useRef<string | null>(conversationsDir());
   const vaultIdRef = useRef<string | null>(null);
   const [vaultLabel, setVaultLabel] = useState<string>('');
+  // Background subagents (Cursor-style): spawned via /agents, results
+  // stream into the transcript as their status transitions.
+  const bgManagerRef = useRef<BackgroundAgentManager | null>(null);
+  const bgSettingsRef = useRef(settings);
+  bgSettingsRef.current = settings;
   if (!clientRef.current) {
     clientRef.current = new TUIClient({
       aiConfig: settings.aiConfig,
@@ -285,6 +296,70 @@ export function ChatScreen() {
   const handleSend = useCallback(async () => {
     const content = chat.input.trim();
     if (content.length === 0) return;
+
+    // /agents <help|list|spawn <name> <task>> — background subagents on
+    // the core's registry; results arrive as their own lines.
+    if (content === '/agents' || content.startsWith('/agents ')) {
+      chat.setInput('');
+      const arg = content.slice(7).trim();
+      const reply = (text: string) =>
+        chat.addMessage({
+          id: `msg_${nanoid()}`,
+          role: 'assistant',
+          content: text,
+          timestamp: Date.now(),
+        });
+      if (arg.startsWith('spawn ')) {
+        const rest = arg.slice(6).trim();
+        const name = rest.slice(0, rest.indexOf(' ')).trim();
+        const task = rest.slice(name.length).trim();
+        if (!name || !task) {
+          reply('[agents] usage: /agents spawn <name> <task>');
+          return;
+        }
+        const { specs, errors } = await subagentRegistry();
+        if (!specs.some((s) => s.name === name)) {
+          reply(
+            `[agents] unknown subagent ${JSON.stringify(name)} — known: ${specs
+              .map((s) => s.name)
+              .join(', ')}`,
+          );
+          return;
+        }
+        const job = getBgManager().spawn(name, task);
+        // The queue transition (queued → running → done) reports itself.
+        if (errors.length > 0) {
+          reply(`[agents] config warnings:\n${errors.join('\n')}`);
+        }
+        reply(jobLine(job));
+        return;
+      }
+      if (arg === '' || arg === 'list' || arg === 'help') {
+        const { specs, errors } = await subagentRegistry();
+        const lines = ['agents — background subagents (core registry):'];
+        for (const s of specs) {
+          const model = s.forced_model ? ` · model ${s.forced_model}` : '';
+          const allow = s.tool_allowlist.length
+            ? s.tool_allowlist.join(', ')
+            : 'full surface';
+          lines.push(`  ${s.name}: ${s.description}`);
+          lines.push(`    tools: ${allow}${model}`);
+        }
+        if (errors.length > 0) {
+          lines.push(`config warnings:\n${errors.join('\n')}`);
+        }
+        lines.push('spawn one: /agents spawn <name> <task>');
+        chat.addMessage({
+          id: `msg_${nanoid()}`,
+          role: 'assistant',
+          content: lines.join('\n'),
+          timestamp: Date.now(),
+        });
+        return;
+      }
+      reply(`[agents: unknown command — try /agents help]`);
+      return;
+    }
 
     // /mcp — report the connected MCP servers and the tools they add
     // to the agent's advertised surface (connect once per process).
@@ -564,6 +639,62 @@ export function ChatScreen() {
     }, 1200);
     return () => clearTimeout(timer);
   }, [messageCount, chat.messages]);
+
+  // One background-agent manager for the screen's lifetime; its runner
+  // resolves the spec against the core's registry (shipped + config
+  // file) and runs the clamped, force-modelled subagent task.
+  const getBgManager = useCallback(() => {
+    bgManagerRef.current ??= new BackgroundAgentManager(
+      async (specName, task) => {
+        const { specs } = await subagentRegistry();
+        const spec = specs.find((s) => s.name === specName);
+        if (!spec) {
+          return {
+            ok: false,
+            error: `unknown subagent ${specName} (available: ${specs
+              .map((s) => s.name)
+              .join(', ')})`,
+          };
+        }
+        const result = await runSubagentTask(
+          spec,
+          { task, maxSteps: undefined },
+          { aiConfig: bgSettingsRef.current.aiConfig },
+        );
+        if (!result.ok) {
+          return { ok: false, error: result.error ?? 'subagent run failed' };
+        }
+        const parts = [result.value.answer];
+        if (result.value.steps?.length > 0) {
+          parts.push('\n--- Subagent Steps ---');
+          for (const step of result.value.steps) {
+            parts.push(
+              `Thought: ${step.thought}\nAction: ${step.action}\nObservation: ${step.observation}`,
+            );
+          }
+        }
+        return { ok: true, answer: parts.join('\n\n') };
+      },
+    );
+    return bgManagerRef.current;
+  }, []);
+
+  // Every job transition lands as its own transcript line — the
+  // deterministic status queue behind `/agents`.
+  useEffect(() => {
+    const manager = getBgManager();
+    return manager.subscribe((job) => {
+      chat.addMessage({
+        id: `msg_${nanoid()}`,
+        role: 'assistant',
+        content: jobLine(job),
+        timestamp: Date.now(),
+      });
+    });
+    // chat.addMessage is stable (useCallback with []); the manager is
+    // screen-lifetime; nothing else belongs in deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [getBgManager]);
 
   useInput((input, key) => {
     if (screen !== 'chat') return;

@@ -7,7 +7,8 @@ import type {
 } from '@prism/shared-types';
 import { ReActAgentService, PermissionAwareToolExecutor } from '@prism/agent';
 import type { ToolExecutor } from '@prism/agent';
-import { loadCore, clampToolCall } from '@prism/ai-core';
+import { loadCore, clampToolCall, resolveSubagentModel, clampSubagentTools } from '@prism/ai-core';
+import type { SubagentSpec } from '@prism/ai-core';
 import { OpenAILLMService } from '@prism/llm';
 import { NodeToolExecutor, NODE_TOOLS } from './node-tool-executor';
 import { mcpSessionOnce, type McpSession } from './mcp';
@@ -112,4 +113,50 @@ export async function runTUIAgent(
     // the core's gate clamps every other name the model may produce.
     tools: request.tools && request.tools.length > 0 ? request.tools : surface,
   });
+}
+
+/**
+ * One subagent run in the background: the model comes from the core's
+ * forced order (spec → session → provider default) and the tool
+ * surface is the core's allowlist clamp over node+MCP. Everything else
+ * (permissions, ask prompts, gating) is the same machinery a mainline
+ * run gets.
+ */
+export async function runSubagentTask(
+  spec: SubagentSpec,
+  request: AgentRequest,
+  options: TUIAgentOptions,
+): Promise<Result<AgentResult>> {
+  const core = await loadCore();
+  const resolution = resolveSubagentModel(
+    core,
+    spec.name,
+    options.aiConfig.model ?? '',
+  );
+  // Share the process-lifetime MCP session with mainline runs.
+  const mcp =
+    options.mcpSession !== undefined
+      ? options.mcpSession
+      : (await mcpSessionOnce()).session;
+  const surface = mcp ? [...NODE_TOOLS, ...mcp.tools] : NODE_TOOLS;
+  const effective = clampSubagentTools(
+    core,
+    spec.name,
+    surface.map((t) => t.name),
+  );
+  const tools = surface.filter((t) => effective.includes(t.name));
+
+  return runTUIAgent(
+    {
+      ...request,
+      tools: tools.length > 0 ? tools : request.tools,
+    },
+    {
+      ...options,
+      // The resolution tier decides the model; the rest of the
+      // provider config is the session's.
+      aiConfig: { ...options.aiConfig, model: resolution.model },
+      mcpSession: mcp,
+    },
+  );
 }

@@ -493,14 +493,25 @@ pub fn agent_subagents_list() -> String {
 /// Forced-model resolution for one subagent — the daemon's documented
 /// order: the spec's `forced_model`, then the session host model, then
 /// the provider default. Returns `{model, tier: subagent_forced|session|
-/// provider_default}` or JSON error when nothing resolves.
-#[wasm_bindgen]
+/// provider_default}` or JSON error when nothing resolves.#[wasm_bindgen]
 pub fn agent_subagent_resolve_model(name: &str, session_model: &str, provider_default: Option<String>) -> String {
     let reg = prism_core::subagents::SubagentRegistry::default();
     match reg.resolve_model(name, session_model, provider_default) {
         Ok(r) => serde_json::to_string(&r).unwrap_or_else(|e| format!("{{\"error\":\"{e}\"}}")),
         // serde_json escaping matters here: the message quotes the
         // subagent name, which would break a hand-built JSON string.
+        Err(e) => serde_json::json!({ "error": e }).to_string(),
+    }
+}
+
+/// Effective tool surface for one subagent — the core's clamp: the
+/// allowlist intersected with the advertised surface. An empty
+/// allowlist means "the full surface"; a total miss is a JSON error.
+#[wasm_bindgen]
+pub fn agent_subagent_clamp_tools(name: &str, advertised: Vec<String>) -> String {
+    let reg = prism_core::subagents::SubagentRegistry::default();
+    match reg.clamp_tools(name, &advertised) {
+        Ok(t) => serde_json::to_string(&t).unwrap_or_else(|e| format!("{{\"error\":\"{e}\"}}")),
         Err(e) => serde_json::json!({ "error": e }).to_string(),
     }
 }

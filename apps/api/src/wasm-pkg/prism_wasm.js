@@ -292,34 +292,30 @@ function agent_sandbox_policy_check(policy_json) {
 exports.agent_sandbox_policy_check = agent_sandbox_policy_check;
 
 /**
- * Forced-model resolution for one subagent — the daemon's documented
- * order: the spec's `forced_model`, then the session host model, then
- * the provider default. Returns `{model, tier: subagent_forced|session|
- * provider_default}` or JSON error when nothing resolves.
+ * Effective tool surface for one subagent — the core's clamp: the
+ * allowlist intersected with the advertised surface. An empty
+ * allowlist means "the full surface"; a total miss is a JSON error.
  * @param {string} name
- * @param {string} session_model
- * @param {string | null} [provider_default]
+ * @param {string[]} advertised
  * @returns {string}
  */
-function agent_subagent_resolve_model(name, session_model, provider_default) {
-    let deferred4_0;
-    let deferred4_1;
+function agent_subagent_clamp_tools(name, advertised) {
+    let deferred3_0;
+    let deferred3_1;
     try {
         const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(session_model, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const ptr1 = passArrayJsValueToWasm0(advertised, wasm.__wbindgen_malloc);
         const len1 = WASM_VECTOR_LEN;
-        var ptr2 = isLikeNone(provider_default) ? 0 : passStringToWasm0(provider_default, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        var len2 = WASM_VECTOR_LEN;
-        const ret = wasm.agent_subagent_resolve_model(ptr0, len0, ptr1, len1, ptr2, len2);
-        deferred4_0 = ret[0];
-        deferred4_1 = ret[1];
+        const ret = wasm.agent_subagent_clamp_tools(ptr0, len0, ptr1, len1);
+        deferred3_0 = ret[0];
+        deferred3_1 = ret[1];
         return getStringFromWasm0(ret[0], ret[1]);
     } finally {
-        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
     }
 }
-exports.agent_subagent_resolve_model = agent_subagent_resolve_model;
+exports.agent_subagent_clamp_tools = agent_subagent_clamp_tools;
 
 /**
  * List the shipped subagent registry (names + tool allowlists). The
@@ -963,6 +959,16 @@ function passArray8ToWasm0(arg, malloc) {
     const ptr = malloc(arg.length * 1, 1) >>> 0;
     getUint8ArrayMemory0().set(arg, ptr / 1);
     WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+
+function passArrayJsValueToWasm0(array, malloc) {
+    const ptr = malloc(array.length * 4, 4) >>> 0;
+    for (let i = 0; i < array.length; i++) {
+        const add = addToExternrefTable0(array[i]);
+        getDataViewMemory0().setUint32(ptr + 4 * i, add, true);
+    }
+    WASM_VECTOR_LEN = array.length;
     return ptr;
 }
 

@@ -48,6 +48,7 @@ export interface WasmCoreModule {
     sessionModel: string,
     providerDefault?: string | null,
   ): string;
+  agent_subagent_clamp_tools(name: string, advertised: string[]): string;
 }
 
 export type WasmCore = WasmCoreModule & Record<string, unknown>;
@@ -467,6 +468,23 @@ export interface SubagentSpec {
 /** The shipped subagent registry. */
 export function subagents(core: WasmCore): SubagentSpec[] {
   return JSON.parse(core.agent_subagents_list()) as SubagentSpec[];
+}
+
+/** Effective tool surface for one subagent — the core's clamp: the
+ *  allowlist intersected with the advertised surface. An empty
+ *  allowlist yields the full surface; a total miss throws. */
+export function clampSubagentTools(
+  core: WasmCore,
+  name: string,
+  advertised: string[],
+): string[] {
+  const raw = JSON.parse(
+    core.agent_subagent_clamp_tools(name, advertised),
+  ) as string[] | { error?: string };
+  if (Array.isArray(raw)) {
+    return raw;
+  }
+  throw new Error(raw.error ?? 'subagent tool clamp failed');
 }
 
 /** Which model a subagent run must use, and which tier decided it. */
