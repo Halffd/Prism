@@ -1,6 +1,111 @@
 /* @ts-self-types="./prism_wasm.d.ts" */
 
 /**
+ * A registry instance the JS host drives across steps.
+ */
+class AgentRegistry {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        AgentRegistryFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_agentregistry_free(ptr, 0);
+    }
+    /**
+     * Execute a tool directly (permission-gated). `ask_fn` is a JS
+     * function `(toolName, input) => bool`.
+     * @param {string} name
+     * @param {string} input
+     * @param {Function} ask_fn
+     * @returns {string}
+     */
+    execute(name, input, ask_fn) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(input, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ret = wasm.agentregistry_execute(this.__wbg_ptr, ptr0, len0, ptr1, len1, ask_fn);
+            deferred3_0 = ret[0];
+            deferred3_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    constructor() {
+        const ret = wasm.agentregistry_new();
+        this.__wbg_ptr = ret;
+        AgentRegistryFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * Register (or replace) a tool. Extension point.
+     * @param {JsTool} tool
+     */
+    register(tool) {
+        _assertClass(tool, JsTool);
+        var ptr0 = tool.__destroy_into_raw();
+        wasm.agentregistry_register(this.__wbg_ptr, ptr0);
+    }
+    /**
+     * Set a tool's permission: "allow" | "deny" | "ask".
+     * @param {string} name
+     * @param {string} level
+     */
+    set_permission(name, level) {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(level, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.agentregistry_set_permission(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+    }
+}
+if (Symbol.dispose) AgentRegistry.prototype[Symbol.dispose] = AgentRegistry.prototype.free;
+exports.AgentRegistry = AgentRegistry;
+
+/**
+ * A JS-registered tool: the host supplies `execute(input) -> string`.
+ * This is the extension point — surfaces register domain tools (page
+ * context, snippets, editor state) and the core loop dispatches them.
+ */
+class JsTool {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        JsToolFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_jstool_free(ptr, 0);
+    }
+    /**
+     * `execute` must be a JS function `(input: string) => string`.
+     * @param {string} name
+     * @param {string} description
+     * @param {Function} execute
+     */
+    constructor(name, description, execute) {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(description, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.jstool_new(ptr0, len0, ptr1, len1, execute);
+        this.__wbg_ptr = ret;
+        JsToolFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+}
+if (Symbol.dispose) JsTool.prototype[Symbol.dispose] = JsTool.prototype.free;
+exports.JsTool = JsTool;
+
+/**
  * Ollama native NDJSON decoder.
  */
 class NdjsonDecoder {
@@ -130,6 +235,179 @@ if (Symbol.dispose) SseDecoder.prototype[Symbol.dispose] = SseDecoder.prototype.
 exports.SseDecoder = SseDecoder;
 
 /**
+ * One complete agent run. `llm_step` is a JS function
+ * `(system: string, historyJson: string) => string` returning the raw
+ * model response (throw/reject to signal an error). Returns JSON
+ * `AgentResult` (`{answer, steps, completed, error}`).
+ * @param {string} task
+ * @param {AgentRegistry} registry
+ * @param {Function} llm_step
+ * @param {number} max_steps
+ * @returns {string}
+ */
+function agent_run(task, registry, llm_step, max_steps) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(task, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        _assertClass(registry, AgentRegistry);
+        const ret = wasm.agent_run(ptr0, len0, registry.__wbg_ptr, llm_step, max_steps);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.agent_run = agent_run;
+
+/**
+ * Preflight + plan a sandbox policy without spawning anything. Input:
+ * JSON `SandboxPolicy` (the helper's `--policy` shape). Returns JSON
+ * `{ok, sandbox_used, error}` where `error` is the closed
+ * `SpawnOutcome` (`sandbox_unsupported` on hosts without Landlock).
+ * Identical to the CLI's `prism sandbox preflight --policy` gate.
+ * @param {string} policy_json
+ * @returns {string}
+ */
+function agent_sandbox_policy_check(policy_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(policy_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.agent_sandbox_policy_check(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.agent_sandbox_policy_check = agent_sandbox_policy_check;
+
+/**
+ * Forced-model resolution for one subagent — the daemon's documented
+ * order: the spec's `forced_model`, then the session host model, then
+ * the provider default. Returns `{model, tier: subagent_forced|session|
+ * provider_default}` or JSON error when nothing resolves.
+ * @param {string} name
+ * @param {string} session_model
+ * @param {string | null} [provider_default]
+ * @returns {string}
+ */
+function agent_subagent_resolve_model(name, session_model, provider_default) {
+    let deferred4_0;
+    let deferred4_1;
+    try {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(session_model, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        var ptr2 = isLikeNone(provider_default) ? 0 : passStringToWasm0(provider_default, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len2 = WASM_VECTOR_LEN;
+        const ret = wasm.agent_subagent_resolve_model(ptr0, len0, ptr1, len1, ptr2, len2);
+        deferred4_0 = ret[0];
+        deferred4_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    }
+}
+exports.agent_subagent_resolve_model = agent_subagent_resolve_model;
+
+/**
+ * List the shipped subagent registry (names + tool allowlists). The
+ * surfaces use it to advertise `task_*` tools.
+ * @returns {string}
+ */
+function agent_subagents_list() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.agent_subagents_list();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+exports.agent_subagents_list = agent_subagents_list;
+
+/**
+ * Clamp a tool call to the advertised surface. Input: JSON
+ * `{"advertised": ["name", ...], "tool": "name"}`. Returns
+ * `{"ok": true}` when the tool is advertised (or is `Final Answer`),
+ * `{"ok": false, "error": "tool_clamped: ..."}` otherwise — the same
+ * fail-closed answer the core's gated execution gives.
+ * @param {string} req_json
+ * @returns {string}
+ */
+function agent_tool_clamp(req_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(req_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.agent_tool_clamp(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.agent_tool_clamp = agent_tool_clamp;
+
+/**
+ * Classify a tool observation and get the actionable detail appended
+ * the way `gated_execute` does. Returns `{kind, detail: string|null}`.
+ * @param {string} observation
+ * @returns {string}
+ */
+function agent_tool_classify(observation) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(observation, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.agent_tool_classify(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.agent_tool_classify = agent_tool_classify;
+
+/**
+ * Repair a model-produced tool argument into the plain string input the
+ * core tools take. Recommended to run before dispatching any tool call.
+ * Returns JSON `{input, notes: [...]}` — notes name every normalisation
+ * applied, so a surface can log the repair.
+ * @param {string} raw_input
+ * @returns {string}
+ */
+function agent_tool_repair(raw_input) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(raw_input, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.agent_tool_repair(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.agent_tool_repair = agent_tool_repair;
+
+/**
  * Prepend the scratchpad instruction to the first user message.
  * Takes and returns a JSON array of `{"role": "...", "content": "..."}`.
  * @param {string} messages_json
@@ -196,6 +474,30 @@ function build_ollama_body(req_json) {
 exports.build_ollama_body = build_ollama_body;
 
 /**
+ * Assemble the SillyTavern-style prompt.
+ * Input: JSON `[CharacterCard, Persona, history: ChatMessage[],
+ *              LoreScan|null, user_input, system_override|null]`.
+ * Returns JSON `Vec<ChatMessage>`.
+ * @param {string} request_json
+ * @returns {string}
+ */
+function build_prompt(request_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(request_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.build_prompt(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.build_prompt = build_prompt;
+
+/**
  * Build the provider POST body for a direct stream request.
  * Input: JSON `StreamRequest` (base_url, api_key, model, temperature,
  * messages, max_tokens?, top_p?, frequency_penalty?, presence_penalty?).
@@ -257,6 +559,68 @@ function derive_title(messages_json) {
     }
 }
 exports.derive_title = derive_title;
+
+/**
+ * Serialize an empty LoreScan (for callers that have no book yet).
+ * @returns {string}
+ */
+function empty_lore_scan() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.empty_lore_scan();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+exports.empty_lore_scan = empty_lore_scan;
+
+/**
+ * Expand SillyTavern macros in a template.
+ * Input: JSON `[template, MacroContext]`. Returns the expanded string.
+ * @param {string} template
+ * @param {string} context_json
+ * @returns {string}
+ */
+function expand_macros(template, context_json) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(template, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(context_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.expand_macros(ptr0, len0, ptr1, len1);
+        deferred3_0 = ret[0];
+        deferred3_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+exports.expand_macros = expand_macros;
+
+/**
+ * Position labels for UI dropdowns: JSON array of
+ * `[{"position":"before_char","label":"Before character"}, …]`.
+ * @returns {string}
+ */
+function lore_position_labels() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.lore_position_labels();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+exports.lore_position_labels = lore_position_labels;
 
 /**
  * Fresh conversation id (nanosecond hex).
@@ -353,6 +717,28 @@ function parse_api_response(body) {
 exports.parse_api_response = parse_api_response;
 
 /**
+ * Parse a character card (V2 file, direct V2, or V1). Returns
+ * `{"Ok": card}` / `{"Err": msg}`.
+ * @param {string} json
+ * @returns {string}
+ */
+function parse_character_card(json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.parse_character_card(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.parse_character_card = parse_character_card;
+
+/**
  * Parse an OpenAI-compatible `GET /models` body.
  * Returns `{"Ok": ["id", ...]}` or `{"Err": "..."}`.
  * @param {string} body
@@ -394,6 +780,35 @@ function providers_json() {
 exports.providers_json = providers_json;
 
 /**
+ * Scan a lore book against chat text.
+ * Input: JSON `[chat_text, history: string[], CharacterBook]`.
+ * Returns JSON `LoreScan`.
+ * @param {string} chat_text
+ * @param {string} history_json
+ * @param {string} book_json
+ * @returns {string}
+ */
+function scan_lore(chat_text, history_json, book_json) {
+    let deferred4_0;
+    let deferred4_1;
+    try {
+        const ptr0 = passStringToWasm0(chat_text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(history_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(book_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.scan_lore(ptr0, len0, ptr1, len1, ptr2, len2);
+        deferred4_0 = ret[0];
+        deferred4_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    }
+}
+exports.scan_lore = scan_lore;
+
+/**
  * Strip `<thinking>` blocks. Returns `[cleaned_content, reasoning_or_null]`.
  * @param {string} content
  * @returns {string}
@@ -413,11 +828,58 @@ function strip_thinking(content) {
     }
 }
 exports.strip_thinking = strip_thinking;
+
+/**
+ * Validate a lore entry's shapes (keys arrays, position string).
+ * Returns `{"Ok": true}` / `{"Err": msg}`.
+ * @param {string} entry_json
+ * @returns {string}
+ */
+function validate_lore_entry(entry_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(entry_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.validate_lore_entry(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.validate_lore_entry = validate_lore_entry;
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
+        __wbg___wbindgen_is_falsy_16bd49b68658263e: function(arg0) {
+            const ret = !arg0;
+            return ret;
+        },
+        __wbg___wbindgen_string_get_0380ccaa2f57f0d9: function(arg0, arg1) {
+            const obj = arg1;
+            const ret = typeof(obj) === 'string' ? obj : undefined;
+            var ptr1 = isLikeNone(ret) ? 0 : passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            var len1 = WASM_VECTOR_LEN;
+            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+        },
         __wbg___wbindgen_throw_41e9ee4f547fc59a: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
+        },
+        __wbg_call_1875a20c43a36133: function() { return handleError(function (arg0, arg1, arg2, arg3) {
+            const ret = arg0.call(arg1, arg2, arg3);
+            return ret;
+        }, arguments); },
+        __wbg_call_187d372bd5fdd4aa: function() { return handleError(function (arg0, arg1, arg2) {
+            const ret = arg0.call(arg1, arg2);
+            return ret;
+        }, arguments); },
+        __wbindgen_generic_0000000000000001: function(arg0, arg1) {
+            // Cast intrinsic for `Ref(String) -> Externref`.
+            const ret = getStringFromWasm0(arg0, arg1);
+            return ret;
         },
         __wbindgen_init_externref_table: function() {
             const table = wasm.__wbindgen_externrefs;
@@ -435,12 +897,38 @@ function __wbg_get_imports() {
     };
 }
 
+const AgentRegistryFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_agentregistry_free(ptr, 1));
+const JsToolFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_jstool_free(ptr, 1));
 const NdjsonDecoderFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_ndjsondecoder_free(ptr, 1));
 const SseDecoderFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_ssedecoder_free(ptr, 1));
+
+function addToExternrefTable0(obj) {
+    const idx = wasm.__externref_table_alloc();
+    wasm.__wbindgen_externrefs.set(idx, obj);
+    return idx;
+}
+
+function _assertClass(instance, klass) {
+    if (!(instance instanceof klass)) {
+        throw new Error(`expected instance of ${klass.name}`);
+    }
+}
+
+let cachedDataViewMemory0 = null;
+function getDataViewMemory0() {
+    if (cachedDataViewMemory0 === null || cachedDataViewMemory0.buffer.detached === true || (cachedDataViewMemory0.buffer.detached === undefined && cachedDataViewMemory0.buffer !== wasm.memory.buffer)) {
+        cachedDataViewMemory0 = new DataView(wasm.memory.buffer);
+    }
+    return cachedDataViewMemory0;
+}
 
 function getStringFromWasm0(ptr, len) {
     return decodeText(ptr >>> 0, len);
@@ -452,6 +940,19 @@ function getUint8ArrayMemory0() {
         cachedUint8ArrayMemory0 = new Uint8Array(wasm.memory.buffer);
     }
     return cachedUint8ArrayMemory0;
+}
+
+function handleError(f, args) {
+    try {
+        return f.apply(this, args);
+    } catch (e) {
+        const idx = addToExternrefTable0(e);
+        wasm.__wbindgen_exn_store(idx);
+    }
+}
+
+function isLikeNone(x) {
+    return x === undefined || x === null;
 }
 
 function passArray8ToWasm0(arg, malloc) {

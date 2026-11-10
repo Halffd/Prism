@@ -498,3 +498,106 @@ pub fn agent_subagent_resolve_model(name: &str, session_model: &str, provider_de
         Err(e) => serde_json::json!({ "error": e }).to_string(),
     }
 }
+
+// ---- character cards / persona / lore / prompt assembly ------------------
+
+use prism_core::cards::{
+    self, parse_card, scan_lore as core_scan_lore, CharacterBook, CharacterCard, LoreEntry,
+    LorePosition, LoreScan, MacroContext, Persona,
+};
+
+/// Parse a character card (V2 file, direct V2, or V1). Returns
+/// `{"Ok": card}` / `{"Err": msg}`.
+#[wasm_bindgen]
+pub fn parse_character_card(json: &str) -> String {
+    result_json(&parse_card(json).map_err(|e| e))
+}
+
+/// Expand SillyTavern macros in a template.
+/// Input: JSON `[template, MacroContext]`. Returns the expanded string.
+#[wasm_bindgen]
+pub fn expand_macros(template: &str, context_json: &str) -> String {
+    match serde_json::from_str::<MacroContext>(context_json) {
+        Ok(ctx) => cards::expand_macros(template, &ctx),
+        Err(e) => format!("{{\"Err\":\"macro context json: {e}\"}}"),
+    }
+}
+
+/// Scan a lore book against chat text.
+/// Input: JSON `[chat_text, history: string[], CharacterBook]`.
+/// Returns JSON `LoreScan`.
+#[wasm_bindgen]
+pub fn scan_lore(chat_text: &str, history_json: &str, book_json: &str) -> String {
+    let history: Vec<String> = serde_json::from_str(history_json).unwrap_or_default();
+    let book: CharacterBook = match serde_json::from_str(book_json) {
+        Ok(b) => b,
+        Err(e) => return format!("{{\"Err\":\"book json: {e}\"}}"),
+    };
+    serde_json::to_string(&core_scan_lore(&book, chat_text, &history))
+        .unwrap_or_else(|e| format!("{{\"Err\":\"{e}\"}}"))
+}
+
+/// Assemble the SillyTavern-style prompt.
+/// Input: JSON `[CharacterCard, Persona, history: ChatMessage[],
+///              LoreScan|null, user_input, system_override|null]`.
+/// Returns JSON `Vec<ChatMessage>`.
+#[wasm_bindgen]
+pub fn build_prompt(request_json: &str) -> String {
+    #[derive(serde::Deserialize)]
+    struct Req {
+        card: CharacterCard,
+        persona: Persona,
+        history: Vec<prism_core::client::ChatMessage>,
+        lore: Option<LoreScan>,
+        user_input: String,
+        system_override: Option<String>,
+    }
+    match serde_json::from_str::<Req>(request_json) {
+        Ok(r) => {
+            let lore = r.lore.unwrap_or_default();
+            let msgs = cards::build_messages(
+                &r.card,
+                &r.persona,
+                &r.history,
+                &lore,
+                &r.user_input,
+                r.system_override.as_deref(),
+            );
+            serde_json::to_string(&msgs).unwrap_or_else(|e| format!("{{\"Err\":\"{e}\"}}"))
+        }
+        Err(e) => format!("{{\"Err\":\"build_prompt json: {e}\"}}"),
+    }
+}
+
+/// Serialize an empty LoreScan (for callers that have no book yet).
+#[wasm_bindgen]
+pub fn empty_lore_scan() -> String {
+    serde_json::to_string(&LoreScan::default()).unwrap_or_else(|_| "{}".into())
+}
+
+/// Validate a lore entry's shapes (keys arrays, position string).
+/// Returns `{"Ok": true}` / `{"Err": msg}`.
+#[wasm_bindgen]
+pub fn validate_lore_entry(entry_json: &str) -> String {
+    match serde_json::from_str::<LoreEntry>(entry_json) {
+        Ok(e) => {
+            if e.keys.is_empty() && !e.constant {
+                r#"{"Err":"entry needs keys or constant=true"}"#.into()
+            } else {
+                r#"{"Ok":true}"#.into()
+            }
+        }
+        Err(e) => format!("{{\"Err\":\"entry json: {e}\"}}"),
+    }
+}
+
+/// Position labels for UI dropdowns: JSON array of
+/// `[{"position":"before_char","label":"Before character"}, …]`.
+#[wasm_bindgen]
+pub fn lore_position_labels() -> String {
+    serde_json::json!([
+        { "position": "before_char", "label": "Before character" },
+        { "position": "after_char", "label": "After character" },
+    ])
+    .to_string()
+}

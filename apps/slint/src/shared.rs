@@ -6,6 +6,7 @@ pub mod media;
 
 // Re-export all public types and functions from dependencies
 pub use prism_core::catalog;
+pub use prism_core::cards::{self, CharacterCard, Persona};
 #[cfg(feature = "agent")]
 pub use prism_core::agent::AgentResult;
 pub use prism_core::client::{
@@ -121,6 +122,10 @@ pub struct State {
     /// Input text saved when Up/Down cycling starts; restored when the
     /// user cycles forward past the newest entry.
     pub history_draft: Option<String>,
+    /// Loaded character card (SillyTavern V2/V1 JSON on disk).
+    pub card: Option<CharacterCard>,
+    /// The user's persona for {{persona}} macros.
+    pub persona: Persona,
     /// Prompts queued while streaming. Each is the prompt text.
     pub prompt_queue: Vec<String>,
     /// Whether a queued prompt is currently being processed (steered).
@@ -167,6 +172,8 @@ impl State {
             ctx_idx,
             history_idx: None,
             history_draft: None,
+            card: None,
+            persona: Persona::default(),
             prompt_queue: Vec::new(),
             queue_processing: false,
             media: crate::shared::media::MediaState::default(),
@@ -615,14 +622,14 @@ pub fn editor_changed(ui: &AppWindow, state: &Rc<RefCell<State>>, text: &str) {
 
 /// Persist the editor buffer back to the workspace file.
 pub fn save_editor(ui: &AppWindow, state: &Rc<RefCell<State>>) {
-    let (rel, text) = {
+    let (rel, text): (Option<String>, String) = {
         let st = state.borrow();
         match &st.open_rel {
-            Some(rel) if st.editor_dirty => (rel.clone(), ui.get_editor_text().to_string()),
-            Some(_) => (None, String::new()),
-            None => (None, String::new()),
+            Some(rel) if st.editor_dirty => (Some(rel.clone()), ui.get_editor_text().to_string()),
+            _ => (None, String::new()),
         }
     };
+    let _ = text;
     let Some(rel) = rel else {
         ui.set_ide_status(if ui.get_editor_text().is_empty() {
             "nothing to save".into()
@@ -689,6 +696,64 @@ pub fn fetch_models(ui: &AppWindow, state: &Rc<RefCell<State>>) {
         },
         tx,
     );
+}
+
+// ---- character cards (SillyTavern-style prompting) ----
+
+/// One-line card summary for the settings panel.
+fn card_summary(card: &CharacterCard) -> String {
+    let mut parts = vec![card.name.clone()];
+    if !card.description.trim().is_empty() {
+        let d = card.description.trim();
+        parts.push(if d.chars().count() > 40 {
+            format!("{}…", d.chars().take(40).collect::<String>())
+        } else {
+            d.to_string()
+        });
+    }
+    if !card.alternate_greetings.is_empty() {
+        parts.push(format!("{} alt greetings", card.alternate_greetings.len()));
+    }
+    parts.join(" · ")
+}
+
+fn card_load(ui: &AppWindow, state: &Rc<RefCell<State>>) {
+    let path = ui.get_card_path().trim().to_string();
+    if path.is_empty() {
+        ui.set_card_summary("no path given".into());
+        return;
+    }
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) => {
+            ui.set_card_summary(format!("read failed: {e}").into());
+            return;
+        }
+    };
+    match cards::parse_card(&text) {
+        Ok(card) => {
+            {
+                let mut st = state.borrow_mut();
+                st.card = Some(card.clone());
+            }
+            ui.set_card_loaded(true);
+            ui.set_card_summary(card_summary(&card).into());
+        }
+        Err(e) => ui.set_card_summary(format!("not a Prism card: {e}").into()),
+    }
+}
+
+fn card_clear(ui: &AppWindow, state: &Rc<RefCell<State>>) {
+    state.borrow_mut().card = None;
+    ui.set_card_loaded(false);
+    ui.set_card_summary("".into());
+}
+
+fn persona_edit(state: &Rc<RefCell<State>>, name: &str, desc: &str) {
+    let mut p = state.borrow().persona.clone();
+    p.name = name.to_string();
+    p.description = desc.to_string();
+    state.borrow_mut().persona = p;
 }
 
 // ---- data sync ----
@@ -1665,6 +1730,45 @@ pub fn run_ui() {
         ui.on_custom_provider_add(move || {
             let Some(ui) = ui_w.upgrade() else { return };
             add_custom_provider(&ui, &state_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_card_load(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            card_load(&ui, &state_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_card_clear(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            card_clear(&ui, &state_c);
+        });
+    }
+    {
+        let state_c = state.clone();
+        ui.on_persona_edited(move |name, desc| {
+            // No UI write needed: the persona lives in State only.
+            persona_edit(&state_c, &name.to_string(), &desc.to_string());
+        });
+    }
+    {
+        // Prompt engine toggle card + persona already live in State; this
+        // just reports status so the user sees the setting took.
+        let ui_w = ui.as_weak();
+        ui.on_prompt_engine_toggle(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            let on = ui.get_prompt_engine_on();
+            ui.set_settings_status(
+                if on {
+                    "core prompt engine on".into()
+                } else {
+                    "core prompt engine off".into()
+                },
+            );
         });
     }
     {

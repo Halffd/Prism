@@ -323,6 +323,38 @@ Chat/session/prompt storage is compatible across the extension
   picker) until Slint gains a dialog dependency; the envelope is
   JSON so any file browser works.
 
+## Character cards + prompt engine (2026-11-09)
+
+SillyTavern-style prompting now lives in the core so every surface
+assembles identical prompts:
+
+- **`prism_core::cards`**: `CharacterCard` (V2 spec fields + alt
+  greetings + embedded `character_book`), `Persona`, `LoreEntry`,
+  `CharacterBook`; `parse_card` (V2 file / direct V2 / V1);
+  `expand_macros` ({{char}} {{user}} {{description}} {{personality}}
+  {{scenario}} {{persona}} {{first_mes}} {{mes_example}}; unknown
+  macros stay verbatim); `scan_lore` (keyword + ALL-secondary
+  selective or ANY-secondary group scoring, constant entries,
+  whole-word matching, scan-depth history window, one-fire-per-scan
+  recursion guard, token budget with drop counting);
+  `build_messages` → system → lore-before → character block →
+  lore-after → example dialogue → post-history instructions →
+  conversation.
+- Serde per-field defaults matter: `LoreEntry::enabled` defaults TRUE
+  (cards ship lore on) — `bool::default()` would silently disable
+  every entry. `LoreScan` fields default so hand-built JS objects
+  load. `LorePosition` is snake_case on the wire.
+- **Wasm**: `parse_character_card`, `expand_macros`, `scan_lore`,
+  `empty_lore_scan`, `validate_lore_entry`, `lore_position_labels`,
+  `build_prompt`; typed in `@prism/ai-core` (CoreCharacterCard /
+  CoreCharacterBook / CoreLoreEntry / CoreLoreScan / CorePersona).
+- **Surfaces**: extension already had card import/export + a TS
+  context-manager; the core engine is the portable path for every
+  OTHER surface. Slint settings gained a Character panel (card path
+  load/clear + persona name/description + core prompt-engine toggle).
+- Extension PNG card pack/unpack (CharacterCardEditor) already
+  existed; unchanged.
+
 ## Service-worker note (extension)
 
 The MV3 background service worker imports the core (it relays

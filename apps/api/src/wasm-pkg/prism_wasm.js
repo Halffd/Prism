@@ -474,6 +474,30 @@ function build_ollama_body(req_json) {
 exports.build_ollama_body = build_ollama_body;
 
 /**
+ * Assemble the SillyTavern-style prompt.
+ * Input: JSON `[CharacterCard, Persona, history: ChatMessage[],
+ *              LoreScan|null, user_input, system_override|null]`.
+ * Returns JSON `Vec<ChatMessage>`.
+ * @param {string} request_json
+ * @returns {string}
+ */
+function build_prompt(request_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(request_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.build_prompt(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.build_prompt = build_prompt;
+
+/**
  * Build the provider POST body for a direct stream request.
  * Input: JSON `StreamRequest` (base_url, api_key, model, temperature,
  * messages, max_tokens?, top_p?, frequency_penalty?, presence_penalty?).
@@ -535,6 +559,68 @@ function derive_title(messages_json) {
     }
 }
 exports.derive_title = derive_title;
+
+/**
+ * Serialize an empty LoreScan (for callers that have no book yet).
+ * @returns {string}
+ */
+function empty_lore_scan() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.empty_lore_scan();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+exports.empty_lore_scan = empty_lore_scan;
+
+/**
+ * Expand SillyTavern macros in a template.
+ * Input: JSON `[template, MacroContext]`. Returns the expanded string.
+ * @param {string} template
+ * @param {string} context_json
+ * @returns {string}
+ */
+function expand_macros(template, context_json) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(template, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(context_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.expand_macros(ptr0, len0, ptr1, len1);
+        deferred3_0 = ret[0];
+        deferred3_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+exports.expand_macros = expand_macros;
+
+/**
+ * Position labels for UI dropdowns: JSON array of
+ * `[{"position":"before_char","label":"Before character"}, …]`.
+ * @returns {string}
+ */
+function lore_position_labels() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.lore_position_labels();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+exports.lore_position_labels = lore_position_labels;
 
 /**
  * Fresh conversation id (nanosecond hex).
@@ -631,6 +717,28 @@ function parse_api_response(body) {
 exports.parse_api_response = parse_api_response;
 
 /**
+ * Parse a character card (V2 file, direct V2, or V1). Returns
+ * `{"Ok": card}` / `{"Err": msg}`.
+ * @param {string} json
+ * @returns {string}
+ */
+function parse_character_card(json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.parse_character_card(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.parse_character_card = parse_character_card;
+
+/**
  * Parse an OpenAI-compatible `GET /models` body.
  * Returns `{"Ok": ["id", ...]}` or `{"Err": "..."}`.
  * @param {string} body
@@ -672,6 +780,35 @@ function providers_json() {
 exports.providers_json = providers_json;
 
 /**
+ * Scan a lore book against chat text.
+ * Input: JSON `[chat_text, history: string[], CharacterBook]`.
+ * Returns JSON `LoreScan`.
+ * @param {string} chat_text
+ * @param {string} history_json
+ * @param {string} book_json
+ * @returns {string}
+ */
+function scan_lore(chat_text, history_json, book_json) {
+    let deferred4_0;
+    let deferred4_1;
+    try {
+        const ptr0 = passStringToWasm0(chat_text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(history_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(book_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.scan_lore(ptr0, len0, ptr1, len1, ptr2, len2);
+        deferred4_0 = ret[0];
+        deferred4_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    }
+}
+exports.scan_lore = scan_lore;
+
+/**
  * Strip `<thinking>` blocks. Returns `[cleaned_content, reasoning_or_null]`.
  * @param {string} content
  * @returns {string}
@@ -691,6 +828,28 @@ function strip_thinking(content) {
     }
 }
 exports.strip_thinking = strip_thinking;
+
+/**
+ * Validate a lore entry's shapes (keys arrays, position string).
+ * Returns `{"Ok": true}` / `{"Err": msg}`.
+ * @param {string} entry_json
+ * @returns {string}
+ */
+function validate_lore_entry(entry_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(entry_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.validate_lore_entry(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.validate_lore_entry = validate_lore_entry;
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,

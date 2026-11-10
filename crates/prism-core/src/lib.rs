@@ -21,6 +21,7 @@
 //! the spec.
 
 pub mod agent;
+pub mod cards;
 pub mod catalog;
 pub mod client;
 pub mod commands;

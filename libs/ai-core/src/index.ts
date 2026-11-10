@@ -30,6 +30,14 @@ export interface WasmCoreModule {
   apply_thinking(messagesJson: string): string;
   providers_json(): string;
   ollama_root_url(baseUrl: string): string;
+  // Character cards / personas / lore / prompt assembly
+  parse_character_card(json: string): string;
+  expand_macros(template: string, contextJson: string): string;
+  scan_lore(chatText: string, historyJson: string, bookJson: string): string;
+  empty_lore_scan(): string;
+  lore_position_labels(): string;
+  validate_lore_entry(entryJson: string): string;
+  build_prompt(requestJson: string): string;
   agent_sandbox_policy_check(policyJson: string): string;
   agent_tool_repair(rawInput: string): string;
   agent_tool_classify(observation: string): string;
@@ -515,4 +523,167 @@ export interface ChatCompletionResponse {
   content: string;
   thinking?: string;
   tokensUsed?: number;
+}
+
+// ---- character cards / personas / lore / prompt assembly ------------------
+
+/** SillyTavern-style character card. Field names mirror
+ *  crates/prism-core/src/cards.rs (snake_case on the wire). */
+export interface CoreCharacterCard {
+  name: string;
+  description?: string;
+  personality?: string;
+  scenario?: string;
+  first_mes?: string;
+  mes_example?: string;
+  system_prompt?: string;
+  post_history_instructions?: string;
+  alternate_greetings?: string[];
+  tags?: string[];
+  creator?: string;
+  character_version?: string;
+  character_book?: CoreCharacterBook | null;
+}
+
+export interface CoreCharacterBook {
+  name?: string;
+  description?: string;
+  entries?: CoreLoreEntry[];
+  scan_depth?: number;
+  token_budget?: number;
+}
+
+export interface CoreLoreEntry {
+  keys?: string[];
+  secondary_keys?: string[];
+  content: string;
+  comment?: string;
+  enabled?: boolean;
+  constant?: boolean;
+  /** 'before_char' | 'after_char' */
+  position?: string;
+  insertion_order?: number;
+  case_sensitive?: boolean;
+  match_whole_words?: boolean;
+  use_group_scoring?: boolean;
+}
+
+export interface CoreLoreScan {
+  before_char: CoreLoreEntry[];
+  after_char: CoreLoreEntry[];
+  dropped_for_budget: number;
+}
+
+export interface CorePersona {
+  name: string;
+  description?: string;
+}
+
+/** Macro values for expansion. */
+export interface CoreMacroContext {
+  char: string;
+  user: string;
+  description: string;
+  personality: string;
+  scenario: string;
+  persona: string;
+  first_mes: string;
+  mes_example: string;
+}
+
+/** Parse a card: V2 file (`{spec,data}`), direct V2, or V1. Throws on
+ *  non-Prism documents. */
+export function parseCharacterCard(core: WasmCore, json: string): CoreCharacterCard {
+  const raw = core.parse_character_card(json);
+  const parsed = JSON.parse(raw) as { Ok?: CoreCharacterCard; Err?: string };
+  if (parsed.Err) throw new Error(parsed.Err);
+  if (!parsed.Ok) throw new Error('card parse failed');
+  return parsed.Ok;
+}
+
+/** Expand {{char}} {{user}} {{description}} {{personality}} {{scenario}}
+ *  {{persona}} {{first_mes}} {{mes_example}}. Unknown macros stay. */
+export function expandMacros(
+  core: WasmCore,
+  template: string,
+  ctx: CoreMacroContext,
+): string {
+  return core.expand_macros(template, JSON.stringify(ctx));
+}
+
+/** Scan a lore book against the newest turns. */
+export function scanLore(
+  core: WasmCore,
+  chatText: string,
+  history: string[],
+  book: CoreCharacterBook,
+): CoreLoreScan {
+  return JSON.parse(core.scan_lore(chatText, JSON.stringify(history), JSON.stringify(book)));
+}
+
+export function emptyLoreScan(core: WasmCore): CoreLoreScan {
+  return JSON.parse(core.empty_lore_scan());
+}
+
+/** Lore position labels for UI dropdowns. */
+export function lorePositionLabels(
+  core: WasmCore,
+): Array<{ position: string; label: string }> {
+  return JSON.parse(core.lore_position_labels());
+}
+
+/** Validate a lore entry; returns null when valid, else the reason. */
+export function validateLoreEntry(core: WasmCore, entry: CoreLoreEntry): string | null {
+  const raw = JSON.parse(core.validate_lore_entry(JSON.stringify(entry))) as {
+    Ok?: boolean;
+    Err?: string;
+  };
+  return raw.Err ?? null;
+}
+
+export interface BuildPromptRequest {
+  card: CoreCharacterCard;
+  persona: CorePersona;
+  history: WireMessage[];
+  lore: CoreLoreScan | null;
+  user_input: string;
+  system_override?: string | null;
+}
+
+/** Assemble the SillyTavern-style prompt into chat messages. */
+export function buildPrompt(core: WasmCore, req: BuildPromptRequest): WireMessage[] {
+  const raw = core.build_prompt(JSON.stringify(req));
+  // Errors come back as {"Err": "..."}
+  const probe = (() => {
+    try {
+      return JSON.parse(raw) as { Err?: string };
+    } catch {
+      return null;
+    }
+  })();
+  if (probe && probe.Err) throw new Error(probe.Err);
+  const msgs = JSON.parse(raw) as WireMessage[];
+  if (!Array.isArray(msgs)) throw new Error('build_prompt did not return messages');
+  return msgs;
+}
+
+/** Macro context for a card + persona (the usual assembly). */
+export function macroContext(
+  card: CoreCharacterCard,
+  persona: CorePersona,
+): CoreMacroContext {
+  const personaExpanded =
+    persona.description && persona.description.trim()
+      ? `${persona.name}: ${persona.description.trim()}`
+      : persona.name;
+  return {
+    char: card.name,
+    user: persona.name,
+    description: card.description ?? '',
+    personality: card.personality ?? '',
+    scenario: card.scenario ?? '',
+    persona: personaExpanded,
+    first_mes: card.first_mes ?? '',
+    mes_example: card.mes_example ?? '',
+  };
 }

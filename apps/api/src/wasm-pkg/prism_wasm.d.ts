@@ -135,6 +135,14 @@ export function build_api_chat_body(req_json: string): string;
 export function build_ollama_body(req_json: string): string;
 
 /**
+ * Assemble the SillyTavern-style prompt.
+ * Input: JSON `[CharacterCard, Persona, history: ChatMessage[],
+ *              LoreScan|null, user_input, system_override|null]`.
+ * Returns JSON `Vec<ChatMessage>`.
+ */
+export function build_prompt(request_json: string): string;
+
+/**
  * Build the provider POST body for a direct stream request.
  * Input: JSON `StreamRequest` (base_url, api_key, model, temperature,
  * messages, max_tokens?, top_p?, frequency_penalty?, presence_penalty?).
@@ -151,6 +159,23 @@ export function default_settings_json(): string;
  * Auto-title from the first user message (JSON array of messages in).
  */
 export function derive_title(messages_json: string): string;
+
+/**
+ * Serialize an empty LoreScan (for callers that have no book yet).
+ */
+export function empty_lore_scan(): string;
+
+/**
+ * Expand SillyTavern macros in a template.
+ * Input: JSON `[template, MacroContext]`. Returns the expanded string.
+ */
+export function expand_macros(template: string, context_json: string): string;
+
+/**
+ * Position labels for UI dropdowns: JSON array of
+ * `[{"position":"before_char","label":"Before character"}, …]`.
+ */
+export function lore_position_labels(): string;
 
 /**
  * Fresh conversation id (nanosecond hex).
@@ -181,6 +206,12 @@ export function ollama_root_url(base_url: string): string;
 export function parse_api_response(body: string): string;
 
 /**
+ * Parse a character card (V2 file, direct V2, or V1). Returns
+ * `{"Ok": card}` / `{"Err": msg}`.
+ */
+export function parse_character_card(json: string): string;
+
+/**
  * Parse an OpenAI-compatible `GET /models` body.
  * Returns `{"Ok": ["id", ...]}` or `{"Err": "..."}`.
  */
@@ -193,6 +224,19 @@ export function parse_models_response(body: string): string;
 export function providers_json(): string;
 
 /**
+ * Scan a lore book against chat text.
+ * Input: JSON `[chat_text, history: string[], CharacterBook]`.
+ * Returns JSON `LoreScan`.
+ */
+export function scan_lore(chat_text: string, history_json: string, book_json: string): string;
+
+/**
  * Strip `<thinking>` blocks. Returns `[cleaned_content, reasoning_or_null]`.
  */
 export function strip_thinking(content: string): string;
+
+/**
+ * Validate a lore entry's shapes (keys arrays, position string).
+ * Returns `{"Ok": true}` / `{"Err": msg}`.
+ */
+export function validate_lore_entry(entry_json: string): string;

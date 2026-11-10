@@ -77,6 +77,13 @@ export component AppWindow inherits Window {
     in property <string> gpu-label;
     in property <string> ctx-label;
     in-out property <string> input-text;
+    // ---- character cards / persona ----
+    in-out property <string> card-path;        // path to a V2/V1 card JSON
+    in-out property <string> persona-name;
+    in-out property <string> persona-desc;
+    in property <bool> card-loaded;
+    in property <string> card-summary;         // "Aria · engineer · 2 greetings"
+    in-out property <bool> prompt-engine-on: false;
     // ---- data sync ----
     in-out property <string> sync-status;
     in-out property <string> sync-login-email;
@@ -136,6 +143,10 @@ export component AppWindow inherits Window {
     callback palette-query-changed(string);
     callback palette-execute(string); // arg: PaletteRow.id
     callback palette-move(int);       // arg: index delta (+1/-1)
+    callback card-load();     // read card-path, attach for prompt assembly
+    callback card-clear();
+    callback persona-edited(string, string); // name, description
+    callback prompt-engine-toggle();
     callback sync-export();
     callback sync-import();
     callback sync-clear();
@@ -288,7 +299,7 @@ export component AppWindow inherits Window {
                             background: ui-mode == i ? #1f3130 : transparent;
                             border-width: 1px;
                             border-color: ui-mode == i ? #2f6b4f : #232a31;
-                            radius: 4px;
+                            border-radius: 4px;
                         }
                     }
                 }
@@ -701,6 +712,49 @@ export component AppWindow inherits Window {
                         }
                     }
 
+
+                    // ---- character cards (SillyTavern-style) ----
+                    Text { text: "Character"; color: #9fb0bd; font-weight: 700; }
+                    VerticalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: "Load a V2/V1 character card (JSON). The core assembles the prompt with macros + lore.";
+                            color: #8b95a1;
+                            font-size: 11px;
+                            wrap: word-wrap;
+                        }
+                        LineEdit {
+                            text <=> card-path;
+                            placeholder-text: "/path/to/character-card.json";
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Button { text: "Load card"; clicked => { card-load(); } }
+                            Button { text: "Clear"; clicked => { card-clear(); } }
+                        }
+                        if card-loaded : Text {
+                            text: card-summary;
+                            color: #7ee787;
+                            font-size: 11px;
+                            wrap: word-wrap;
+                        }
+                        Text { text: "Persona (your character)"; color: #8b95a1; font-size: 11px; }
+                        LineEdit {
+                            text <=> persona-name;
+                            placeholder-text: "Name";
+                            edited(t) => { persona-edited(t, persona-desc); }
+                        }
+                        LineEdit {
+                            text <=> persona-desc;
+                            placeholder-text: "Description";
+                            edited(t) => { persona-edited(persona-name, t); }
+                        }
+                        CheckBox {
+                            text: "Use the core prompt engine";
+                            checked <=> prompt-engine-on;
+                            toggled => { prompt-engine-toggle(); }
+                        }
+                    }
 
                     // ---- data sync (portable with extension) ----
                     Text { text: "Data sync"; color: #9fb0bd; font-weight: 700; }
