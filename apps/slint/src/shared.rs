@@ -406,7 +406,14 @@ mod agent_integration {
         let task = task.to_string();
         let provider = state.borrow().settings.provider.clone();
         let settings = state.borrow().settings.clone();
-        let workspace_root = std::path::PathBuf::from(".");
+        // The IDE's open workspace, falling back to the launcher cwd —
+        // the same root the editor panel and the file tools enforce.
+        let workspace_root = state
+            .borrow()
+            .workspace
+            .as_ref()
+            .map(|w| w.root.clone())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
 
         // Opt-in sandbox through the same env contract as the CLI
         // (`PRISM_AGENT_SANDBOX_POLICY` = policy JSON or a path to it).
@@ -937,6 +944,9 @@ pub fn palette_execute(
     id: &str,
 ) {
     ui.set_palette_open(false);
+    // arg-taking commands take the palette query (e.g. the workspace
+    // folder the user typed); capture it before the reset.
+    let query = ui.get_palette_query().to_string();
     ui.set_palette_query("".into());
     if let Some(model) = id.strip_prefix("model:") {
         state.borrow_mut().settings.model = model.to_string();
@@ -1067,6 +1077,14 @@ pub fn palette_execute(
             }
             push_system(ui, state, lines_model, detail);
         }
+        // Surface modes — same three counts Cursor offers: plain chat,
+        // agent-first composer, and the editor + agent sidebar pair.
+        "ide.mode.chat" => set_mode(ui, state, 0),
+        "ide.mode.agent" => set_mode(ui, state, 1),
+        "ide.mode.agent_sidebar" => set_mode(ui, state, 2),
+        "ide.workspace.open" => open_workspace(ui, state, query.trim()),
+        "ide.workspace.refresh" => refresh_tree(ui, state),
+        "ide.workspace.save" => save_editor(ui, state),
         other => push_system(ui, state, lines_model, format!("unknown command: {other}")),
     }
 }
@@ -1665,6 +1683,8 @@ pub fn run_ui() {
         ui.set_media_provider(st.media.provider().into());
         ui.set_media_needs_image(st.media.needs_image());
         ui.set_media_needs_mask(st.media.needs_mask());
+        ui.set_ui_mode(st.mode as i32);
+        ui.set_composer_hint(composer_hint(st.mode).into());
         refresh_chats(&ui, &state);
     }
 
@@ -1675,7 +1695,23 @@ pub fn run_ui() {
         let lines_c = lines_model.clone();
         ui.on_send(move |text| {
             let Some(ui) = ui_w.upgrade() else { return };
-            send(&ui, &state_c, &lines_c, text.to_string());
+            let text = text.to_string();
+            // Agent/IDE modes route the composer into the agent loop;
+            // Chat keeps the streaming chat.
+            if ui.get_ui_mode() != 0 {
+                if text.trim().is_empty() {
+                    return;
+                }
+                push_system(&ui, &state_c, &lines_c, format!("[agent task] {text}"));
+                #[cfg(feature = "agent")]
+                crate::shared::agent_integration::run_agent_from_palette(
+                    &ui, &state_c, &lines_c, &text,
+                );
+                #[cfg(not(feature = "agent"))]
+                run_agent_from_palette(&ui, &state_c, &lines_c, &text);
+                return;
+            }
+            send(&ui, &state_c, &lines_c, text);
         });
     }
     {
@@ -1715,6 +1751,56 @@ pub fn run_ui() {
             palette_refresh(&ui, &state_c, &q.to_string());
         });
     }
+    // ---- IDE callbacks (modes, workspace, editor) ----
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_mode_selected(move |m| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            set_mode(&ui, &state_c, m as usize);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_workspace_open(move |arg| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            open_workspace(&ui, &state_c, &arg.to_string());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_workspace_refresh(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            refresh_tree(&ui, &state_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_tree_open(move |rel| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            open_tree_file(&ui, &state_c, &rel.to_string());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_editor_changed(move |text| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            editor_changed(&ui, &state_c, &text.to_string());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_editor_save(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            save_editor(&ui, &state_c);
+        });
+    }
+
     {
         let ui_w = ui.as_weak();
         let state_c = state.clone();
