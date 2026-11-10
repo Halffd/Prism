@@ -13,6 +13,13 @@ import { useSillyTavern } from '../hooks/use-silly-tavern';
 import { TUIClient } from '../lib/tui-client';
 import { runTUIAgent } from '../lib/tui-agent';
 import { TUIRagSession } from '../lib/tui-rag';
+import {
+  conversationsDir,
+  deleteConversation,
+  listConversations,
+  loadConversation,
+  persistChat,
+} from '../lib/core-store';
 import { nanoid } from 'nanoid';
 import type {
   Message,
@@ -35,6 +42,12 @@ export function ChatScreen() {
   const ragSessionRef = useRef<TUIRagSession>(
     new TUIRagSession(settings.aiConfig),
   );
+  // Shared conversation vault (core's store — the Slint app and the CLI
+  // read the same files). Vault id grows with the chat; /vault commands
+  // manage listing/loading/saving by hand.
+  const vaultDirRef = useRef<string | null>(conversationsDir());
+  const vaultIdRef = useRef<string | null>(null);
+  const [vaultLabel, setVaultLabel] = useState<string>('');
   if (!clientRef.current) {
     clientRef.current = new TUIClient({
       aiConfig: settings.aiConfig,
@@ -272,6 +285,88 @@ export function ChatScreen() {
     const content = chat.input.trim();
     if (content.length === 0) return;
 
+    // /vault <help|list|save|open <id>|delete <id>> — the shared
+    // conversation vault (the core's store; Slint and the CLI read the
+    // same files). Autosave covers the common path; these commands give
+    // explicit control.
+    if (content === '/vault' || content.startsWith('/vault ')) {
+      chat.setInput('');
+      const arg = content.slice(6).trim();
+      const dir = vaultDirRef.current;
+      const reply = (text: string) =>
+        chat.addMessage({
+          id: `msg_${nanoid()}`,
+          role: 'assistant',
+          content: text,
+          timestamp: Date.now(),
+        });
+      if (arg === '' || arg === 'help') {
+        reply(
+          [
+            'vault — the shared conversation store (prism/conversations)',
+            '  /vault list           newest-first ids + titles',
+            '  /vault save           persist the current chat, print its id',
+            '  /vault open <id>      load a conversation into the chat',
+            '  /vault delete <id>    remove one conversation file',
+          ].join('\n'),
+        );
+      } else if (arg === 'list') {
+        const metas = listConversations(dir);
+        reply(
+          metas.length === 0
+            ? 'vault is empty'
+            : metas
+                .slice(0, 10)
+                .map(
+                  (m) =>
+                    `${m.id}  ${new Date(m.updated_at).toISOString()}  ${m.title}`,
+                )
+                .join('\n'),
+        );
+      } else if (arg === 'save') {
+        const res = persistChat(dir, vaultIdRef.current, chat.messages);
+        if (res.error) {
+          reply(`[vault save failed: ${res.error}]`);
+        } else {
+          vaultIdRef.current = res.id;
+          const meta = listConversations(dir).find((m) => m.id === res.id);
+          setVaultLabel(`vault ${res.id}`);
+          reply(`saved as ${res.id}${meta ? ` — “${meta.title}”` : ''}`);
+        }
+      } else if (arg.startsWith('open ')) {
+        const id = arg.slice(5).trim();
+        const conv = loadConversation(dir, id);
+        if (!conv) {
+          reply(`[vault: no conversation ${JSON.stringify(id)}]`);
+        } else {
+          chat.clearMessages();
+          for (const m of conv.messages) {
+            chat.addMessage({
+              id: `msg_${nanoid()}`,
+              role: m.role as Message['role'],
+              content: m.content,
+              timestamp: Date.now(),
+            });
+          }
+          vaultIdRef.current = conv.id;
+          setVaultLabel(`vault ${conv.id}`);
+          reply(
+            `opened ${conv.id} (“${conv.title}”, ${conv.messages.length} messages)`,
+          );
+        }
+      } else if (arg.startsWith('delete ')) {
+        const id = arg.slice(7).trim();
+        reply(
+          deleteConversation(dir, id)
+            ? `deleted ${id}`
+            : `[vault: could not delete ${JSON.stringify(id)}]`,
+        );
+      } else {
+        reply(`[vault: unknown command ${JSON.stringify(arg)} — try /vault help]`);
+      }
+      return;
+    }
+
     // /rag <path> — ingest a local file into the session's RAG store
     if (content.startsWith('/rag ')) {
       const path = content.slice(5).trim();
@@ -404,6 +499,31 @@ export function ChatScreen() {
     performAgent,
   ]);
 
+  // Debounced autosave: every time the chat grows, persist the full
+  // history to the vault (same files as Slint/CLI) after a short idle.
+  // Only runs when there is something storable; a small gap keeps
+  // streaming updates from hitting the disk on every token.
+  const messageCount = chat.messages.length;
+  useEffect(() => {
+    if (messageCount < 2) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      const res = persistChat(
+        vaultDirRef.current,
+        vaultIdRef.current,
+        chat.messages,
+      );
+      if (!res.error) {
+        if (vaultIdRef.current !== res.id) {
+          vaultIdRef.current = res.id;
+          setVaultLabel(`vault ${res.id}`);
+        }
+      }
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [messageCount, chat.messages]);
+
   useInput((input, key) => {
     if (screen !== 'chat') return;
 
@@ -424,6 +544,10 @@ export function ChatScreen() {
     }
 
     if (key.ctrl && input === 'n') {
+      // A fresh session starts detached from any vault conversation;
+      // the next autosave (or /vault save) creates a new id.
+      vaultIdRef.current = null;
+      setVaultLabel('');
       chat.newSession();
       return;
     }
@@ -552,6 +676,7 @@ export function ChatScreen() {
         sessionTokens={sessionTokens}
         avgTokensPerSecond={avgTokensPerSecond}
         lastMetrics={assistantWithMetrics?.metrics ?? null}
+        vaultLabel={vaultLabel || undefined}
       />
 
       {searchModeLabel && (

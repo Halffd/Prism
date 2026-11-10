@@ -13,6 +13,8 @@ interface StatusBarProps {
   sessionTokens?: number;
   avgTokensPerSecond?: number;
   lastMetrics?: ResponseMetrics | null;
+  /** Vault conversation id when the chat is shared with the core store. */
+  vaultLabel?: string;
 }
 
 export function StatusBar({
@@ -26,6 +28,7 @@ export function StatusBar({
   sessionTokens,
   avgTokensPerSecond,
   lastMetrics,
+  vaultLabel,
 }: StatusBarProps) {
   const providerDisplay =
     provider.length > 12 ? provider.slice(0, 12) : provider;
@@ -71,6 +74,9 @@ export function StatusBar({
           <Text color={colors.tertiary}>@{activeCharacter}</Text>
         )}
         {isGroupChat && <Text color={colors.warning}>GROUP</Text>}
+        {vaultLabel && (
+          <Text color={colors.outline_variant}>{vaultLabel}</Text>
+        )}
         <Text color={colors.on_surface_variant}>{messageCount}msg</Text>
         {tokensDisplay && (
           <Text color={colors.on_surface_variant}>{tokensDisplay}</Text>
