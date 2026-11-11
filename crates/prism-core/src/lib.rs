@@ -37,6 +37,7 @@ pub mod prompt_history;
 pub mod providers;
 pub mod sandbox;
 pub mod settings;
+pub mod session;
 pub mod storage;
 pub mod subagents;
 pub mod sync;

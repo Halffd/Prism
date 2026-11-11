@@ -125,6 +125,19 @@ Expo RN app `apps/Prism` deleted (plan item 7).
 | libs/ai-core — hardware | done   | HardwareProfile → num_gpu/num_ctx plumbing (settings + core body path) |
 | libs/ai-core — thinking | done   | core apply_thinking/strip_thinking (scratchpad) via ai-core |
 
+## Session model (core)
+
+`prism_core::session` composes the five layers every surface drives, as
+data with mode-scoped defaults:
+
+| Layer | Types | Notes |
+|---|---|---|
+| Prompt | `PromptLayer` | mode system preset (`default_system_prompt`), user input, bound card + persona; assembles via the core card engine when a card is bound |
+| Capability | `CapabilityLayer` | tools / subagents / commands / permissions; a tool the session does not advertise returns **Deny** rather than allow-by-absence |
+| Transport | `TransportLayer`, `Endpoint`, `Rotation`, `cooldown` | provider + model + key + base URL; rotation (`prefer-primary` / `round-robin` / `random`) over cooldown-aware endpoints |
+| Persistence | `PersistenceLayer` | messages (chat/creative), chat tree (creative), job queue (any tool-using or media mode) |
+| Session | `Session` | composes all layers; `set_mode` resets capability + persistence while keeping transport |
+
 ## Tests
 
 | Suite                                     | Status         |
@@ -134,7 +147,7 @@ Expo RN app `apps/Prism` deleted (plan item 7).
 | libs/redux-store (chatSlice, presetSlice) | done — 9 tests |
 | libs/context-manager                      | done — 8 tests |
 | libs/shared-db                            | planned        |
-| crates/prism-core (unit + fixture conformance) | done — 52 + 8 tests |
+| crates/prism-core (unit + fixture conformance) | done — 181 + 8 tests |
 | crates/prism-wasm (wasm-pack test --node) | done — 7 tests |
 | apps/api llm-core fixture tests           | done — 6 tests |
 
