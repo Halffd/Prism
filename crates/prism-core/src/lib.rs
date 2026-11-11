@@ -32,6 +32,7 @@ pub mod host;
 pub mod native_tools;
 pub mod media;
 pub mod modes;
+pub mod local;
 pub mod prompt_history;
 pub mod providers;
 pub mod sandbox;

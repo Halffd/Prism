@@ -12,7 +12,7 @@ use crate::client::{
 use crate::conversations::{self, Conversation, ConversationMeta};
 use crate::settings::{self, Settings};
 use crate::storage::{FsStorage, Storage};
-use crate::transport::ReqwestTransport;
+use crate::transport::{ReqwestTransport, Transport};
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::sync::OnceLock;
@@ -200,6 +200,49 @@ pub fn delete_conversation(id: &str) -> Result<(), String> {
 fn transport() -> &'static ReqwestTransport {
     static T: OnceLock<ReqwestTransport> = OnceLock::new();
     T.get_or_init(ReqwestTransport::new)
+}
+
+/// Probe one local server's health. Blocking; call from a worker thread.
+/// `base_url` overrides the provider's default when the user typed one.
+pub fn probe_local(id: &str, base_url: Option<&str>) -> crate::local::Health {
+    let Some(provider) = crate::local::find(id) else {
+        return crate::local::Health::Down {
+            reason: format!("unknown local provider '{id}'"),
+        };
+    };
+    let base = base_url.unwrap_or(provider.base_url).trim().to_string();
+    let url = provider.health_url(&base);
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string());
+    let Ok(rt) = rt else {
+        return crate::local::Health::Down { reason: rt.err().unwrap() };
+    };
+    rt.block_on(async {
+        let req = crate::transport::HttpRequest {
+            url,
+            headers: Vec::new(),
+            body: None,
+        };
+        match transport().get_body(req).await {
+            Ok(bytes) => {
+                let text = String::from_utf8_lossy(&bytes).into_owned();
+                crate::local::health_from_body(provider, &text)
+            }
+            Err(e) => crate::local::Health::Down { reason: e },
+        }
+    })
+}
+
+/// Probe every local provider concurrently-ish (sequentially; each probe
+/// is a fast TCP connect). Returns the reachable ids.
+pub fn reachable_locals(base_urls: &std::collections::HashMap<String, String>) -> Vec<String> {
+    crate::local::LOCAL_PROVIDERS
+        .iter()
+        .filter(|p| probe_local(p.id, base_urls.get(p.id).map(String::as_str)).reachable())
+        .map(|p| p.id.to_string())
+        .collect()
 }
 
 pub fn spawn_stream(req: StreamRequest, tx: Sender<StreamEvent>) {
