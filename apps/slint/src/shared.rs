@@ -7,8 +7,8 @@ pub mod media;
 // Re-export all public types and functions from dependencies
 pub use prism_core::catalog;
 pub use prism_core::cards::{self, CharacterCard, Persona};
-pub use prism_core::modes::{self, DaemonTask, GenCapability, Mode, TaskTrigger};
-pub use prism_core::session::{self, CapabilityLayer, PermissionLevel, PersistenceLayer, PromptLayer, Rotation, Session, TransportLayer};
+pub use prism_core::modes::{DaemonTask, GenCapability, Mode, TaskTrigger};
+pub use prism_core::session::{PermissionLevel, Session};
 #[cfg(feature = "agent")]
 pub use prism_core::agent::AgentResult;
 pub use prism_core::client::{
@@ -798,6 +798,13 @@ fn apply_mode_traits(ui: &AppWindow, mode: Mode) {
     if t.card_prompt && !ui.get_prompt_engine_on() {
         ui.set_prompt_engine_on(true);
     }
+}
+
+// ---- session permission helpers ------------------------------------------
+
+/// Effective permission for one tool in a session, borrowed briefly.
+fn st_session_perm(state: &Rc<RefCell<State>>, tool: &str) -> PermissionLevel {
+    state.borrow().session.permission_for(tool)
 }
 
 // ---- agent + daemon panel plumbing -------------------------------------
@@ -2021,7 +2028,6 @@ pub fn run_ui() {
     }
     {
         let ui_w = ui.as_weak();
-        let state_c = state.clone();
         ui.on_agent_strategy_selected(move |idx| {
             let Some(ui) = ui_w.upgrade() else { return };
             let label = if idx == 1 {
@@ -2045,6 +2051,9 @@ pub fn run_ui() {
                 ui.set_settings_status("agent task is empty".into());
                 return;
             }
+            // The composer text is the prompt layer's user_input, so
+            // prompt_messages() and the run agree on what was asked.
+            state_c.borrow_mut().session.prompt.user_input = instruction.clone();
             let (mode, tools, denied) = {
                 let st = state_c.borrow();
                 let mode = st.mode;
@@ -2082,11 +2091,26 @@ pub fn run_ui() {
                 )
                 .into(),
             );
-            ui.set_agent_steps(ModelRc::from(Rc::new(VecModel::from(vec![PaletteRow {
-                id: "step".into(),
-                title: format!("queued · {}", mode.label()).into(),
-                group: strategy_label.into(),
-            }]))));
+            // The tool list rendered above the run is the session's own
+            // list, not a static one, so what the surface advertises and
+            // what the policy permits come from one place.
+            let tool_rows: Vec<PaletteRow> = tools
+                .iter()
+                .map(|t| {
+                    let badge = match st_session_perm(&state_c, t) {
+                        PermissionLevel::Allow => "allow",
+                        PermissionLevel::Ask => "ask",
+                        PermissionLevel::Deny => "deny",
+                    };
+                    PaletteRow {
+                        id: format!("tool:{t}").into(),
+                        title: t.clone().into(),
+                        group: badge.into(),
+                    }
+                })
+                .collect();
+            let _ = (mode, strategy_label);
+            ui.set_agent_steps(ModelRc::from(Rc::new(VecModel::from(tool_rows))));
         });
     }
     {
@@ -2099,7 +2123,6 @@ pub fn run_ui() {
     }
     {
         let ui_w = ui.as_weak();
-        let state_c = state.clone();
         ui.on_gen_cap_selected(move |idx| {
             let Some(ui) = ui_w.upgrade() else { return };
             let cap = GenCapability::all()
