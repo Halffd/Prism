@@ -138,6 +138,10 @@ data with mode-scoped defaults:
 | Persistence | `PersistenceLayer` | messages (chat/creative), chat tree (creative), job queue (any tool-using or media mode) |
 | Session | `Session` | composes all layers; `set_mode` resets capability + persistence while keeping transport |
 
+Wired into the Slint surface: `State::session: Session`, mode switches
+drive `session.set_mode` (transport preserved), so the panels the mode
+rail shows are exactly what the session permits.
+
 ## Tests
 
 | Suite                                     | Status         |

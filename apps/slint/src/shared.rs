@@ -8,6 +8,7 @@ pub mod media;
 pub use prism_core::catalog;
 pub use prism_core::cards::{self, CharacterCard, Persona};
 pub use prism_core::modes::{self, DaemonTask, GenCapability, Mode, TaskTrigger};
+pub use prism_core::session::{self, CapabilityLayer, PermissionLevel, PersistenceLayer, PromptLayer, Rotation, Session, TransportLayer};
 #[cfg(feature = "agent")]
 pub use prism_core::agent::AgentResult;
 pub use prism_core::client::{
@@ -127,6 +128,8 @@ pub struct State {
     pub card: Option<CharacterCard>,
     /// Current interaction mode.
     pub mode: Mode,
+    /// Full five-layer session for the current mode.
+    pub session: Session,
     /// Daemon-mode scheduled tasks (in-memory; the host persists them).
     pub daemon_tasks: Vec<DaemonTask>,
     /// True while an agent-mode run is in flight.
@@ -182,6 +185,7 @@ impl State {
             card: None,
             persona: Persona::default(),
             mode: Mode::default(),
+            session: Session::new(Mode::default(), &[]),
             daemon_tasks: Vec::new(),
             agent_busy: false,
             prompt_queue: Vec::new(),
@@ -877,7 +881,12 @@ fn mode_select(ui: &AppWindow, state: &Rc<RefCell<State>>, idx: i32) {
     let Some(mode) = Mode::all().get(idx as usize).copied() else {
         return;
     };
-    state.borrow_mut().mode = mode;
+    {
+        let mut st = state.borrow_mut();
+        let tools = st.session.capability.tools.clone();
+        st.session.set_mode(mode, &tools);
+        st.mode = mode;
+    }
     ui.set_pmode_idx(idx);
     apply_mode_traits(ui, mode);
     let extra = match mode {
