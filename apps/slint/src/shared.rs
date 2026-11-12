@@ -134,6 +134,8 @@ pub struct State {
     pub daemon_tasks: Vec<DaemonTask>,
     /// True while an agent-mode run is in flight.
     pub agent_busy: bool,
+    /// Last random-prompt pick, so "Surprise me" avoids an immediate repeat.
+    pub last_random: Option<String>,
     /// The user's persona for {{persona}} macros.
     pub persona: Persona,
     /// Prompts queued while streaming. Each is the prompt text.
@@ -188,6 +190,7 @@ impl State {
             session: Session::new(Mode::default(), &[]),
             daemon_tasks: Vec::new(),
             agent_busy: false,
+            last_random: None,
             prompt_queue: Vec::new(),
             queue_processing: false,
             media: crate::shared::media::MediaState::default(),
@@ -1887,6 +1890,27 @@ pub fn run_ui() {
         ui.on_history_forward(move || {
             let Some(ui) = ui_w.upgrade() else { return };
             history_recall(&ui, &state_c, false);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_random_prompt(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            // Avoid repeating the last random pick, and seed from the
+            // clock so consecutive clicks differ.
+            let last = state_c.borrow().last_random.clone();
+            let seed = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0);
+            match host::random_prompt(last.as_deref(), seed) {
+                Some(p) => {
+                    ui.set_input_text(p.clone().into());
+                    state_c.borrow_mut().last_random = Some(p);
+                }
+                None => ui.set_settings_status("no prompts in the pool or history".into()),
+            }
         });
     }
     {

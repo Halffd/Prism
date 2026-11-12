@@ -81,6 +81,48 @@ pub fn record_prompt(text: &str) {
     }
 }
 
+/// Path of the random-prompt pool (`prompts.json` in the config root).
+/// A curated list of starter prompts the "surprise me" surface draws
+/// from. Absent/empty = fall back to the prompt history itself.
+pub fn prompt_pool_path() -> Option<PathBuf> {
+    config_dir().map(|d| d.join("prompts.json"))
+}
+
+/// The random-prompt pool, or the recent history when no pool file
+/// exists (so the picker is useful on a fresh install).
+pub fn prompt_pool() -> Vec<String> {
+    if let Some(path) = prompt_pool_path() {
+        if let Ok(text) = storage().read_to_string(&path) {
+            if let Ok(list) = serde_json::from_str::<Vec<String>>(&text) {
+                let pool: Vec<String> = list
+                    .into_iter()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                if !pool.is_empty() {
+                    return pool;
+                }
+            }
+        }
+    }
+    load_prompt_history()
+        .into_iter()
+        .map(|e| e.text)
+        .collect()
+}
+
+/// One random prompt from the pool, avoiding `avoid` (the last pick).
+/// `seed` comes from the caller (a clock or counter) so the choice is
+/// reproducible in tests and varied in use.
+pub fn random_prompt(avoid: Option<&str>, seed: u64) -> Option<String> {
+    let pool = prompt_pool();
+    if pool.is_empty() {
+        return None;
+    }
+    let refs: Vec<&str> = pool.iter().map(String::as_str).collect();
+    crate::prompt_picker::pick(&refs, seed, avoid).map(String::from)
+}
+
 /// Conversation storage dir; `$PRISM_CONVERSATIONS_DIR` overrides.
 pub fn conversations_dir() -> Option<PathBuf> {
     if let Ok(dir) = std::env::var("PRISM_CONVERSATIONS_DIR") {

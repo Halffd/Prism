@@ -159,6 +159,7 @@ export component AppWindow inherits Window {
     callback send(string);
     callback history-back();
     callback history-forward();
+    callback random-prompt();
     callback scroll-to-end();
     callback invoke-agent-done(string); // JSON AgentResult
     callback palette-toggle();
@@ -544,6 +545,13 @@ export component AppWindow inherits Window {
                     clicked => {
                         send(input-text);
                         input-text = "";
+                    }
+                }
+                Button {
+                    text: "Surprise me";
+                    enabled: !streaming;
+                    clicked => {
+                        random-prompt();
                     }
                 }
                 input-focus := FocusScope {
