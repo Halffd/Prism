@@ -140,7 +140,10 @@ data with mode-scoped defaults:
 
 Wired into the Slint surface: `State::session: Session`, mode switches
 drive `session.set_mode` (transport preserved), so the panels the mode
-rail shows are exactly what the session permits.
+rail shows are exactly what the session permits. The system-prompt field
+writes through to `PromptLayer` via `override_prompt` (empty resets to
+the mode preset), and the agent run reports the effective permission
+count from `session.permission_for` before starting.
 
 ## Tests
 

@@ -2045,13 +2045,47 @@ pub fn run_ui() {
                 ui.set_settings_status("agent task is empty".into());
                 return;
             }
+            let (mode, tools, denied) = {
+                let st = state_c.borrow();
+                let mode = st.mode;
+                let tools = st.session.capability.tools.clone();
+                // Anything the session's permission policy denies is
+                // reported before the run starts, not discovered mid-run.
+                let denied: Vec<String> = tools
+                    .iter()
+                    .filter(|t| {
+                        st.session.permission_for(t) == PermissionLevel::Deny
+                    })
+                    .cloned()
+                    .collect();
+                (mode, tools, denied)
+            };
             state_c.borrow_mut().agent_busy = true;
             ui.set_agent_busy(true);
-            ui.set_settings_status("agent running (tools + permissions via core)".into());
+            let strategy = ui.get_agent_strategy_idx();
+            let strategy_label = if strategy == 1 {
+                "plan-and-execute"
+            } else {
+                "react"
+            };
+            ui.set_settings_status(
+                format!(
+                    "agent: {} · {}/{} tools · {}",
+                    strategy_label,
+                    tools.len() - denied.len(),
+                    tools.len(),
+                    if denied.is_empty() {
+                        "all permitted".to_string()
+                    } else {
+                        format!("denied: {}", denied.join(", "))
+                    }
+                )
+                .into(),
+            );
             ui.set_agent_steps(ModelRc::from(Rc::new(VecModel::from(vec![PaletteRow {
                 id: "step".into(),
-                title: "queued".into(),
-                group: "react".into(),
+                title: format!("queued · {}", mode.label()).into(),
+                group: strategy_label.into(),
             }]))));
         });
     }
@@ -2485,7 +2519,10 @@ pub fn run_ui() {
     {
         let state_c = state.clone();
         ui.on_system_prompt_edited(move |t| {
-            state_c.borrow_mut().settings.system_prompt = t.to_string();
+            let mut st = state_c.borrow_mut();
+            st.settings.system_prompt = t.to_string();
+            let mode = st.mode;
+            st.session.prompt.override_prompt(mode, &t.to_string());
         });
     }
     {
