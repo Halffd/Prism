@@ -18,14 +18,21 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The five interaction modes.
+/// The six interaction modes. Each is a contract on the same runtime:
+/// same transports, same models, different constraints (ChatGPT /
+/// opencode / Cursor / SillyTavern / Hermes / ComfyUI-style).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Mode {
     /// No tools, plain conversation (ChatGPT-style).
     Chat,
-    /// Full tool surface, permissions, subagents (Claude Code / opencode-style).
+    /// Full tool surface, permissions, subagents (Claude Code /
+    /// opencode-style autonomous work).
     Agent,
+    /// Style-only code assistance: refactor and format text with no
+    /// tool execution and no role-play/jailbreak contamination
+    /// (Cursor-style).
+    Code,
     /// Character cards, personas, lore (SillyTavern-style).
     Creative,
     /// Persistent tasks + triggers on the agent loop (Hermes/long-running).
@@ -46,6 +53,7 @@ impl Mode {
         &[
             Mode::Chat,
             Mode::Agent,
+            Mode::Code,
             Mode::Creative,
             Mode::Daemon,
             Mode::Generative,
@@ -56,6 +64,7 @@ impl Mode {
         match self {
             Mode::Chat => "chat",
             Mode::Agent => "agent",
+            Mode::Code => "code",
             Mode::Creative => "creative",
             Mode::Daemon => "daemon",
             Mode::Generative => "generative",
@@ -66,6 +75,7 @@ impl Mode {
         match self {
             Mode::Chat => "Chat",
             Mode::Agent => "Agent",
+            Mode::Code => "Code",
             Mode::Creative => "Creative",
             Mode::Daemon => "Daemon",
             Mode::Generative => "Generative",
@@ -86,6 +96,7 @@ impl Mode {
         match self {
             Mode::Chat => "Plain conversation, no tools",
             Mode::Agent => "Autonomous work with tools and permissions",
+            Mode::Code => "Code style and refactors, no tools",
             Mode::Creative => "Character cards and roleplay",
             Mode::Daemon => "Long-running tasks and triggers",
             Mode::Generative => "Images, video, audio, OCR",
@@ -106,6 +117,60 @@ pub struct ModeTraits {
     pub tasks: bool,
     /// Show the strategy switcher (react / plan-and-execute).
     pub strategy: bool,
+    /// May spawn nested subagent workers (agent/daemon only — chat and
+    /// code modes cannot, which keeps chat from silently acquiring
+    /// superpowers through a cycle).
+    pub subagents: bool,
+    /// Slash commands advertised by this mode (`/fix`, `/swipe`, `/img`).
+    /// Empty means none.
+    pub commands: Vec<String>,
+    /// Prompt/output style contract, applied as instructions on top of
+    /// the mode preset.
+    #[serde(default)]
+    pub style: ModeStyle,
+    /// How long the interaction persists.
+    #[serde(default)]
+    pub persistence: Persistence,
+}
+
+/// The prompt/output style a mode enforces. Applied as a short
+/// instruction block on top of the mode preset so a chat prompt never
+/// leaks a role-play jailbreak and code never gets narrative filler.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ModeStyle {
+    Conversational,
+    TerseExecution,
+    MinimalDiff,
+    Narrative,
+    OpsReport,
+    AssetDescription,
+}
+
+impl Default for ModeStyle {
+    fn default() -> Self {
+        ModeStyle::Conversational
+    }
+}
+
+/// How long a mode's interaction persists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Persistence {
+    /// In-memory/last-session state; gone on exit.
+    Session,
+    /// Chat tree with branches (creative).
+    ChatTree,
+    /// Job queue with retries (generative).
+    JobQueue,
+    /// Long-running daemon: tasks survive reboot (daemon).
+    AlwaysOn,
+}
+
+impl Default for Persistence {
+    fn default() -> Self {
+        Persistence::Session
+    }
 }
 
 impl Mode {
@@ -117,6 +182,10 @@ impl Mode {
                 media: false,
                 tasks: false,
                 strategy: false,
+                subagents: false,
+                commands: Vec::new(),
+                style: ModeStyle::Conversational,
+                persistence: Persistence::Session,
             },
             Mode::Agent => ModeTraits {
                 tools: true,
@@ -124,6 +193,24 @@ impl Mode {
                 media: false,
                 tasks: false,
                 strategy: true,
+                subagents: true,
+                commands: ["fix", "test", "commit", "review"]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+                style: ModeStyle::TerseExecution,
+                persistence: Persistence::Session,
+            },
+            Mode::Code => ModeTraits {
+                tools: false,
+                card_prompt: false,
+                media: false,
+                tasks: false,
+                strategy: false,
+                subagents: false,
+                commands: Vec::new(),
+                style: ModeStyle::MinimalDiff,
+                persistence: Persistence::Session,
             },
             Mode::Creative => ModeTraits {
                 tools: false,
@@ -131,6 +218,13 @@ impl Mode {
                 media: false,
                 tasks: false,
                 strategy: false,
+                subagents: false,
+                commands: ["swipe", "continue", "impersonate", "branch"]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+                style: ModeStyle::Narrative,
+                persistence: Persistence::ChatTree,
             },
             Mode::Daemon => ModeTraits {
                 tools: true,
@@ -138,6 +232,10 @@ impl Mode {
                 media: false,
                 tasks: true,
                 strategy: true,
+                subagents: true,
+                commands: Vec::new(),
+                style: ModeStyle::OpsReport,
+                persistence: Persistence::AlwaysOn,
             },
             Mode::Generative => ModeTraits {
                 tools: false,
@@ -145,6 +243,13 @@ impl Mode {
                 media: true,
                 tasks: false,
                 strategy: false,
+                subagents: false,
+                commands: ["img", "vid", "tts", "stt", "ocr"]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+                style: ModeStyle::AssetDescription,
+                persistence: Persistence::JobQueue,
             },
         }
     }
@@ -349,6 +454,59 @@ mod tests {
         assert!(Mode::Daemon.traits().tools && Mode::Daemon.traits().tasks);
         assert!(Mode::Generative.traits().media);
         assert!(!Mode::Generative.traits().tools);
+    }
+
+    #[test]
+    fn code_mode_is_style_only() {
+        let t = Mode::Code.traits();
+        // No tools, no subagents, no commands: pure style/refactor.
+        assert!(!t.tools);
+        assert!(!t.subagents);
+        assert!(t.commands.is_empty());
+        assert_eq!(t.style, ModeStyle::MinimalDiff);
+        assert_eq!(t.persistence, Persistence::Session);
+    }
+
+    #[test]
+    fn only_agent_and_daemon_spawn_subagents() {
+        let spawners: Vec<Mode> = Mode::all()
+            .iter()
+            .copied()
+            .filter(|m| m.traits().subagents)
+            .collect();
+        assert_eq!(spawners, vec![Mode::Agent, Mode::Daemon]);
+        assert!(!Mode::Chat.traits().subagents);
+        assert!(!Mode::Code.traits().subagents);
+        assert!(!Mode::Creative.traits().subagents);
+        assert!(!Mode::Generative.traits().subagents);
+    }
+
+    #[test]
+    fn style_and_persistence_are_distinct_per_mode() {
+        use ModeStyle::*;
+        use Persistence::*;
+        let expected = [
+            (Mode::Chat, Conversational, Session),
+            (Mode::Agent, TerseExecution, Session),
+            (Mode::Code, MinimalDiff, Session),
+            (Mode::Creative, Narrative, ChatTree),
+            (Mode::Daemon, OpsReport, AlwaysOn),
+            (Mode::Generative, AssetDescription, JobQueue),
+        ];
+        for (mode, style, persistence) in expected {
+            let t = mode.traits();
+            assert_eq!(t.style, style, "{:?} style", mode);
+            assert_eq!(t.persistence, persistence, "{:?} persistence", mode);
+        }
+    }
+
+    #[test]
+    fn commands_are_mode_scoped() {
+        assert!(Mode::Chat.traits().commands.is_empty());
+        assert!(Mode::Code.traits().commands.is_empty());
+        assert_eq!(Mode::Agent.traits().commands.len(), 4);
+        assert_eq!(Mode::Creative.traits().commands.len(), 4);
+        assert_eq!(Mode::Generative.traits().commands.len(), 5);
     }
 
     #[test]

@@ -904,6 +904,7 @@ fn mode_select(ui: &AppWindow, state: &Rc<RefCell<State>>, idx: i32) {
         Mode::Generative => "generative mode: media screens",
         Mode::Creative => "creative mode: cards + personas + lore",
         Mode::Agent => "agent mode: tools + permissions + subagents",
+        Mode::Code => "code mode: style + refactors, no tools",
         Mode::Chat => "chat mode: no tools",
     };
     ui.set_settings_status(extra.into());

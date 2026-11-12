@@ -30,6 +30,9 @@ pub fn default_system_prompt(mode: Mode) -> &'static str {
         Mode::Agent => {
             "You are an autonomous agent. Use the available tools to complete the task, then give the final answer."
         }
+        Mode::Code => {
+            "You are a code assistant. Write minimal, idiomatic, correct code. No tools are available and none are needed — return the edited code, not a narrative."
+        }
         Mode::Creative => "Stay in character and narrate the scene.",
         Mode::Daemon => {
             "You are a background daemon. Complete the scheduled task with the tools available and report the result."
