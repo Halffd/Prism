@@ -13,11 +13,14 @@ use prism_core::client::StreamEvent;
 use prism_core::host;
 use prism_core::settings::{Connection, Settings};
 use std::sync::mpsc;
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 
 fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    static LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
+        std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
+    // Recover from poisoning: one failing test must not cascade into
+    // every other test in the file panicking on the same guard.
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Fresh isolated config dir + app (offline-safe provider: ollama, no key).
@@ -237,4 +240,83 @@ fn conversation_persists_across_app_restart() {
     assert_eq!(app2.conv.messages[0].content, "remember me");
     assert_eq!(app2.conv.messages[1].content, "kept");
     assert_eq!(app2.conv.messages[1].thinking, None);
+}
+
+// ---- interaction modes (prism_core::modes contract on this surface) ----
+
+#[test]
+fn agent_command_is_denied_in_tool_less_modes() {
+    let (_g, _dir, mut app, tx) = fresh_app("mode-no-tools");
+    // Default is chat: no tools advertised.
+    assert!(app.imode.traits().tools == false);
+    type_line(&mut app, &tx, "/agent do something");
+    // A system line explains the refusal rather than running the loop.
+    let last = app.conv.messages.last().unwrap();
+    assert_eq!(last.role, "system");
+    assert!(last.content.contains("no tools"), "{}", last.content);
+}
+
+#[test]
+fn agent_command_runs_in_agent_mode() {
+    let (_g, _dir, mut app, tx) = fresh_app("mode-agent");
+    app.set_imode(prism_cli::state::IMode::Agent);
+    assert!(app.imode.traits().tools);
+    // The refusal branch is what matters here: this mode advertises
+    // tools, so no refusal line is pushed. The agent loop itself is not
+    // asserted — spawning one would leave a thread writing into the
+    // dropped tempdir after the test returns.
+    type_line(&mut app, &tx, "/agent do something");
+    assert!(
+        app.conv.messages.iter().all(|m| !m.content.contains("no tools")),
+        "agent mode must not refuse: {:?}",
+        app.conv.messages.last()
+    );
+}
+
+#[test]
+fn mode_switch_applies_the_preset_prompt() {
+    let (_g, _dir, mut app, _tx) = fresh_app("mode-prompt");
+    // Fresh settings have no user prompt, so switching to Code replaces
+    // the empty prompt with the Code preset.
+    assert!(app.settings.system_prompt.trim().is_empty());
+    app.set_imode(prism_cli::state::IMode::Code);
+    assert!(app.settings.system_prompt.to_lowercase().contains("code"));
+    assert!(!app.imode.traits().tools);
+}
+
+#[test]
+fn alt_m_cycles_modes_and_wraps() {
+    let (_g, _dir, mut app, tx) = fresh_app("mode-cycle");
+    app.set_imode(prism_cli::state::IMode::Chat);
+    let alt_m = KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT);
+    app.handle_key(alt_m, &tx);
+    assert_eq!(app.imode, prism_cli::state::IMode::Agent);
+    // Agent → Code → Creative → Daemon → Generative.
+    for expected in [
+        prism_cli::state::IMode::Code,
+        prism_cli::state::IMode::Creative,
+        prism_cli::state::IMode::Daemon,
+        prism_cli::state::IMode::Generative,
+    ] {
+        app.handle_key(alt_m, &tx);
+        assert_eq!(app.imode, expected);
+    }
+    // Sixth wrap back to Chat.
+    app.handle_key(alt_m, &tx);
+    assert_eq!(app.imode, prism_cli::state::IMode::Chat);
+}
+
+#[test]
+fn mode_command_accepts_ids_and_rejects_junk() {
+    let (_g, _dir, mut app, tx) = fresh_app("mode-cmd");
+    type_line(&mut app, &tx, "/mode code");
+    assert_eq!(app.imode, prism_cli::state::IMode::Code);
+    let before = app.conv.messages.len();
+    type_line(&mut app, &tx, "/mode nonsense");
+    // Unchanged mode plus a message naming the valid options.
+    assert_eq!(app.imode, prism_cli::state::IMode::Code);
+    let last = &app.conv.messages[app.conv.messages.len() - 1];
+    assert_eq!(last.role, "system");
+    assert!(last.content.contains("unknown mode"), "{}", last.content);
+    let _ = before;
 }

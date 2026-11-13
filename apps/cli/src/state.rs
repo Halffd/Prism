@@ -37,6 +37,11 @@ pub enum Mode {
     Search,
 }
 
+/// Interaction mode: the six-mode taxonomy (Chat/Agent/Code/Creative/
+/// Daemon/Generative). Independent of the key-handling `Mode` above —
+/// one is what you're doing, the other is which keymap is active.
+pub use prism_core::modes::Mode as IMode;
+
 pub struct App {
     pub settings: prism_core::settings::Settings,
     pub conv: Conversation,
@@ -46,6 +51,7 @@ pub struct App {
     pub input: Vec<char>,
     pub cursor: usize,
     pub mode: Mode,
+    pub imode: IMode,
     pub search: Option<String>,
     pub matches: Vec<usize>,
     pub match_sel: usize,
@@ -86,6 +92,7 @@ impl App {
             input: Vec::new(),
             cursor: 0,
             mode: Mode::Normal,
+            imode: IMode::Chat,
             search: None,
             matches: Vec::new(),
             match_sel: 0,
@@ -519,6 +526,26 @@ impl App {
                     self.status = format!("key set for {}", self.settings.provider);
                 }
             }
+            "mode" => {
+                if arg.is_empty() {
+                    let ids: Vec<&str> = prism_core::modes::Mode::all()
+                        .iter()
+                        .map(|m| m.id())
+                        .collect();
+                    self.push_message("system", &format!("mode: {} (options: {}, Alt+M cycles)", self.imode.id(), ids.join(", ")));
+                } else {
+                    let m = prism_core::modes::Mode::from_id(&arg);
+                    if m.id() != arg.trim().to_lowercase() {
+                        let ids: Vec<&str> = prism_core::modes::Mode::all()
+                            .iter()
+                            .map(|m| m.id())
+                            .collect();
+                        self.push_message("system", &format!("unknown mode; options: {}", ids.join(", ")));
+                    } else {
+                        self.set_imode(m);
+                    }
+                }
+            }
             "system" => {
                 self.settings.system_prompt = arg.clone();
                 self.persist_settings();
@@ -564,6 +591,16 @@ impl App {
                     self.push_message(
                         "system",
                         "usage: /agent <task> — run the core agent loop (calculator + file tools; writes are denied headless). Set PRISM_AGENT_SANDBOX_POLICY (JSON or policy file) to add the sandboxed shell tool",
+                    );
+                } else if !self.imode.traits().tools {
+                    // Tool-less modes cannot run the loop at all. This is
+                    // the "no mode leakage" guarantee made real.
+                    self.push_message(
+                        "system",
+                        &format!(
+                            "{} mode has no tools — /agent needs agent, daemon, or /mode agent",
+                            self.imode.label()
+                        ),
                     );
                 } else if self.agent_running {
                     self.push_message("system", "agent already running");
@@ -766,9 +803,58 @@ impl App {
                     self.open_conversation(&meta.id);
                 }
             }
+            'm' | 'M' => {
+                let next = IMode::all()
+                    .iter()
+                    .copied()
+                    .position(|m| m == self.imode)
+                    .map(|i| IMode::all()[(i + 1) % IMode::all().len()])
+                    .unwrap_or(IMode::Chat);
+                self.set_imode(next);
+            }
             'q' | 'Q' => self.quit = true,
             _ => {}
         }
+    }
+
+    /// Switch interaction mode. The mode is not a label: Code and Chat
+    /// advertise no tools, so the system prompt is reset to the mode
+    /// preset (any user override is discarded, because "style only"
+    /// cannot coexist with a prompt that says "use the shell"), and the
+    /// agent job refuses to start.
+    pub fn set_imode(&mut self, mode: IMode) {
+        self.imode = mode;
+        let t = mode.traits();
+        // The mode preset becomes the system prompt unless the user set
+        // one explicitly (then Mode::Code would be a no-op switch).
+        let preset = prism_core::session::default_system_prompt(mode).to_string();
+        let user_set = !self.settings.system_prompt.trim().is_empty();
+        if !user_set {
+            self.settings.system_prompt = preset.clone();
+        }
+        let mut bits = vec![mode.label().to_string()];
+        if t.tools {
+            bits.push("tools".into());
+        }
+        if t.subagents {
+            bits.push("subagents".into());
+        }
+        if t.commands.is_empty() {
+            bits.push("no commands".into());
+        }
+        if t.tools {
+            self.status = format!("mode: {} · {}", bits.join(" + "), t.style.style_label());
+        } else {
+            // Style-only modes: no agent run and no tool surface.
+            self.agent_running = false;
+            self.status = format!(
+                "mode: {} · {} · tools off{}",
+                bits.join(" + "),
+                t.style.style_label(),
+                if user_set { " (prompt kept)" } else { "" }
+            );
+        }
+        self.persist_settings();
     }
 
     fn list_title(&self, idx: usize) -> String {

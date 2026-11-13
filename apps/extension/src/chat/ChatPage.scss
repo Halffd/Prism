@@ -566,6 +566,30 @@
   }
 }
 
+// Mode strip: the six interaction modes (Chat/Agent/Code/Creative/
+// Daemon/Generative). Same contract as prism_core::modes — the row lets
+// you see, not click-and-hope, which mode binds which constraints.
+.mode-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 16px 2px;
+  border-bottom: 1px solid var(--outline-variant, rgba(255, 255, 255, 0.06));
+
+  // The active mode is the one whose constraints apply.
+  .mode-toggle-btn {
+    font-size: 12px;
+    padding: 3px 8px;
+  }
+
+  .mode-toggle-btn.active {
+    background: var(--primary);
+    color: var(--on-primary, #0f0d13);
+    font-weight: 600;
+  }
+}
+
 .mode-toggle-btn {
   background: var(--surface-container-high);
   color: var(--on-surface-variant);

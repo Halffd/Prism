@@ -120,9 +120,11 @@ pub struct ModeTraits {
     /// May spawn nested subagent workers (agent/daemon only — chat and
     /// code modes cannot, which keeps chat from silently acquiring
     /// superpowers through a cycle).
+    #[serde(default)]
     pub subagents: bool,
     /// Slash commands advertised by this mode (`/fix`, `/swipe`, `/img`).
     /// Empty means none.
+    #[serde(default)]
     pub commands: Vec<String>,
     /// Prompt/output style contract, applied as instructions on top of
     /// the mode preset.
@@ -147,6 +149,20 @@ pub enum ModeStyle {
     AssetDescription,
 }
 
+impl ModeStyle {
+    /// Short display label for status bars and mode rows.
+    pub fn style_label(self) -> &'static str {
+        match self {
+            ModeStyle::Conversational => "conversational",
+            ModeStyle::TerseExecution => "terse execution",
+            ModeStyle::MinimalDiff => "minimal diff",
+            ModeStyle::Narrative => "narrative",
+            ModeStyle::OpsReport => "ops report",
+            ModeStyle::AssetDescription => "asset description",
+        }
+    }
+}
+
 impl Default for ModeStyle {
     fn default() -> Self {
         ModeStyle::Conversational
@@ -165,6 +181,18 @@ pub enum Persistence {
     JobQueue,
     /// Long-running daemon: tasks survive reboot (daemon).
     AlwaysOn,
+}
+
+impl Persistence {
+    /// Short display label for status rows.
+    pub fn label(self) -> &'static str {
+        match self {
+            Persistence::Session => "session",
+            Persistence::ChatTree => "chat tree",
+            Persistence::JobQueue => "job queue",
+            Persistence::AlwaysOn => "always-on",
+        }
+    }
 }
 
 impl Default for Persistence {
@@ -507,6 +535,48 @@ mod tests {
         assert_eq!(Mode::Agent.traits().commands.len(), 4);
         assert_eq!(Mode::Creative.traits().commands.len(), 4);
         assert_eq!(Mode::Generative.traits().commands.len(), 5);
+    }
+
+    #[test]
+    fn style_and_persistence_have_stable_labels() {
+        // The TUI status bar and Slint rail render these; a label change
+        // is a user-visible string change, not just a refactor.
+        assert_eq!(ModeStyle::MinimalDiff.style_label(), "minimal diff");
+        assert_eq!(ModeStyle::TerseExecution.style_label(), "terse execution");
+        assert_eq!(ModeStyle::Narrative.style_label(), "narrative");
+        assert_eq!(ModeStyle::OpsReport.style_label(), "ops report");
+        assert_eq!(
+            ModeStyle::AssetDescription.style_label(),
+            "asset description"
+        );
+        assert_eq!(
+            ModeStyle::Conversational.style_label(),
+            "conversational"
+        );
+
+        assert_eq!(Persistence::Session.label(), "session");
+        assert_eq!(Persistence::ChatTree.label(), "chat tree");
+        assert_eq!(Persistence::JobQueue.label(), "job queue");
+        assert_eq!(Persistence::AlwaysOn.label(), "always-on");
+    }
+
+    #[test]
+    fn traits_roundtrip_through_serde() {
+        // Hosts persist ModeTraits in session files; every field must
+        // survive a round trip or a stored session loses constraints.
+        let t = Mode::Daemon.traits();
+        let json = serde_json::to_string(&t).unwrap();
+        let back: ModeTraits = serde_json::from_str(&json).unwrap();
+        assert_eq!(t, back);
+        // The new fields carry defaults so older session files (written
+        // before subagents/commands/style/persistence existed) still load.
+        let legacy = r#"{"tools":true,"card_prompt":false,"media":false,"tasks":false,"strategy":true}"#;
+        let legacy: ModeTraits = serde_json::from_str(legacy).unwrap();
+        assert!(legacy.tools);
+        assert!(!legacy.subagents);
+        assert!(legacy.commands.is_empty());
+        assert_eq!(legacy.style, ModeStyle::Conversational);
+        assert_eq!(legacy.persistence, Persistence::Session);
     }
 
     #[test]

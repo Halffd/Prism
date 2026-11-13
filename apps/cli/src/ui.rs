@@ -12,9 +12,10 @@ use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
 pub const HELP_LINES: &[&str] = &[
-    "Prism CLI — commands: /help /new /load N /del N /model X /provider X /key X /system X /think /temp X /conn direct|api /search X /agent <task> /quit",
+    "Prism CLI — commands: /help /new /load N /del N /model X /provider X /key X /mode [chat|agent|code|creative|daemon|generative] /system X /think /temp X /conn direct|api /search X /agent <task> /quit",
+    "modes: chat (no tools) · agent (tools+subagents) · code (style only) · creative (cards+lore) · daemon (tasks, always-on) · generative (image/video/audio) · Alt+M cycles, /mode lists",
     "agent shell: PRISM_AGENT_SANDBOX_POLICY (JSON or file) adds the sandboxed `shell` tool · prism sandbox preflight [--policy FILE] [--json] probes the host",
-    "keys: Enter send · Esc stop/clear · Ctrl+F search (n/N navigate) · PgUp/PgDn scroll · Ctrl+T thinking · Alt+N new chat · Alt+P/K pick chat · Alt+O open · Ctrl+U clear input · Ctrl+W del word · Ctrl+C quit",
+    "keys: Enter send · Esc stop/clear · Ctrl+F search (n/N navigate) · PgUp/PgDn scroll · Ctrl+T thinking · Alt+N new chat · Alt+P/K pick chat · Alt+O open · Alt+M mode · Ctrl+U clear input · Ctrl+W del word · Ctrl+C quit",
 ];
 
 const LEFT_WIDTH: u16 = 26;
@@ -214,6 +215,7 @@ fn draw_details(f: &mut Frame, app: &App, area: Rect) {
         prism_core::settings::Connection::PrismApi => "prism api",
     };
     let mut rows: Vec<RtLine> = vec![
+        kv("mode", &app.imode.label()),
         kv("provider", &s.provider),
         kv("model", &app.effective_model()),
         kv("connection", conn),
@@ -284,6 +286,23 @@ fn draw_details(f: &mut Frame, app: &App, area: Rect) {
     if app.is_streaming() {
         rows.push(kv("streaming", "running (Esc to stop)"));
     }
+    // Interaction-mode constraints: style contract, persistence scope,
+    // and the hard caps (subagents / commands) so the user can see at a
+    // glance what this mode allows.
+    let t = app.imode.traits();
+    rows.push(RtLine::from(""));
+    rows.push(kv("style", t.style.style_label()));
+    rows.push(kv("persists", t.persistence.label()));
+    rows.push(kv(
+        "subagents",
+        if t.subagents { "allowed" } else { "denied" },
+    ));
+    let cmds = if t.commands.is_empty() {
+        "—".to_string()
+    } else {
+        t.commands.join(" ")
+    };
+    rows.push(kv("commands", &cmds));
     let block = Block::new()
         .borders(Borders::ALL)
         .title(Span::styled(" session ", Style::new().fg(Color::Cyan)));
@@ -311,14 +330,14 @@ fn draw_composer(f: &mut Frame, app: &App, area: Rect) {
         text.push('▌');
     }
     let hint = if app.input.first() == Some(&'/') {
-        "/help for commands"
+        "/help · /mode to switch (Alt+M cycles)"
     } else {
         "Enter send · Esc stop · Ctrl+F search"
     };
     let title = if app.is_streaming() {
         format!(" {} streaming — Esc stops ", app.spinner_char())
     } else {
-        " composer ".to_string()
+        format!(" {} · composer ", app.imode.label())
     };
     let block = Block::new().borders(Borders::ALL).title(Span::styled(
         title,
@@ -356,8 +375,12 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
         Mode::Normal => "",
         Mode::Search => "SEARCH · ",
     };
+    let im = app.imode;
+    let t = im.traits();
+    let badge = format!("{} · {} · ", im.label(), t.style.style_label());
     let line = RtLine::from(vec![
         Span::styled(format!(" {mode}"), Style::new().fg(Color::Magenta)),
+        Span::styled(badge, Style::new().fg(Color::Cyan)),
         Span::styled(
             truncate(&app.status, area.width.saturating_sub(4) as usize),
             Style::new().fg(Color::Gray),

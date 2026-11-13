@@ -776,10 +776,35 @@ fn card_clear(ui: &AppWindow, state: &Rc<RefCell<State>>) {
 // ---- interaction modes ----
 
 /// Labels + blurbs for the mode rail (same order as `Mode::all()`).
-fn mode_lists() -> (Vec<SharedString>, Vec<SharedString>) {
-    let labels = Mode::all().iter().map(|m| SharedString::from(m.label())).collect();
-    let blurbs = Mode::all().iter().map(|m| SharedString::from(m.blurb())).collect();
-    (labels, blurbs)
+fn mode_lists() -> (Vec<SharedString>, Vec<SharedString>, Vec<SharedString>) {
+    let modes = Mode::all();
+    let labels = modes.iter().map(|m| SharedString::from(m.label())).collect();
+    let blurbs = modes.iter().map(|m| SharedString::from(m.blurb())).collect();
+    // The traits line: only the constraints that bind, in a fixed order.
+    // Chat (nothing enabled) keeps an empty line so the tile stays compact.
+    let traits = modes
+        .iter()
+        .map(|m| {
+            let t = m.traits();
+            let mut bits = Vec::new();
+            if t.tools {
+                bits.push("tools");
+            }
+            if t.subagents {
+                bits.push("subagents");
+            }
+            if t.tasks {
+                bits.push("tasks");
+            }
+            if t.media {
+                bits.push("media");
+            }
+            bits.push(t.style.style_label());
+            bits.push(t.persistence.label());
+            SharedString::from(bits.join(" · "))
+        })
+        .collect();
+    (labels, blurbs, traits)
 }
 
 fn gen_cap_labels() -> Vec<SharedString> {
@@ -1826,9 +1851,10 @@ pub fn run_ui() {
             &st.settings,
         )))));
         {
-            let (labels, blurbs) = mode_lists();
+            let (labels, blurbs, traits) = mode_lists();
             ui.set_pmode_labels(ModelRc::from(Rc::new(VecModel::from(labels))));
             ui.set_pmode_blurbs(ModelRc::from(Rc::new(VecModel::from(blurbs))));
+            ui.set_pmode_traits(ModelRc::from(Rc::new(VecModel::from(traits))));
             apply_mode_traits(&ui, Mode::default());
             ui.set_gen_cap_labels(ModelRc::from(Rc::new(VecModel::from(
                 gen_cap_labels(),

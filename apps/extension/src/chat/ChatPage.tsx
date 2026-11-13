@@ -57,6 +57,13 @@ import { MultiSendPanel } from '../components/MultiSendPanel';
 import { DebatePanel } from '../components/DebatePanel';
 import { AgentRunnerPanel } from '../components/AgentRunnerPanel';
 import { AgentConsolePanel } from '../components/AgentConsolePanel';
+import {
+  getMode,
+  traitsSummary,
+  MODES,
+  defaultSystemPrompt,
+  type ModeId,
+} from './modes';
 import { BUILTIN_TOOLS } from '@prism/agent';
 import {
   loadAgentConsole,
@@ -146,6 +153,8 @@ export function ChatPage() {
   const [debateInProgress, setDebateInProgress] = useState(false);
   const [debateResult, setDebateResult] = useState<DebateResult | null>(null);
   const [agentEnabled, setAgentEnabled] = useState(false);
+  const [modeId, setModeId] = useState<ModeId>('chat');
+  const mode = getMode(modeId);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const { agents: customAgents, activeAgentId } = useSelector(
     (state: RootState) => state.agents,
@@ -664,7 +673,14 @@ export function ChatPage() {
       : [];
 
     const assembled = assembleContext({
-      systemPrompt: '',
+      // Creative mode lets the card engine assemble from character +
+      // persona + preset (so pass through whatever the user configured,
+      // which assembleContext ignores in favour of the card). The other
+      // modes inject the mode preset; Chat stays empty so the user's own
+      // prompt config is used untouched.
+      systemPrompt: mode.cardPrompt || mode.label === 'Chat'
+        ? ''
+        : defaultSystemPrompt(mode.id),
       messages,
       character: isGroupChat ? undefined : activeCharacter,
       characters: isGroupChat ? groupCharacters : undefined,
@@ -815,7 +831,19 @@ export function ChatPage() {
           await saveCurrentChatToDB([...messages, userMessage, debateMessage]);
         }
       } else if (agentEnabled) {
-        // Custom agent flow
+        // Custom agent flow. Gated on the mode: only agent and daemon
+        // advertise tools, so a chat/code session cannot run the loop.
+        if (!mode.tools) {
+          dispatch(
+            addMessage({
+              id: Date.now().toString(),
+              role: 'system',
+              content: `${mode.label} mode has no tools — pick Agent to run the agent loop.`,
+              timestamp: Date.now(),
+            }),
+          );
+          return;
+        }
         const agentData = await performAgent(input);
         if (agentData) {
           const stepsSummary =
@@ -1417,8 +1445,20 @@ export function ChatPage() {
           />
         )}
 
-      <div className="input-container">
-        <ChatInputBar
+        <div className="input-container">
+          <div className="mode-bar" role="group" aria-label="Interaction mode">
+            {MODES.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => setModeId(m.id)}
+                className={`mode-toggle-btn ${modeId === m.id ? 'active' : ''}`}
+                title={`${m.blurb} — ${traitsSummary(m)}`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <ChatInputBar
           onOpenCharacterSelector={() => setShowCharacterSelector(true)}
           onOpenPersonaSelector={() => setShowPersonaSelector(true)}
           onOpenPresetManager={() => setShowPresetManager(true)}
