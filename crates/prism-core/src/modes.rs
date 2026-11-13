@@ -104,6 +104,157 @@ impl Mode {
     }
 }
 
+/// A single capability that a mode can grant. Modes are bundles of
+/// features; mixing modes unions their features, and the UI can then
+/// toggle individual features on or off. This is the unit that makes
+/// "mode mixing" and "capability editing" the same operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Feature {
+    /// Tool execution surface.
+    Tools,
+    /// Nested subagent workers.
+    Subagents,
+    /// Slash commands.
+    Commands,
+    /// Character-card / lorebook prompt assembly.
+    CharacterCards,
+    /// Media generation screens.
+    Media,
+    /// Scheduled task list and trigger editor.
+    Tasks,
+    /// Strategy switcher (react / plan-and-execute).
+    Strategy,
+}
+
+impl Feature {
+    /// All features in UI order.
+    pub fn all() -> &'static [Feature] {
+        &[
+            Feature::Tools,
+            Feature::Subagents,
+            Feature::Commands,
+            Feature::CharacterCards,
+            Feature::Media,
+            Feature::Tasks,
+            Feature::Strategy,
+        ]
+    }
+
+    /// Stable id for persistence and UI keys.
+    pub fn id(self) -> &'static str {
+        match self {
+            Feature::Tools => "tools",
+            Feature::Subagents => "subagents",
+            Feature::Commands => "commands",
+            Feature::CharacterCards => "character-cards",
+            Feature::Media => "media",
+            Feature::Tasks => "tasks",
+            Feature::Strategy => "strategy",
+        }
+    }
+
+    /// Short display label.
+    pub fn label(self) -> &'static str {
+        match self {
+            Feature::Tools => "Tools",
+            Feature::Subagents => "Subagents",
+            Feature::Commands => "Commands",
+            Feature::CharacterCards => "Character cards",
+            Feature::Media => "Media",
+            Feature::Tasks => "Tasks",
+            Feature::Strategy => "Strategy",
+        }
+    }
+
+    /// One-line description for the capability editor.
+    pub fn description(self) -> &'static str {
+        match self {
+            Feature::Tools => "Execute tools (shell, files, search)",
+            Feature::Subagents => "Spawn nested workers",
+            Feature::Commands => "Slash commands",
+            Feature::CharacterCards => "Character cards and lorebook",
+            Feature::Media => "Image, video and audio generation",
+            Feature::Tasks => "Scheduled tasks and triggers",
+            Feature::Strategy => "React / plan-and-execute switch",
+        }
+    }
+
+    /// From an id string; unknown ids return `None` so a caller can
+    /// reject bad input rather than silently defaulting.
+    pub fn from_id(s: &str) -> Option<Feature> {
+        let s = s.trim().to_lowercase();
+        Feature::all().iter().copied().find(|f| f.id() == s)
+    }
+}
+
+impl ModeTraits {
+    /// Is this feature granted by these traits?
+    pub fn has(&self, feature: Feature) -> bool {
+        match feature {
+            Feature::Tools => self.tools,
+            Feature::Subagents => self.subagents,
+            Feature::Commands => !self.commands.is_empty(),
+            Feature::CharacterCards => self.card_prompt,
+            Feature::Media => self.media,
+            Feature::Tasks => self.tasks,
+            Feature::Strategy => self.strategy,
+        }
+    }
+
+    /// The features these traits grant, in `Feature::all()` order.
+    pub fn features(&self) -> Vec<Feature> {
+        Feature::all()
+            .iter()
+            .copied()
+            .filter(|f| self.has(*f))
+            .collect()
+    }
+
+    /// Apply a feature override to this trait set. Turning a feature off
+    /// that was granted by a mode clears the flag *and* the commands it
+    /// implies, so "no commands" is really no commands rather than an
+    /// empty-but-present list.
+    pub fn with_feature(&self, feature: Feature, enabled: bool) -> ModeTraits {
+        let mut t = self.clone();
+        match feature {
+            Feature::Tools => t.tools = enabled,
+            Feature::Subagents => t.subagents = enabled,
+            Feature::Commands => t.commands = if enabled { t.commands } else { Vec::new() },
+            Feature::CharacterCards => t.card_prompt = enabled,
+            Feature::Media => t.media = enabled,
+            Feature::Tasks => t.tasks = enabled,
+            Feature::Strategy => t.strategy = enabled,
+        }
+        t
+    }
+
+    /// Union of two trait sets: the union of feature flags, the
+    /// concatenation of command lists, and the *most permissive*
+    /// persistence scope. Style is taken from the first (the primary
+    /// mode) because style is a voice, not a capability — mixing Code
+    /// with Creative should keep Code's minimal-diff voice.
+    pub fn merged_with(&self, other: &ModeTraits) -> ModeTraits {
+        let mut commands = self.commands.clone();
+        for c in &other.commands {
+            if !commands.contains(c) {
+                commands.push(c.clone());
+            }
+        }
+        ModeTraits {
+            tools: self.tools || other.tools,
+            card_prompt: self.card_prompt || other.card_prompt,
+            media: self.media || other.media,
+            tasks: self.tasks || other.tasks,
+            strategy: self.strategy || other.strategy,
+            subagents: self.subagents || other.subagents,
+            commands,
+            style: self.style,
+            persistence: self.persistence.max(other.persistence),
+        }
+    }
+}
+
 /// What a mode enables. Hosts read this to decide what to render.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModeTraits {
@@ -170,7 +321,10 @@ impl Default for ModeStyle {
 }
 
 /// How long a mode's interaction persists.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Ordered by how durable the scope is, so mixing two modes keeps the
+/// longer-lived one: `Session < ChatTree < JobQueue < AlwaysOn`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Persistence {
     /// In-memory/last-session state; gone on exit.
@@ -626,5 +780,108 @@ mod tests {
         assert!(GenCapability::Transcribe.needs_input_file());
         assert!(!GenCapability::Image.needs_input_file());
         assert_eq!(GenCapability::all().len(), 7);
+    }
+
+    // -- features ---------------------------------------------------------
+
+    #[test]
+    fn every_mode_reports_its_features() {
+        // The feature list is what the capability editor renders, so it
+        // must agree with the boolean flags exactly.
+        for mode in Mode::all() {
+            let t = mode.traits();
+            let features = t.features();
+            assert_eq!(
+                features.contains(&Feature::Tools),
+                t.tools,
+                "{:?} tools",
+                mode
+            );
+            assert_eq!(
+                features.contains(&Feature::Subagents),
+                t.subagents,
+                "{:?} subagents",
+                mode
+            );
+            assert_eq!(
+                features.contains(&Feature::CharacterCards),
+                t.card_prompt,
+                "{:?} cards",
+                mode
+            );
+            assert_eq!(
+                features.contains(&Feature::Media),
+                t.media,
+                "{:?} media",
+                mode
+            );
+            assert_eq!(
+                features.contains(&Feature::Tasks),
+                t.tasks,
+                "{:?} tasks",
+                mode
+            );
+            assert_eq!(
+                features.contains(&Feature::Strategy),
+                t.strategy,
+                "{:?} strategy",
+                mode
+            );
+            assert_eq!(
+                features.contains(&Feature::Commands),
+                !t.commands.is_empty(),
+                "{:?} commands",
+                mode
+            );
+        }
+    }
+
+    #[test]
+    fn merging_unions_capabilities_and_keeps_primary_voice() {
+        let chat = Mode::Chat.traits();
+        let agent = Mode::Agent.traits();
+        let merged = chat.merged_with(&agent);
+        assert!(merged.tools);
+        assert!(merged.subagents);
+        assert!(!merged.card_prompt);
+        // Style is the primary's voice, not a union.
+        assert_eq!(merged.style, ModeStyle::Conversational);
+        // Commands are concatenated without duplicates.
+        let creative = Mode::Creative.traits();
+        let mixed = agent.merged_with(&creative);
+        assert_eq!(mixed.commands.len(), 8);
+        let again = mixed.merged_with(&agent);
+        assert_eq!(again.commands.len(), 8, "no duplicate commands");
+    }
+
+    #[test]
+    fn merging_keeps_the_longest_persistence_scope() {
+        let session = Mode::Chat.traits();
+        let tree = Mode::Creative.traits();
+        let always = Mode::Daemon.traits();
+        assert_eq!(
+            session.merged_with(&tree).persistence,
+            Persistence::ChatTree
+        );
+        assert_eq!(
+            tree.merged_with(&always).persistence,
+            Persistence::AlwaysOn
+        );
+        assert_eq!(
+            always.merged_with(&session).persistence,
+            Persistence::AlwaysOn
+        );
+    }
+
+    #[test]
+    fn feature_override_can_switch_a_feature_off() {
+        let agent = Mode::Agent.traits();
+        assert!(agent.has(Feature::Tools));
+        let off = agent.with_feature(Feature::Tools, false);
+        assert!(!off.has(Feature::Tools));
+        // Commands off means an actually empty command list.
+        let no_commands = agent.with_feature(Feature::Commands, false);
+        assert!(no_commands.commands.is_empty());
+        assert!(!no_commands.has(Feature::Commands));
     }
 }

@@ -16,7 +16,7 @@
 
 use crate::cards::{self, CharacterCard, Persona};
 use crate::client::ChatMessage;
-use crate::modes::{Mode, ModeTraits};
+use crate::modes::{Feature, Mode, ModeTraits};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -192,6 +192,48 @@ impl CapabilityLayer {
     pub fn allows(&self, tool: &str) -> bool {
         self.permission_for(tool) != PermissionLevel::Deny
     }
+
+    /// Set a per-tool permission override. The tool must be advertised:
+    /// granting a permission for a tool this session cannot see would
+    /// make the policy and the tool list disagree.
+    pub fn set_permission(&mut self, tool: &str, level: PermissionLevel) -> bool {
+        if !self.tools.iter().any(|t| t == tool) {
+            return false;
+        }
+        self.permissions.insert(tool.to_string(), level);
+        true
+    }
+
+    /// Drop a per-tool override so the tool follows the default again.
+    pub fn clear_permission(&mut self, tool: &str) -> bool {
+        self.permissions.remove(tool).is_some()
+    }
+
+    /// Set the fallback permission used for tools with no explicit entry.
+    pub fn set_default_permission(&mut self, level: PermissionLevel) {
+        self.default_permission = level;
+    }
+
+    /// One row per advertised tool: its name and effective permission.
+    /// This is what a permissions editor renders.
+    pub fn permission_rows(&self) -> Vec<(String, PermissionLevel)> {
+        self.tools
+            .iter()
+            .map(|t| (t.clone(), self.permission_for(t)))
+            .collect()
+    }
+
+    /// The tools whose permission differs from the default.
+    pub fn overridden_tools(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .permissions
+            .iter()
+            .filter(|(_tool, level)| **level != self.default_permission)
+            .map(|(tool, _)| tool.clone())
+            .collect();
+        names.sort();
+        names
+    }
 }
 
 // ---- transport layer -----------------------------------------------------
@@ -339,6 +381,16 @@ impl PersistenceLayer {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Session {
     pub mode: Mode,
+    /// Additional modes blended into this session. The primary `mode`
+    /// stays first and owns the prompt voice; the rest contribute
+    /// capabilities. Empty means a single-mode session.
+    #[serde(default)]
+    pub mixed: Vec<Mode>,
+    /// Explicit per-feature overrides on top of the blended traits.
+    /// `Some(true)` forces a feature on, `Some(false)` forces it off,
+    /// `None` follows the blended modes.
+    #[serde(default)]
+    pub feature_overrides: HashMap<Feature, bool>,
     pub prompt: PromptLayer,
     pub capability: CapabilityLayer,
     pub transport: TransportLayer,
@@ -350,11 +402,69 @@ impl Session {
     pub fn new(mode: Mode, available_tools: &[String]) -> Self {
         Session {
             mode,
+            mixed: Vec::new(),
+            feature_overrides: HashMap::new(),
             prompt: PromptLayer::new(mode),
             capability: CapabilityLayer::for_mode(mode, available_tools),
             transport: TransportLayer::default(),
             persistence: PersistenceLayer::for_mode(mode),
         }
+    }
+
+    /// Every mode in this session: the primary first, then the blend.
+    pub fn active_modes(&self) -> Vec<Mode> {
+        let mut modes = vec![self.mode];
+        for m in &self.mixed {
+            if *m != self.mode && !modes.contains(m) {
+                modes.push(*m);
+            }
+        }
+        modes
+    }
+
+    /// The traits this session actually has: the union of every active
+    /// mode's traits, with explicit feature overrides applied on top.
+    /// This is the single source of truth for what the session can do.
+    pub fn active_traits(&self) -> ModeTraits {
+        let mut traits = self.mode.traits();
+        for m in &self.mixed {
+            traits = traits.merged_with(&m.traits());
+        }
+        for (feature, enabled) in &self.feature_overrides {
+            traits = traits.with_feature(*feature, *enabled);
+        }
+        traits
+    }
+
+    /// Is a feature on for this session, after overrides?
+    pub fn feature(&self, feature: Feature) -> bool {
+        self.active_traits().has(feature)
+    }
+
+    /// Force a feature on or off, overriding the blended modes.
+    pub fn set_feature(&mut self, feature: Feature, enabled: bool) {
+        self.feature_overrides.insert(feature, enabled);
+    }
+
+    /// Drop an override so the feature follows the blended modes again.
+    pub fn reset_feature(&mut self, feature: Feature) {
+        self.feature_overrides.remove(&feature);
+    }
+
+    /// Blend another mode into this session. The blended mode's
+    /// capabilities are unioned in; its prompt voice is not (the primary
+    /// mode owns the voice). Blending the primary mode again is a no-op.
+    pub fn add_mode(&mut self, mode: Mode) {
+        if mode != self.mode && !self.mixed.contains(&mode) {
+            self.mixed.push(mode);
+        }
+    }
+
+    /// Remove a blended mode. The primary mode cannot be removed.
+    pub fn remove_mode(&mut self, mode: Mode) -> bool {
+        let before = self.mixed.len();
+        self.mixed.retain(|m| *m != mode);
+        self.mixed.len() != before
     }
 
     /// Switch modes, resetting the capability and persistence layers to
@@ -363,6 +473,8 @@ impl Session {
     pub fn set_mode(&mut self, mode: Mode, available_tools: &[String]) {
         self.prompt.system_prompt = default_system_prompt(mode).to_string();
         self.mode = mode;
+        self.mixed.clear();
+        self.feature_overrides.clear();
         self.capability = CapabilityLayer::for_mode(mode, available_tools);
         self.persistence = PersistenceLayer::for_mode(mode);
     }
@@ -393,6 +505,7 @@ impl ModeTraits {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::modes::{ModeStyle, Persistence};
 
     fn tools() -> Vec<String> {
         vec!["calculator".into(), "web_search".into()]
@@ -502,5 +615,183 @@ mod tests {
         let mut eps = vec![Endpoint::new("a")];
         cooldown(&mut eps, "a", 0, 10);
         assert!(select_endpoint(&eps, Rotation::RoundRobin, 100, 0).is_none());
+    }
+
+    // -- mode mixing ------------------------------------------------------
+
+    #[test]
+    fn mixing_modes_unions_capabilities() {
+        let mut s = Session::new(Mode::Chat, &tools());
+        // Chat alone: no tools.
+        assert!(!s.feature(Feature::Tools));
+        // Blend Creative in: character cards appear, tools still not.
+        s.add_mode(Mode::Creative);
+        assert_eq!(s.active_modes(), vec![Mode::Chat, Mode::Creative]);
+        assert!(s.feature(Feature::CharacterCards));
+        assert!(!s.feature(Feature::Tools));
+        // Blend Agent in: tools and subagents appear.
+        s.add_mode(Mode::Agent);
+        assert!(s.feature(Feature::Tools));
+        assert!(s.feature(Feature::Subagents));
+        assert!(s.feature(Feature::CharacterCards));
+    }
+
+    #[test]
+    fn mixing_keeps_primary_voice_and_longest_persistence() {
+        let mut s = Session::new(Mode::Code, &tools());
+        s.add_mode(Mode::Creative);
+        let t = s.active_traits();
+        // Style comes from the primary mode, not the blend.
+        assert_eq!(t.style, ModeStyle::MinimalDiff);
+        // Persistence takes the longer-lived scope.
+        assert_eq!(t.persistence, Persistence::ChatTree);
+        // The prompt still belongs to the primary mode.
+        assert!(s.prompt.system_prompt.contains("code assistant"));
+    }
+
+    #[test]
+    fn mixing_is_idempotent_and_primary_cannot_be_removed() {
+        let mut s = Session::new(Mode::Chat, &tools());
+        s.add_mode(Mode::Agent);
+        s.add_mode(Mode::Agent);
+        assert_eq!(s.mixed, vec![Mode::Agent]);
+        // Removing the primary mode is refused.
+        assert!(!s.remove_mode(Mode::Chat));
+        assert_eq!(s.mode, Mode::Chat);
+        // Removing a blend works.
+        assert!(s.remove_mode(Mode::Agent));
+        assert!(s.mixed.is_empty());
+        assert!(!s.feature(Feature::Tools));
+    }
+
+    #[test]
+    fn switching_mode_clears_the_blend_and_overrides() {
+        let mut s = Session::new(Mode::Chat, &tools());
+        s.add_mode(Mode::Agent);
+        s.set_feature(Feature::Media, true);
+        s.set_mode(Mode::Creative, &tools());
+        assert!(s.mixed.is_empty());
+        assert!(s.feature_overrides.is_empty());
+        assert!(!s.feature(Feature::Tools));
+    }
+
+    // -- capability editing ----------------------------------------------
+
+    #[test]
+    fn feature_overrides_beat_the_modes() {
+        let mut s = Session::new(Mode::Agent, &tools());
+        assert!(s.feature(Feature::Tools));
+        // Force tools off even though Agent grants them.
+        s.set_feature(Feature::Tools, false);
+        assert!(!s.feature(Feature::Tools));
+        // Force subagents on for a mode that does not grant them.
+        s.set_feature(Feature::Subagents, true);
+        assert!(s.feature(Feature::Subagents));
+        // Reset returns to the mode's own value.
+        s.reset_feature(Feature::Tools);
+        assert!(s.feature(Feature::Tools));
+    }
+
+    #[test]
+    fn turning_commands_off_clears_the_command_list() {
+        let mut s = Session::new(Mode::Agent, &tools());
+        assert!(!s.active_traits().commands.is_empty());
+        s.set_feature(Feature::Commands, false);
+        let t = s.active_traits();
+        assert!(!t.has(Feature::Commands));
+        assert!(t.commands.is_empty(), "{:?}", t.commands);
+    }
+
+    #[test]
+    fn feature_ids_roundtrip_and_reject_junk() {
+        for f in Feature::all() {
+            assert_eq!(Feature::from_id(f.id()), Some(*f));
+        }
+        assert_eq!(Feature::from_id("tools"), Some(Feature::Tools));
+        assert_eq!(Feature::from_id("nonsense"), None);
+    }
+
+    // -- permission editing ----------------------------------------------
+
+    #[test]
+    fn permission_edits_apply_and_clear() {
+        let mut s = Session::new(Mode::Agent, &tools());
+        // Advertised tool: the override sticks.
+        assert!(s.capability.set_permission("calculator", PermissionLevel::Ask));
+        assert_eq!(s.permission_for("calculator"), PermissionLevel::Ask);
+        assert_eq!(s.capability.overridden_tools(), vec!["calculator"]);
+        // Clearing returns it to the default.
+        assert!(s.capability.clear_permission("calculator"));
+        assert_ne!(s.permission_for("calculator"), PermissionLevel::Ask);
+        assert!(s.capability.overridden_tools().is_empty());
+    }
+
+    #[test]
+    fn permission_edit_rejects_unadvertised_tools() {
+        let mut s = Session::new(Mode::Chat, &tools());
+        // Chat advertises no tools, so there is nothing to grant.
+        assert!(!s.capability.set_permission("calculator", PermissionLevel::Allow));
+        assert_eq!(s.permission_for("calculator"), PermissionLevel::Deny);
+    }
+
+    #[test]
+    fn default_permission_applies_to_every_advertised_tool() {
+        let mut s = Session::new(Mode::Agent, &tools());
+        s.capability.set_default_permission(PermissionLevel::Ask);
+        assert_eq!(s.permission_for("calculator"), PermissionLevel::Ask);
+        assert_eq!(s.permission_for("web_search"), PermissionLevel::Ask);
+        // An explicit override still wins over the default.
+        s.capability.set_permission("calculator", PermissionLevel::Allow);
+        assert_eq!(s.permission_for("calculator"), PermissionLevel::Allow);
+        assert_eq!(s.permission_for("web_search"), PermissionLevel::Ask);
+    }
+
+    #[test]
+    fn permission_rows_cover_every_advertised_tool() {
+        let mut s = Session::new(Mode::Agent, &tools());
+        s.capability.set_permission("web_search", PermissionLevel::Deny);
+        let rows = s.capability.permission_rows();
+        assert_eq!(rows.len(), 2);
+        let by_name: std::collections::HashMap<_, _> =
+            rows.into_iter().map(|(n, p)| (n, p)).collect();
+        assert_eq!(by_name.get("web_search"), Some(&PermissionLevel::Deny));
+        assert_ne!(by_name.get("calculator"), Some(&PermissionLevel::Deny));
+    }
+
+    #[test]
+    fn permission_levels_cycle_and_parse() {
+        assert_eq!(PermissionLevel::Allow.cycled(), PermissionLevel::Ask);
+        assert_eq!(PermissionLevel::Ask.cycled(), PermissionLevel::Deny);
+        assert_eq!(PermissionLevel::Deny.cycled(), PermissionLevel::Allow);
+        assert_eq!(PermissionLevel::from_label("ask"), Some(PermissionLevel::Ask));
+        assert_eq!(PermissionLevel::from_label("nonsense"), None);
+    }
+
+    #[test]
+    fn session_with_modes_and_overrides_roundtrips_through_serde() {
+        let mut s = Session::new(Mode::Chat, &tools());
+        s.add_mode(Mode::Agent);
+        s.set_feature(Feature::Media, true);
+        let json = serde_json::to_string(&s).unwrap();
+        let back: Session = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.mixed, vec![Mode::Agent]);
+        assert!(back.feature(Feature::Tools));
+        assert!(back.feature(Feature::Media));
+    }
+
+    #[test]
+    fn legacy_session_without_mix_fields_still_loads() {
+        // A session file written before mixing existed must still parse.
+        let legacy = r#"{
+            "mode":"chat",
+            "prompt":{"system_prompt":"x","user_input":"","card":null,"persona":null},
+            "capability":{"tools":[],"subagents":[],"commands":[],"permissions":{},"default_permission":"allow"},
+            "transport":{"provider":"","rotation":"prefer-primary","endpoints":[],"cooldowns":{}},
+            "persistence":{"messages":true,"chat_tree":false,"job_queue":false}
+        }"#;
+        let s: Session = serde_json::from_str(legacy).unwrap();
+        assert!(s.mixed.is_empty());
+        assert!(s.feature_overrides.is_empty());
+        assert_eq!(s.mode, Mode::Chat);
     }
 }

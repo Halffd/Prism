@@ -24,6 +24,38 @@ pub enum Permission {
     Ask,
 }
 
+impl Permission {
+    /// Short display label for permission rows.
+    pub fn label(self) -> &'static str {
+        match self {
+            Permission::Allow => "allow",
+            Permission::Deny => "deny",
+            Permission::Ask => "ask",
+        }
+    }
+
+    /// The next level in the cycle allow → ask → deny → allow. A
+    /// permissions editor toggles through these in order.
+    pub fn cycled(self) -> Permission {
+        match self {
+            Permission::Allow => Permission::Ask,
+            Permission::Ask => Permission::Deny,
+            Permission::Deny => Permission::Allow,
+        }
+    }
+
+    /// From a label or id; unknown input returns `None` so a caller can
+    /// reject bad input rather than defaulting silently.
+    pub fn from_label(s: &str) -> Option<Permission> {
+        match s.trim().to_lowercase().as_str() {
+            "allow" => Some(Permission::Allow),
+            "deny" | "denied" => Some(Permission::Deny),
+            "ask" => Some(Permission::Ask),
+            _ => None,
+        }
+    }
+}
+
 /// One executable tool.
 pub trait Tool: Send + Sync {
     fn name(&self) -> &str;
