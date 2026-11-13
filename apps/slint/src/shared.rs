@@ -7,7 +7,7 @@ pub mod media;
 // Re-export all public types and functions from dependencies
 pub use prism_core::catalog;
 pub use prism_core::cards::{self, CharacterCard, Persona};
-pub use prism_core::modes::{DaemonTask, GenCapability, Mode, TaskTrigger};
+pub use prism_core::modes::{DaemonTask, Feature, GenCapability, Mode, ModeTraits, TaskTrigger};
 pub use prism_core::session::{PermissionLevel, Session};
 #[cfg(feature = "agent")]
 pub use prism_core::agent::AgentResult;
@@ -25,6 +25,7 @@ pub use prism_core::{host, thinking};
 pub use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 pub use std::cell::RefCell;
 pub use std::rc::Rc;
+pub use std::sync::Arc;
 pub use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 /// Matches COMPUTE_LEVELS in the TUI settings screen / shared types.
@@ -187,7 +188,7 @@ impl State {
             card: None,
             persona: Persona::default(),
             mode: Mode::default(),
-            session: Session::new(Mode::default(), &[]),
+            session: Session::new(Mode::default(), &available_tool_names()),
             daemon_tasks: Vec::new(),
             agent_busy: false,
             last_random: None,
@@ -814,9 +815,21 @@ fn gen_cap_labels() -> Vec<SharedString> {
         .collect()
 }
 
-/// Apply a mode's traits to every mode-derived UI property.
-fn apply_mode_traits(ui: &AppWindow, mode: Mode) {
-    let t = mode.traits();
+/// The tool names the agent loop would run with on this host. The
+/// permissions editor renders this list, so it must come from the same
+/// registry the loop uses — not a hand-written duplicate.
+pub fn available_tool_names() -> Vec<String> {
+    use prism_core::agent::{CalculatorTool, ToolRegistry};
+    let reg = ToolRegistry::new();
+    reg.register(Arc::new(CalculatorTool));
+    prism_core::native_tools::register_all(&reg, std::path::Path::new("."));
+    reg.tool_names()
+}
+
+/// Apply a trait set to every mode-derived UI property. Takes the
+/// traits rather than a mode, because a blended session's traits are
+/// not any single mode's traits.
+fn apply_mode_traits(ui: &AppWindow, t: ModeTraits) {
     ui.set_mode_tools(t.tools);
     ui.set_mode_cards(t.card_prompt);
     ui.set_mode_media(t.media);
@@ -923,7 +936,8 @@ fn mode_select(ui: &AppWindow, state: &Rc<RefCell<State>>, idx: i32) {
         st.mode = mode;
     }
     ui.set_pmode_idx(idx);
-    apply_mode_traits(ui, mode);
+    apply_mode_traits(ui, state.borrow().session.active_traits());
+    refresh_session_panels(ui, state);
     let extra = match mode {
         Mode::Daemon => "daemon mode: tasks + tools + strategy",
         Mode::Generative => "generative mode: media screens",
@@ -933,6 +947,156 @@ fn mode_select(ui: &AppWindow, state: &Rc<RefCell<State>>, idx: i32) {
         Mode::Chat => "chat mode: no tools",
     };
     ui.set_settings_status(extra.into());
+}
+
+/// Push the session's blend, capabilities and permissions into the UI
+/// models. Called after every change to any of the three.
+fn refresh_session_panels(ui: &AppWindow, state: &Rc<RefCell<State>>) {
+    let (mixed, summary, cap_rows, perm_rows, perm_default) = {
+        let st = state.borrow();
+        let mixed = Mode::all()
+            .iter()
+            .map(|m| st.session.mixed.contains(m))
+            .collect::<Vec<bool>>();
+        let names: Vec<&str> = st
+            .session
+            .active_modes()
+            .iter()
+            .map(|m| m.label())
+            .collect();
+        let traits = st.session.active_traits();
+        let summary = format!(
+            "{} · {} · {}",
+            names.join(" + "),
+            traits.style.style_label(),
+            traits.persistence.label()
+        );
+        // Capability rows: the feature id, its label, and whether it is
+        // currently on. `group` carries the on/off mark.
+        let cap_rows: Vec<PaletteRow> = Feature::all()
+            .iter()
+            .map(|f| PaletteRow {
+                id: f.id().into(),
+                title: f.label().into(),
+                group: if st.session.feature(*f) { "on" } else { "off" }.into(),
+            })
+            .collect();
+        // Permission rows: the tool name and its effective level.
+        let perm_rows: Vec<PaletteRow> = st
+            .session
+            .capability
+            .permission_rows()
+            .iter()
+            .map(|(tool, level)| PaletteRow {
+                id: tool.clone().into(),
+                title: tool.clone().into(),
+                group: level.label().into(),
+            })
+            .collect();
+        let perm_default = st
+            .session
+            .capability
+            .default_permission
+            .label()
+            .to_string();
+        (mixed, summary, cap_rows, perm_rows, perm_default)
+    };
+    ui.set_pmode_mixed(ModelRc::from(Rc::new(VecModel::from(mixed))));
+    ui.set_pmode_blend_summary(summary.into());
+    ui.set_cap_rows(ModelRc::from(Rc::new(VecModel::from(cap_rows))));
+    ui.set_perm_rows(ModelRc::from(Rc::new(VecModel::from(perm_rows))));
+    ui.set_perm_default(perm_default.into());
+}
+
+/// Blend a mode into the session, or remove it if already blended.
+fn mode_mix_toggle(ui: &AppWindow, state: &Rc<RefCell<State>>, idx: i32) {
+    let Some(mode) = Mode::all().get(idx as usize).copied() else {
+        return;
+    };
+    let (msg, traits) = {
+        let mut st = state.borrow_mut();
+        // The primary mode is the base, not a blend member.
+        if mode == st.mode {
+            (
+                format!("{} is the primary mode", mode.label()),
+                st.session.active_traits(),
+            )
+        } else if st.session.remove_mode(mode) {
+            (
+                format!("unblended {}", mode.label()),
+                st.session.active_traits(),
+            )
+        } else {
+            st.session.add_mode(mode);
+            (
+                format!("blended {}", mode.label()),
+                st.session.active_traits(),
+            )
+        }
+    };
+    // A blend that grants tools must actually advertise them.
+    if traits.tools {
+        let mut st = state.borrow_mut();
+        if st.session.capability.tools.is_empty() {
+            st.session.capability.tools = available_tool_names();
+        }
+    }
+    apply_mode_traits(ui, traits);
+    refresh_session_panels(ui, state);
+    ui.set_settings_status(msg.into());
+}
+
+/// Toggle one capability on the session.
+fn cap_toggle(ui: &AppWindow, state: &Rc<RefCell<State>>, feature_id: &str) {
+    let Some(feature) = Feature::from_id(feature_id) else {
+        ui.set_settings_status(format!("unknown capability: {feature_id}").into());
+        return;
+    };
+    let traits = {
+        let mut st = state.borrow_mut();
+        let current = st.session.feature(feature);
+        st.session.set_feature(feature, !current);
+        if !st.session.feature(feature) {
+            // Revoking tools retracts the surface too: a policy that
+            // allows a tool the session cannot see would disagree.
+            st.session.capability.tools.clear();
+            st.session.capability.permissions.clear();
+        } else if st.session.capability.tools.is_empty() {
+            st.session.capability.tools = available_tool_names();
+        }
+        st.session.active_traits()
+    };
+    apply_mode_traits(ui, traits.clone());
+    refresh_session_panels(ui, state);
+    ui.set_settings_status(
+        format!("{} {}", if traits.has(feature) { "on" } else { "off" }, feature.id()).into(),
+    );
+}
+
+/// Cycle one tool's permission: allow → ask → deny → allow.
+fn perm_cycle(ui: &AppWindow, state: &Rc<RefCell<State>>, tool: &str) {
+    let result = {
+        let mut st = state.borrow_mut();
+        let current = st.session.capability.permission_for(tool);
+        st.session
+            .capability
+            .set_permission(tool, current.cycled())
+    };
+    if !result {
+        ui.set_settings_status(format!("no such tool: {tool}").into());
+        return;
+    }
+    refresh_session_panels(ui, state);
+}
+
+/// Cycle the default permission applied to tools with no explicit entry.
+fn perm_default_cycle(ui: &AppWindow, state: &Rc<RefCell<State>>) {
+    {
+        let mut st = state.borrow_mut();
+        let current = st.session.capability.default_permission;
+        st.session.capability.set_default_permission(current.cycled());
+    }
+    refresh_session_panels(ui, state);
 }
 
 fn persona_edit(state: &Rc<RefCell<State>>, name: &str, desc: &str) {
@@ -1855,7 +2019,8 @@ pub fn run_ui() {
             ui.set_pmode_labels(ModelRc::from(Rc::new(VecModel::from(labels))));
             ui.set_pmode_blurbs(ModelRc::from(Rc::new(VecModel::from(blurbs))));
             ui.set_pmode_traits(ModelRc::from(Rc::new(VecModel::from(traits))));
-            apply_mode_traits(&ui, Mode::default());
+            apply_mode_traits(&ui, Mode::default().traits());
+            refresh_session_panels(&ui, &state);
             ui.set_gen_cap_labels(ModelRc::from(Rc::new(VecModel::from(
                 gen_cap_labels(),
             ))));
@@ -2170,6 +2335,59 @@ pub fn run_ui() {
         ui.on_pmode_selected(move |idx| {
             let Some(ui) = ui_w.upgrade() else { return };
             mode_select(&ui, &state_c, idx);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_pmode_mix_toggle(move |idx| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            mode_mix_toggle(&ui, &state_c, idx);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        ui.on_mix_editor_toggle(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            ui.set_show_mix_editor(!ui.get_show_mix_editor());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        ui.on_cap_editor_toggle(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            ui.set_show_cap_editor(!ui.get_show_cap_editor());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_cap_toggle(move |feature| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            cap_toggle(&ui, &state_c, &feature.to_string());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        ui.on_perm_editor_toggle(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            ui.set_show_perm_editor(!ui.get_show_perm_editor());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_perm_cycle(move |tool| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            perm_cycle(&ui, &state_c, &tool.to_string());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_perm_default_cycle(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            perm_default_cycle(&ui, &state_c);
         });
     }
     {

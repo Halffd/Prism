@@ -1,10 +1,25 @@
 import {
   MODES,
+  FEATURES,
   defaultSystemPrompt,
   getMode,
   nextModeId,
   traitsSummary,
+  newSession,
+  mixMode,
+  unmixMode,
+  setFeature,
+  resetFeature,
+  sessionHasFeature,
+  activeFeatures,
+  activeModes,
+  permissionFor,
+  setPermission,
+  cycleToolPermission,
+  cyclePermission,
+  sessionSummary,
   type ModeId,
+  type ModeSession,
 } from '../chat/modes';
 
 /**
@@ -106,5 +121,122 @@ describe('mode registry conformance with prism_core::modes', () => {
     expect(traitsSummary(getMode('daemon'))).toBe(
       'tools · subagents · tasks · ops report · always-on',
     );
+  });
+});
+
+describe('mode session: mixing, capabilities and permissions', () => {
+  it('a fresh session has only the chat contract', () => {
+    const s = newSession();
+    expect(s.primary).toBe('chat');
+    expect(s.mixed).toEqual([]);
+    expect(activeModes(s)).toEqual(['chat']);
+    expect(sessionHasFeature(s, 'tools')).toBe(false);
+    expect(sessionHasFeature(s, 'character-cards')).toBe(false);
+  });
+
+  it('mixing unions capabilities', () => {
+    let s = newSession('chat');
+    s = mixMode(s, 'creative');
+    expect(activeModes(s)).toEqual(['chat', 'creative']);
+    expect(sessionHasFeature(s, 'character-cards')).toBe(true);
+    expect(sessionHasFeature(s, 'tools')).toBe(false);
+
+    s = mixMode(s, 'agent');
+    expect(sessionHasFeature(s, 'tools')).toBe(true);
+    expect(sessionHasFeature(s, 'subagents')).toBe(true);
+    // Creative's cards survive the union.
+    expect(sessionHasFeature(s, 'character-cards')).toBe(true);
+  });
+
+  it('mixing the primary or a duplicate is refused', () => {
+    let s = newSession('chat');
+    s = mixMode(s, 'chat');
+    expect(s.mixed).toEqual([]);
+    s = mixMode(s, 'agent');
+    s = mixMode(s, 'agent');
+    expect(s.mixed).toEqual(['agent']);
+  });
+
+  it('unmix removes a blend but never the primary', () => {
+    let s = newSession('chat');
+    s = mixMode(s, 'agent');
+    s = unmixMode(s, 'agent');
+    expect(s.mixed).toEqual([]);
+    expect(sessionHasFeature(s, 'tools')).toBe(false);
+
+    s = unmixMode(s, 'chat');
+    expect(s.primary).toBe('chat');
+  });
+
+  it('feature overrides beat the modes', () => {
+    let s = newSession('agent');
+    expect(sessionHasFeature(s, 'tools')).toBe(true);
+    s = setFeature(s, 'tools', false);
+    expect(sessionHasFeature(s, 'tools')).toBe(false);
+    s = setFeature(s, 'media', true);
+    expect(sessionHasFeature(s, 'media')).toBe(true);
+    s = resetFeature(s, 'tools');
+    expect(sessionHasFeature(s, 'tools')).toBe(true);
+  });
+
+  it('feature list mirrors the Rust Feature::all order', () => {
+    expect(FEATURES.map((f) => f.id)).toEqual([
+      'tools',
+      'subagents',
+      'commands',
+      'character-cards',
+      'media',
+      'tasks',
+      'strategy',
+    ]);
+    // A blended chat+agent session lists features in that order.
+    // Agent grants tools, subagents, commands and strategy.
+    const s = mixMode(newSession('chat'), 'agent');
+    expect(activeFeatures(s)).toEqual([
+      'tools',
+      'subagents',
+      'commands',
+      'strategy',
+    ]);
+  });
+
+  it('permission edits apply and reject unknown tools', () => {
+    const tools = ['calculator', 'web_search'];
+    let s = newSession('agent');
+    s = setPermission(s, 'calculator', 'ask', tools);
+    expect(permissionFor(s, 'calculator')).toBe('ask');
+    expect(permissionFor(s, 'web_search')).toBe('allow');
+    // A tool the session cannot use is not grantable.
+    s = setPermission(s, 'shell', 'allow', tools);
+    expect(permissionFor(s, 'shell')).toBe('allow'); // falls back to default
+    expect(s.permissions.shell).toBeUndefined();
+  });
+
+  it('permission cycles allow -> ask -> deny -> allow', () => {
+    expect(cyclePermission('allow')).toBe('ask');
+    expect(cyclePermission('ask')).toBe('deny');
+    expect(cyclePermission('deny')).toBe('allow');
+
+    const tools = ['calculator'];
+    let s = newSession('agent');
+    s = cycleToolPermission(s, 'calculator', tools);
+    expect(permissionFor(s, 'calculator')).toBe('ask');
+    s = cycleToolPermission(s, 'calculator', tools);
+    expect(permissionFor(s, 'calculator')).toBe('deny');
+  });
+
+  it('the default permission covers tools with no entry', () => {
+    const s: ModeSession = {
+      ...newSession('agent'),
+      defaultPermission: 'deny',
+    };
+    expect(permissionFor(s, 'calculator')).toBe('deny');
+  });
+
+  it('the summary names every active mode', () => {
+    let s = newSession('chat');
+    expect(sessionSummary(s)).toBe('Chat');
+    s = mixMode(s, 'agent');
+    expect(sessionSummary(s)).toBe('Chat + Agent');
   });
 });

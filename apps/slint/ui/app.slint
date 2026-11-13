@@ -88,6 +88,19 @@ export component AppWindow inherits Window {
     in property <[string]> pmode-labels;
     in property <[string]> pmode-blurbs;
     in property <[string]> gen-cap-labels;
+    // ---- mode mixing ----
+    // Which rail tiles are blended into the session (the primary is
+    // pmode-idx). A tile can be both primary and mixed.
+    in property <[bool]> pmode-mixed;
+    in property <string> pmode-blend-summary;
+    in property <bool> show-mix-editor;
+    // ---- capability editor ----
+    in property <[PaletteRow]> cap-rows;
+    in property <bool> show-cap-editor;
+    // ---- permissions editor ----
+    in property <[PaletteRow]> perm-rows;
+    in property <bool> show-perm-editor;
+    in property <string> perm-default;
     // ---- agent mode ----
     in-out property <int> agent-strategy-idx: 0;
     in-out property <string> agent-task;
@@ -172,6 +185,13 @@ export component AppWindow inherits Window {
     callback palette-execute(string); // arg: PaletteRow.id
     callback palette-move(int);       // arg: index delta (+1/-1)
     callback pmode-selected(int);   // mode index
+    callback pmode-mix-toggle(int);  // mode index: add/remove from blend
+    callback mix-editor-toggle();
+    callback cap-editor-toggle();
+    callback cap-toggle(string);     // feature id
+    callback perm-editor-toggle();
+    callback perm-cycle(string);     // tool name: allow -> ask -> deny
+    callback perm-default-cycle();
     callback gen-cap-selected(int); // generative capability index
     callback agent-strategy-selected(int);
     callback agent-run(string);       // instruction text
@@ -245,10 +265,12 @@ export component AppWindow inherits Window {
                 padding: 6px;
                 spacing: 6px;
                 for pmode[i] in pmode-labels : Rectangle {
-                    height: 78px;
+                    height: 86px;
                     background: pmode-idx == i ? #1f3130 : transparent;
                     border-width: 1px;
-                    border-color: pmode-idx == i ? #2f6b4f : #232a31;
+                    // A mixed-in tile gets an amber edge so a blend is
+                    // visible without reading the summary line.
+                    border-color: pmode-idx == i ? #2f6b4f : (i < pmode-mixed.length && pmode-mixed[i] ? #8a6d2f : #232a31);
                     border-radius: 6px;
                     TouchArea {
                         clicked => { pmode-selected(i); }
@@ -280,6 +302,27 @@ export component AppWindow inherits Window {
                             horizontal-alignment: center;
                             wrap: word-wrap;
                             font-weight: 700;
+                        }
+                        // Blend toggle. The primary tile cannot be
+                        // un-blended, so it shows a filled dot instead.
+                        Rectangle {
+                            height: 14px;
+                            width: 20px;
+                            background: pmode-idx == i ? #2f6b4f : (i < pmode-mixed.length && pmode-mixed[i] ? #8a6d2f : transparent);
+                            border-width: 1px;
+                            border-color: #3a444d;
+                            border-radius: 7px;
+                            TouchArea {
+                                clicked => { pmode-mix-toggle(i); }
+                                mouse-cursor: pointer;
+                            }
+                            Text {
+                                text: pmode-idx == i ? "●" : (i < pmode-mixed.length && pmode-mixed[i] ? "+" : "○");
+                                color: pmode-idx == i ? #bfffdd : #8b95a1;
+                                font-size: 9px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
                         }
                     }
                 }
@@ -845,6 +888,96 @@ export component AppWindow inherits Window {
                             text: "Use the core prompt engine";
                             checked <=> prompt-engine-on;
                             toggled => { prompt-engine-toggle(); }
+                        }
+                    }
+
+                    // ---- mode mixing / capability / permission editors ----
+                    // These are the same contract the core defines: a
+                    // blend of modes, per-feature overrides, and the
+                    // per-tool policy.
+                    VerticalLayout {
+                        spacing: 6px;
+                        Text { text: "Mode & capabilities"; color: #9fb0bd; font-weight: 700; }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Button { text: "Blend"; clicked => { mix-editor-toggle(); } }
+                            Button { text: "Capabilities"; clicked => { cap-editor-toggle(); } }
+                            Button { text: "Permissions"; clicked => { perm-editor-toggle(); } }
+                        }
+                        Text {
+                            text: pmode-blend-summary;
+                            color: #8b95a1;
+                            font-size: 11px;
+                            wrap: word-wrap;
+                        }
+                    }
+
+                    if show-cap-editor : VerticalLayout {
+                        spacing: 4px;
+                        Text { text: "Capabilities"; color: #7ee787; font-weight: 700; }
+                        for cap in cap-rows : Rectangle {
+                            height: 24px;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: cap.group;
+                                    color: #66707a;
+                                    font-size: 10px;
+                                    vertical-alignment: center;
+                                    width: 18px;
+                                }
+                                Text {
+                                    text: cap.title;
+                                    color: #cfd8dc;
+                                    font-size: 11px;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                TouchArea {
+                                    clicked => { cap-toggle(cap.id); }
+                                    mouse-cursor: pointer;
+                                }
+                            }
+                        }
+                    }
+
+                    if show-perm-editor : VerticalLayout {
+                        spacing: 4px;
+                        Text { text: "Permissions"; color: #7ee787; font-weight: 700; }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text {
+                                text: "default: " + perm-default;
+                                color: #8b95a1;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+                            Button { text: "Cycle"; clicked => { perm-default-cycle(); } }
+                        }
+                        for perm in perm-rows : Rectangle {
+                            height: 24px;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: perm.group;
+                                    color: #66707a;
+                                    font-size: 10px;
+                                    vertical-alignment: center;
+                                    width: 42px;
+                                }
+                                Text {
+                                    text: perm.title;
+                                    color: #cfd8dc;
+                                    font-size: 11px;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                TouchArea {
+                                    clicked => { perm-cycle(perm.title); }
+                                    mouse-cursor: pointer;
+                                }
+                            }
                         }
                     }
 

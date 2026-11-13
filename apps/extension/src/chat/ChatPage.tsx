@@ -61,8 +61,19 @@ import {
   getMode,
   traitsSummary,
   MODES,
+  FEATURES,
   defaultSystemPrompt,
-  type ModeId,
+  newSession,
+  mixMode,
+  unmixMode,
+  setFeature,
+  sessionHasFeature,
+  activeFeatures,
+  permissionFor,
+  cycleToolPermission,
+  cyclePermission,
+  sessionSummary,
+  type ModeSession,
 } from './modes';
 import { BUILTIN_TOOLS } from '@prism/agent';
 import {
@@ -153,8 +164,16 @@ export function ChatPage() {
   const [debateInProgress, setDebateInProgress] = useState(false);
   const [debateResult, setDebateResult] = useState<DebateResult | null>(null);
   const [agentEnabled, setAgentEnabled] = useState(false);
-  const [modeId, setModeId] = useState<ModeId>('chat');
-  const mode = getMode(modeId);
+  const [modeSession, setModeSession] = useState<ModeSession>(newSession());
+  const [showCapEditor, setShowCapEditor] = useState(false);
+  const [showPermEditor, setShowPermEditor] = useState(false);
+  const mode = getMode(modeSession.primary);
+  // The tool names the session may use: only when the session actually
+  // has the Tools capability. A permission editor for a session with no
+  // tools would be a lie.
+  const availableTools = sessionHasFeature(modeSession, 'tools')
+    ? BUILTIN_TOOLS.map((t) => t.name)
+    : [];
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const { agents: customAgents, activeAgentId } = useSelector(
     (state: RootState) => state.agents,
@@ -677,10 +696,12 @@ export function ChatPage() {
       // persona + preset (so pass through whatever the user configured,
       // which assembleContext ignores in favour of the card). The other
       // modes inject the mode preset; Chat stays empty so the user's own
-      // prompt config is used untouched.
-      systemPrompt: mode.cardPrompt || mode.label === 'Chat'
-        ? ''
-        : defaultSystemPrompt(mode.id),
+      // prompt config is used untouched. The *primary* mode owns the
+      // voice even when other modes are blended in.
+      systemPrompt:
+        mode.cardPrompt || modeSession.primary === 'chat'
+          ? ''
+          : defaultSystemPrompt(modeSession.primary),
       messages,
       character: isGroupChat ? undefined : activeCharacter,
       characters: isGroupChat ? groupCharacters : undefined,
@@ -831,9 +852,10 @@ export function ChatPage() {
           await saveCurrentChatToDB([...messages, userMessage, debateMessage]);
         }
       } else if (agentEnabled) {
-        // Custom agent flow. Gated on the mode: only agent and daemon
-        // advertise tools, so a chat/code session cannot run the loop.
-        if (!mode.tools) {
+        // Custom agent flow. Gated on the session's Tools capability,
+        // not the primary mode: a chat/code session cannot run the
+        // loop, but a blend that grants tools can.
+        if (!sessionHasFeature(modeSession, 'tools')) {
           dispatch(
             addMessage({
               id: Date.now().toString(),
@@ -1447,17 +1469,118 @@ export function ChatPage() {
 
         <div className="input-container">
           <div className="mode-bar" role="group" aria-label="Interaction mode">
-            {MODES.map((m) => (
-              <button
-                key={m.id}
-                onClick={() => setModeId(m.id)}
-                className={`mode-toggle-btn ${modeId === m.id ? 'active' : ''}`}
-                title={`${m.blurb} — ${traitsSummary(m)}`}
-              >
-                {m.label}
-              </button>
-            ))}
+            {MODES.map((m) => {
+              const isPrimary = modeSession.primary === m.id;
+              const isMixed = modeSession.mixed.includes(m.id);
+              return (
+                <span key={m.id} className="mode-tile">
+                  <button
+                    onClick={() => setModeSession({ ...modeSession, primary: m.id, mixed: modeSession.mixed.filter((x) => x !== m.id) })}
+                    className={`mode-toggle-btn ${isPrimary ? 'active' : ''} ${isMixed ? 'mixed' : ''}`}
+                    title={`${m.blurb} — ${traitsSummary(m)}`}
+                  >
+                    {m.label}
+                  </button>
+                  {isPrimary ? (
+                    <span className="mode-blend-mark primary" title="Primary mode — owns the prompt voice">●</span>
+                  ) : (
+                    <button
+                      className="mode-blend-mark"
+                      onClick={() =>
+                        setModeSession(
+                          isMixed
+                            ? unmixMode(modeSession, m.id)
+                            : mixMode(modeSession, m.id),
+                        )
+                      }
+                      title={
+                        isMixed
+                          ? `Remove ${m.label} from the blend`
+                          : `Blend ${m.label} into this session`
+                      }
+                    >
+                      {isMixed ? '+' : '○'}
+                    </button>
+                  )}
+                </span>
+              );
+            })}
           </div>
+          <div className="mode-summary" role="status">
+            {sessionSummary(modeSession)} ·{' '}
+            {activeFeatures(modeSession).join(' · ') || 'no capabilities'}
+            <button
+              className="mode-link-btn"
+              onClick={() => setShowCapEditor(!showCapEditor)}
+            >
+              {showCapEditor ? 'hide capabilities' : 'capabilities'}
+            </button>
+            <button
+              className="mode-link-btn"
+              onClick={() => setShowPermEditor(!showPermEditor)}
+            >
+              {showPermEditor ? 'hide permissions' : 'permissions'}
+            </button>
+          </div>
+          {showCapEditor && (
+            <div className="mode-editor" role="group" aria-label="Capabilities">
+              {FEATURES.map((f) => {
+                const on = sessionHasFeature(modeSession, f.id);
+                return (
+                  <label key={f.id} className="cap-row" title={f.description}>
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={(e) =>
+                        setModeSession(
+                          setFeature(modeSession, f.id, e.target.checked),
+                        )
+                      }
+                    />
+                    <span>{f.label}</span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+          {showPermEditor && (
+            <div className="mode-editor" role="group" aria-label="Permissions">
+              <div className="cap-row">
+                <span>default</span>
+                <button
+                  className="mode-link-btn"
+                  onClick={() =>
+                    setModeSession({
+                      ...modeSession,
+                      defaultPermission: cyclePermission(
+                        modeSession.defaultPermission,
+                      ),
+                    })
+                  }
+                >
+                  {modeSession.defaultPermission}
+                </button>
+              </div>
+              {availableTools.length === 0 && (
+                <div className="cap-row">no tools in this session</div>
+              )}
+              {availableTools.map((tool) => (
+                <div key={tool} className="cap-row">
+                  <span>{tool}</span>
+                  <button
+                    className="mode-link-btn"
+                    onClick={() =>
+                      setModeSession(
+                        cycleToolPermission(modeSession, tool, availableTools),
+                      )
+                    }
+                  >
+                    {permissionFor(modeSession, tool)}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <ChatInputBar
           onOpenCharacterSelector={() => setShowCharacterSelector(true)}
           onOpenPersonaSelector={() => setShowPersonaSelector(true)}

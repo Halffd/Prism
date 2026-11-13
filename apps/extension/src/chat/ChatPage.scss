@@ -610,6 +610,81 @@
     background: var(--primary);
     color: var(--on-surface);
   }
+
+  // A blended-in mode: amber edge, so a mix is visible without
+  // reading the summary line.
+  &.mixed {
+    box-shadow: inset 0 0 0 1px #8a6d2f;
+  }
+}
+
+// One mode tile: the button plus its blend marker.
+.mode-tile {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.mode-blend-mark {
+  background: transparent;
+  border: 1px solid var(--outline-variant, rgba(255, 255, 255, 0.15));
+  border-radius: 50%;
+  color: var(--on-surface-variant);
+  cursor: pointer;
+  font-size: 9px;
+  height: 14px;
+  line-height: 1;
+  padding: 0;
+  width: 14px;
+
+  &.primary {
+    border-color: var(--primary);
+    color: var(--primary);
+    cursor: default;
+  }
+}
+
+// The live contract: which modes are active and which capabilities
+// they grant.
+.mode-summary {
+  align-items: center;
+  color: var(--on-surface-variant);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 11px;
+  gap: 8px;
+  padding: 2px 16px 4px;
+}
+
+.mode-link-btn {
+  background: transparent;
+  border: none;
+  color: var(--primary);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0;
+  text-decoration: underline;
+}
+
+// The capability and permission editors.
+.mode-editor {
+  border-top: 1px solid var(--outline-variant, rgba(255, 255, 255, 0.06));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 16px;
+}
+
+.cap-row {
+  align-items: center;
+  color: var(--on-surface-variant);
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+
+  span {
+    flex: 1;
+  }
 }
 
 
