@@ -49,6 +49,7 @@ import { SnippetManager } from '../components/SnippetManager';
 import { IframeInjectionSection } from './IframeInjectionSection';
 import { ErrorModalHost } from '../components/ErrorModal';
 import { ChatTabBar } from '../chat/ChatTabBar';
+import { PermissionBanner } from './PermissionBanner';
 import '../chat/ChatTabs.scss';
 import {
   closeTab,
@@ -2125,6 +2126,8 @@ export function Popup() {
         signOut={signOut}
         autoSyncEnabled={autoSyncEnabled}
       />
+
+      <PermissionBanner />
 
       <ChatTabBar
         openTabs={openTabs}

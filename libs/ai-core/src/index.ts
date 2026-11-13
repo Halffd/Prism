@@ -103,15 +103,23 @@ export function loadCoreNode(): WasmCore {
   // Resolve from candidate locations: this module's directory (src
   // layout, jest), a copied pkg beside the build output, or the
   // monorepo working directory.
+  //
+  // The specifier is assembled at runtime on purpose. A literal
+  // `require('./wasm-pkg-node/prism_wasm.js')` is statically resolvable,
+  // so a browser bundler pulls the Node wasm build (megabytes of
+  // generated glue) into the bundle even though the Node branch never
+  // runs there. The `/* @vite-ignore */` comment stops Vite from
+  // resolving the dynamic import, mirroring `loadCoreWeb` below.
+  const pkgPath = 'wasm-pkg-node/prism_wasm.js';
   const candidates = [
-    './wasm-pkg-node/prism_wasm.js',
-    '../../src/wasm-pkg-node/prism_wasm.js',
-    'libs/ai-core/src/wasm-pkg-node/prism_wasm.js',
+    './' + pkgPath,
+    '../../src/' + pkgPath,
+    'libs/ai-core/src/' + pkgPath,
   ];
   let lastError: unknown = null;
   for (const candidate of candidates) {
     try {
-      return req(candidate) as WasmCore;
+      return req(/* @vite-ignore */ candidate) as WasmCore;
     } catch (e) {
       lastError = e;
     }

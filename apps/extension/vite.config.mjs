@@ -44,6 +44,103 @@ export default defineConfig({
         );
       },
     },
+    {
+      // The content script must be a single self-contained file with no
+      // import statements: Firefox loads manifest-declared content scripts
+      // as classic scripts (its content_scripts schema has no `type`
+      // property), so an ES module fails with "import declarations may
+      // only appear at top level of a module". Chrome accepts a module
+      // content script but a classic one works in both.
+      //
+      // A separate Rollup pass produces the content script on its own,
+      // inlined into one IIFE with no shared chunks. It runs in
+      // writeBundle because Vite empties the output directory before
+      // writing, which would otherwise delete the file it produced.
+      name: 'bundle-content-script-standalone',
+      async writeBundle() {
+        // Vite's build API is used rather than raw Rollup because it
+        // applies the TypeScript and React transforms the content script
+        // needs. The build runs in a separate Vite environment so it does
+        // not recurse into this config's plugins.
+        const { build } = await import('vite');
+        await build({
+          root: __dirname,
+          configFile: false,
+          logLevel: 'error',
+          resolve: {
+            alias: [
+              // The content script dynamically imports the React popups,
+              // which pull in several workspace packages. Each one ships
+              // only type declarations, so they must all be aliased to
+              // their source entries.
+              //
+              // The aliases are exact matches: a string alias also
+              // rewrites deeper specifiers, so `@prism/firebase-auth/src/utils`
+              // would become `.../index.ts/src/utils` and fail to load.
+              ...[
+                'ui-components',
+                'shared-types',
+                'redux-store',
+                'api-client',
+                'shared-db',
+                'image-gen',
+                'supabase-client',
+                'logging',
+                'ai-core',
+                'agent',
+                'context-manager',
+                'llm',
+                'rag',
+                'deepsearch',
+                'web-search',
+                'firebase-auth',
+                'ocr',
+                'stt',
+                'tts',
+                'inpaint',
+                'model-gen',
+                'audio-gen',
+                'video-gen',
+                'ai-factory',
+                'ai-builder',
+                'council',
+              ].map((name) => ({
+                find: new RegExp(`^@prism/${name}$`),
+                replacement: resolve(
+                  __dirname,
+                  `../../libs/${name}/src/index.ts`,
+                ),
+              })),
+            ],
+          },
+          plugins: [react()],
+          // The content script runs as a classic script in the page, where
+          // there is no `process` global. Vite rewrites `process.env` to
+          // an object literal, so the configuration reads in the shared
+          // libraries (which fall back to their defaults) resolve
+          // without touching Node globals. `process.env.NODE_ENV` has to
+          // be spelled out separately or React's development build reads
+          // it at runtime and throws.
+          define: {
+            'process.env': '{}',
+            'process.env.NODE_ENV': JSON.stringify('production'),
+          },
+          build: {
+            outDir: '../../dist/apps/extension',
+            emptyOutDir: false,
+            lib: {
+              entry: resolve(__dirname, 'src/content/content.ts'),
+              formats: ['iife'],
+              name: 'PrismContent',
+              fileName: () => 'content.js',
+            },
+            rollupOptions: {
+              output: { inlineDynamicImports: true },
+            },
+          },
+        });
+      },
+    },
   ],
 
   resolve: {
@@ -67,15 +164,14 @@ export default defineConfig({
         settings: resolve(__dirname, 'settings.html'),
         chat: resolve(__dirname, 'chat.html'),
         background: resolve(__dirname, 'src/background/background.ts'),
-        content: resolve(__dirname, 'src/content/content.ts'),
+        // The content script is built separately below: it must be a
+        // single self-contained file with no import statements.
       },
       output: {
         entryFileNames: (chunkInfo) => {
           // Use fixed names for extension files that are referenced in manifest.json
           if (chunkInfo.name === 'background') {
             return 'background.js';
-          } else if (chunkInfo.name === 'content') {
-            return 'content.js';
           }
           // For other entries, use the hashed names
           return `[name]-[hash].js`;

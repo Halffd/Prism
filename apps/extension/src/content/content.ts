@@ -23,6 +23,7 @@ import {
 } from './editable-target';
 import { replaceRangeWithText } from './text-insertion';
 import { createHotkeyEngine } from './hotkey-engine';
+import { isButtonRemoved, setButtonRemoved } from './content-storage';
 import type {
   HotkeyBinding,
   PromptShortcut,
@@ -904,7 +905,7 @@ function injectFloatingButton() {
     e.preventDefault();
     button.style.opacity = '0';
     buttonRemovedByUser = true; // Mark that user removed the button
-    localStorage.setItem('prismButtonRemoved', 'true'); // Persist the state
+    void setButtonRemoved(true); // Persist the state in the extension's own storage
     setTimeout(() => {
       document.body.removeChild(button);
     }, 200);
@@ -1136,27 +1137,28 @@ async function loadButtonSettings() {
   }
 }
 
-// Check if button was previously removed by the user
-let buttonRemovedByUser = localStorage.getItem('prismButtonRemoved') === 'true';
+// Tracks whether the user dismissed the floating button on this origin.
+// Populated from the extension's storage by `initializeFloatingButton`.
+let buttonRemovedByUser = false;
 
-// Enable floating button
+// Enable the floating button. The dismissal flag lives in the extension's
+// own storage, so reading it is asynchronous: the button is injected once
+// the read resolves rather than on a bare top-level statement.
+async function initializeFloatingButton() {
+  const removed = await isButtonRemoved();
+  buttonRemovedByUser = removed;
+  if (!removed) {
+    injectFloatingButton();
+  }
+}
+
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
-    // Check if button was previously removed by the user
-    buttonRemovedByUser = localStorage.getItem('prismButtonRemoved') === 'true';
-
-    if (!buttonRemovedByUser) {
-      injectFloatingButton();
-    }
+    void initializeFloatingButton();
     loadDisplaySettings();
   });
 } else {
-  // Check if button was previously removed by the user
-  buttonRemovedByUser = localStorage.getItem('prismButtonRemoved') === 'true';
-
-  if (!buttonRemovedByUser) {
-    injectFloatingButton();
-  }
+  void initializeFloatingButton();
   loadDisplaySettings();
   initializeFontScale();
   setupHotkeyListener();
@@ -1308,18 +1310,32 @@ chrome.storage.onChanged?.addListener((changes, areaName) => {
   }
 });
 
-// Only observe if the button hasn't been removed by the user
-if (isTopFrame && !buttonRemovedByUser) {
-  const observer = new MutationObserver((mutationsList) => {
-    if (!document.getElementById('prism-floating-button')) {
-      setTimeout(() => injectFloatingButton(), 500); // Small delay to allow page to load
+// Only observe if the button hasn't been removed by the user. The flag is
+// read from storage asynchronously, so the observer is attached after the
+// read resolves — otherwise it could re-inject a button the user dismissed.
+if (isTopFrame) {
+  void isButtonRemoved().then((removed) => {
+    buttonRemovedByUser = removed;
+    if (removed) {
+      return;
     }
-  });
+    const observer = new MutationObserver((mutationsList) => {
+      if (!document.getElementById('prism-floating-button')) {
+        setTimeout(() => injectFloatingButton(), 500); // Small delay to allow page to load
+      }
+    });
 
-  // Start observing
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true,
+    // Start observing. `document.body` is null until the parser reaches
+    // it, and the storage read above is asynchronous, so the observer
+    // can be attached before the body exists.
+    const body = document.body;
+    if (!body) {
+      return;
+    }
+    observer.observe(body, {
+      childList: true,
+      subtree: true,
+    });
   });
 }
 

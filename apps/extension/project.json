@@ -46,6 +46,21 @@
     "lint": {
       "executor": "@nx/eslint:lint",
       "outputs": ["{options.outputFile}"]
+    },
+    "firefox": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "outputs": ["{workspaceRoot}/dist/apps/extension-firefox"],
+      "options": {
+        "command": "bash apps/extension/scripts/build-firefox.sh"
+      }
+    },
+    "firefox:lint": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": {
+        "command": "npx web-ext lint --source-dir dist/apps/extension --self-hosted"
+      }
     }
   },
   "tags": []

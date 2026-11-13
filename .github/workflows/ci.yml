@@ -137,6 +137,43 @@ jobs:
       - name: Build
         run: npx nx run-many -t build
 
+  # --- Firefox: manifest lint + real-browser smoke test ---
+  firefox:
+    name: Firefox (extension)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build extension
+        run: npx nx build @prism/extension
+
+      - name: Lint manifest for Firefox
+        # Warnings are not errors: the build's minified output trips
+        # `web-ext`'s `UNSAFE_VAR_ASSIGNMENT` heuristic on every
+        # `innerHTML` write, and Firefox legitimately ignores the
+        # Chrome-only `service_worker` key. Errors are what matter.
+        run: npx web-ext lint --source-dir dist/apps/extension --self-hosted
+
+      - name: Install Firefox
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y firefox
+
+      - name: Smoke test in Firefox
+        run: node apps/extension/scripts/firefox-smoke.mjs dist/apps/extension
+
   # --- Conformance fixtures (core + wasm) ---
   conformance:
     name: Conformance (core + wasm)

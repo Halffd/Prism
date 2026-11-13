@@ -3,7 +3,7 @@
   "name": "Prism - Context AI Assistant",
   "version": "0.1.0",
   "description": "AI assistant that understands your webpage context",
-  "permissions": ["activeTab", "storage", "contextMenus", "commands"],
+  "permissions": ["activeTab", "storage", "contextMenus"],
   "host_permissions": ["http://localhost:3000/*", "https://api.prism.app/*"],
   "action": {
     "default_popup": "index.html",
@@ -16,6 +16,7 @@
   },
   "background": {
     "service_worker": "background.js",
+    "scripts": ["background.js"],
     "type": "module"
   },
   "commands": {
@@ -61,5 +62,17 @@
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "prism-extension@halffd.dev",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
+    },
+    "gecko_android": {
+      "strict_min_version": "142.0"
+    }
   }
 }

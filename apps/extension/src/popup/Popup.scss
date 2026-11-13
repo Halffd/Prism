@@ -1026,6 +1026,50 @@
   }
 }
 
+// Firefox MV3 grant prompt: the extension cannot read the page until the
+// user approves host access for this origin.
+.permission-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--on-surface);
+  background: var(--secondary-container);
+  border-bottom: 1px solid var(--outline-variant, rgba(255, 255, 255, 0.08));
+
+  &.granted {
+    background: var(--surface-container-high);
+  }
+
+  .permission-banner-text {
+    flex: 1;
+  }
+
+  .permission-banner-button,
+  .permission-banner-reload {
+    flex-shrink: 0;
+    padding: 4px 10px;
+    font-size: 11px;
+    border: none;
+    border-radius: 12px;
+    cursor: pointer;
+    background: var(--primary);
+    color: var(--on-primary);
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+  }
+
+  .permission-banner-reload {
+    background: var(--surface-container-highest);
+    color: var(--on-surface);
+  }
+}
+
 .media-panel {
   display: flex;
   flex-direction: column;
