@@ -520,7 +520,7 @@ pub fn agent_subagent_clamp_tools(name: &str, advertised: Vec<String>) -> String
 
 use prism_core::cards::{
     self, parse_card, scan_lore as core_scan_lore, CharacterBook, CharacterCard, LoreEntry,
-    LorePosition, LoreScan, MacroContext, Persona,
+    LoreScan, MacroContext, Persona,
 };
 
 /// Parse a character card (V2 file, direct V2, or V1). Returns

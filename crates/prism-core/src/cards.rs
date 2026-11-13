@@ -520,7 +520,6 @@ mod tests {
 
 
     #[test]
-    #[test]
     fn parse_v2_file() {
         let json = r#"{"spec":"chara_card_v2","data":{"name":"Bob","description":"tinkerer","mes_example":"<START>\nhi"}}"#;
         let c = parse_card(json).unwrap();
