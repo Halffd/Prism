@@ -52,6 +52,10 @@ pub struct App {
     pub cursor: usize,
     pub mode: Mode,
     pub imode: IMode,
+    /// The layered session: holds the mode blend, per-feature overrides
+    /// and the permission policy. The TUI's raw `Settings` stays the
+    /// transport-level config; this is the capability contract.
+    pub session: prism_core::session::Session,
     pub search: Option<String>,
     pub matches: Vec<usize>,
     pub match_sel: usize,
@@ -93,6 +97,10 @@ impl App {
             cursor: 0,
             mode: Mode::Normal,
             imode: IMode::Chat,
+            session: prism_core::session::Session::new(
+                IMode::Chat,
+                &crate::chat::agent_job::available_tool_names(),
+            ),
             search: None,
             matches: Vec::new(),
             match_sel: 0,
@@ -546,6 +554,103 @@ impl App {
                     }
                 }
             }
+            "mix" => {
+                // Blend another mode into the session: its capabilities
+                // are unioned in, its prompt voice is not.
+                if arg.is_empty() {
+                    let ids: Vec<&str> = prism_core::modes::Mode::all()
+                        .iter()
+                        .map(|m| m.id())
+                        .collect();
+                    self.push_message("system", &format!("mix: {} (options: {})", self.mix_summary(), ids.join(", ")));
+                } else {
+                    let m = prism_core::modes::Mode::from_id(&arg);
+                    if m.id() != arg.trim().to_lowercase() {
+                        self.push_message("system", &format!("unknown mode; options: {}", prism_core::modes::Mode::all().iter().map(|m| m.id()).collect::<Vec<_>>().join(", ")));
+                    } else if m == self.imode {
+                        self.push_message("system", &format!("{} is already the primary mode", m.label()));
+                    } else {
+                        self.session.add_mode(m);
+                        // Blending in a tool-bearing mode grants the
+                        // tool surface the primary mode lacked.
+                        if self.session.feature(prism_core::modes::Feature::Tools)
+                            && self.session.capability.tools.is_empty()
+                        {
+                            self.session.capability.tools =
+                                crate::chat::agent_job::available_tool_names();
+                        }
+                        self.apply_session();
+                        self.status = format!("mix: {}", self.mix_summary());
+                    }
+                }
+            }
+            "unmix" => {
+                if arg.is_empty() {
+                    self.push_message("system", &format!("mix: {} (usage: /unmix <mode>)", self.mix_summary()));
+                } else {
+                    let m = prism_core::modes::Mode::from_id(&arg);
+                    if m.id() != arg.trim().to_lowercase() {
+                        self.push_message("system", &format!("unknown mode; options: {}", prism_core::modes::Mode::all().iter().map(|m| m.id()).collect::<Vec<_>>().join(", ")));
+                    } else if !self.session.remove_mode(m) {
+                        self.push_message("system", &format!("{} is not mixed in", m.label()));
+                    } else {
+                        self.apply_session();
+                        self.status = format!("mix: {}", self.mix_summary());
+                    }
+                }
+            }
+            "cap" => {
+                // Toggle one capability on the session.
+                if arg.is_empty() {
+                    let rows: Vec<String> = prism_core::modes::Feature::all()
+                        .iter()
+                        .map(|f| format!("{} {}", if self.session.feature(*f) { "+" } else { "-" }, f.id()))
+                        .collect();
+                    self.push_message("system", &format!("capabilities: {} (usage: /cap <feature> [on|off])", rows.join("  ")));
+                } else {
+                    let mut parts = arg.splitn(2, char::is_whitespace);
+                    let id = parts.next().unwrap_or("");
+                    let value = parts.next().unwrap_or("").trim();
+                    let Some(feature) = prism_core::modes::Feature::from_id(id) else {
+                        self.push_message("system", &format!("unknown capability '{}'; options: {}", id, prism_core::modes::Feature::all().iter().map(|f| f.id()).collect::<Vec<_>>().join(", ")));
+                        return;
+                    };
+                    let enabled = match value.to_lowercase().as_str() {
+                        "" | "on" | "enable" => true,
+                        "off" | "disable" => false,
+                        _ => {
+                            self.push_message("system", "usage: /cap <feature> [on|off]");
+                            return;
+                        }
+                    };
+                    self.session.set_feature(feature, enabled);
+                    self.apply_session();
+                    self.status = format!("{} {}", if enabled { "enabled" } else { "disabled" }, feature.id());
+                }
+            }
+            "perm" => {
+                // Edit the permission policy for one tool.
+                if arg.is_empty() {
+                    let rows: Vec<String> = self.session.capability.permission_rows()
+                        .iter()
+                        .map(|(t, p)| format!("{}={}", t, p.label()))
+                        .collect();
+                    self.push_message("system", &format!("permissions: {} (usage: /perm <tool> allow|ask|deny)", if rows.is_empty() { "no tools".into() } else { rows.join("  ") }));
+                } else {
+                    let mut parts = arg.splitn(2, char::is_whitespace);
+                    let tool = parts.next().unwrap_or("").trim();
+                    let level = parts.next().unwrap_or("").trim();
+                    let Some(permission) = prism_core::session::PermissionLevel::from_label(level) else {
+                        self.push_message("system", "usage: /perm <tool> allow|ask|deny");
+                        return;
+                    };
+                    if !self.session.capability.set_permission(tool, permission) {
+                        self.push_message("system", &format!("no such tool: {}", tool));
+                    } else {
+                        self.status = format!("{} = {}", tool, permission.label());
+                    }
+                }
+            }
             "system" => {
                 self.settings.system_prompt = arg.clone();
                 self.persist_settings();
@@ -592,9 +697,11 @@ impl App {
                         "system",
                         "usage: /agent <task> — run the core agent loop (calculator + file tools; writes are denied headless). Set PRISM_AGENT_SANDBOX_POLICY (JSON or policy file) to add the sandboxed shell tool",
                     );
-                } else if !self.imode.traits().tools {
+                } else if !self.session.feature(prism_core::modes::Feature::Tools) {
                     // Tool-less modes cannot run the loop at all. This is
-                    // the "no mode leakage" guarantee made real.
+                    // the "no mode leakage" guarantee made real — and it
+                    // reads the *session* traits, so a mix that grants
+                    // tools (or a /cap that revokes them) is honoured.
                     self.push_message(
                         "system",
                         &format!(
@@ -817,6 +924,31 @@ impl App {
         }
     }
 
+    /// The modes in this session, as a short human string.
+    pub fn mix_summary(&self) -> String {
+        self.session
+            .active_modes()
+            .iter()
+            .map(|m| m.label())
+            .collect::<Vec<_>>()
+            .join(" + ")
+    }
+
+    /// Push the session's effective traits into the surfaces that read
+    /// them: the capability layer's tool list and the agent gate. The
+    /// session is the source of truth for what the TUI may do.
+    fn apply_session(&mut self) {
+        let traits = self.session.active_traits();
+        // The advertised tool list follows the Tools capability: with
+        // tools off, no tool may be permitted even if an override says
+        // allow.
+        if !traits.tools {
+            self.session.capability.tools.clear();
+            self.session.capability.permissions.clear();
+            self.agent_running = false;
+        }
+    }
+
     /// Switch interaction mode. The mode is not a label: Code and Chat
     /// advertise no tools, so the system prompt is reset to the mode
     /// preset (any user override is discarded, because "style only"
@@ -824,6 +956,14 @@ impl App {
     /// agent job refuses to start.
     pub fn set_imode(&mut self, mode: IMode) {
         self.imode = mode;
+        // Keep the session's primary mode in step; switching modes
+        // clears the blend and the feature overrides, matching the core.
+        // The full available tool list is passed so a mode that grants
+        // tools advertises all of them.
+        self.session.set_mode(
+            mode,
+            &crate::chat::agent_job::available_tool_names(),
+        );
         let t = mode.traits();
         // The mode preset becomes the system prompt unless the user set
         // one explicitly (then Mode::Code would be a no-op switch).

@@ -101,6 +101,15 @@ impl ToolRegistry {
         self.tools.lock().unwrap().get(name).cloned()
     }
 
+    /// The registered tool names, sorted. A permissions editor renders
+    /// this list, so it must come from the registry rather than a
+    /// hand-written copy that could drift.
+    pub fn tool_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.tools.lock().unwrap().keys().cloned().collect();
+        names.sort();
+        names
+    }
+
     pub fn permission(&self, name: &str) -> Permission {
         self.permissions
             .lock()

@@ -12,8 +12,9 @@ use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
 pub const HELP_LINES: &[&str] = &[
-    "Prism CLI — commands: /help /new /load N /del N /model X /provider X /key X /mode [chat|agent|code|creative|daemon|generative] /system X /think /temp X /conn direct|api /search X /agent <task> /quit",
+    "Prism CLI — commands: /help /new /load N /del N /model X /provider X /key X /mode [id] /mix [id] /unmix [id] /cap [feature [on|off]] /perm <tool> allow|ask|deny /system X /think /temp X /conn direct|api /search X /agent <task> /quit",
     "modes: chat (no tools) · agent (tools+subagents) · code (style only) · creative (cards+lore) · daemon (tasks, always-on) · generative (image/video/audio) · Alt+M cycles, /mode lists",
+    "mixing: /mix <id> blends another mode in (capabilities union, prompt voice stays primary) · /unmix <id> removes it · /cap tools|subagents|commands|character-cards|media|tasks|strategy [on|off] toggles one capability · /perm <tool> allow|ask|deny edits the policy",
     "agent shell: PRISM_AGENT_SANDBOX_POLICY (JSON or file) adds the sandboxed `shell` tool · prism sandbox preflight [--policy FILE] [--json] probes the host",
     "keys: Enter send · Esc stop/clear · Ctrl+F search (n/N navigate) · PgUp/PgDn scroll · Ctrl+T thinking · Alt+N new chat · Alt+P/K pick chat · Alt+O open · Alt+M mode · Ctrl+U clear input · Ctrl+W del word · Ctrl+C quit",
 ];
@@ -303,6 +304,34 @@ fn draw_details(f: &mut Frame, app: &App, area: Rect) {
         t.commands.join(" ")
     };
     rows.push(kv("commands", &cmds));
+
+    // The live session: mode blend, effective capabilities, permission
+    // policy. These are what the session can actually do, which is not
+    // the same as what a single mode would grant.
+    rows.push(RtLine::from(""));
+    rows.push(kv("mix", &app.mix_summary()));
+    let caps: Vec<String> = prism_core::modes::Feature::all()
+        .iter()
+        .map(|f| {
+            format!(
+                "{}{}",
+                if app.session.feature(*f) { "+" } else { "-" },
+                f.id()
+            )
+        })
+        .collect();
+    rows.push(kv("caps", &caps.join(" ")));
+    let perms = app.session.capability.permission_rows();
+    let perm_text = if perms.is_empty() {
+        "no tools".to_string()
+    } else {
+        perms
+            .iter()
+            .map(|(t, p)| format!("{}={}", t, p.label()))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    rows.push(kv("perms", &perm_text));
     let block = Block::new()
         .borders(Borders::ALL)
         .title(Span::styled(" session ", Style::new().fg(Color::Cyan)));
@@ -377,7 +406,17 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     };
     let im = app.imode;
     let t = im.traits();
-    let badge = format!("{} · {} · ", im.label(), t.style.style_label());
+    // Show the blend when there is one: "Chat + Agent" is a different
+    // contract from "Chat" and the user must be able to see which.
+    let badge = if app.session.mixed.is_empty() {
+        format!("{} · {} · ", im.label(), t.style.style_label())
+    } else {
+        format!(
+            "{} · {} · ",
+            app.mix_summary(),
+            app.session.active_traits().style.style_label()
+        )
+    };
     let line = RtLine::from(vec![
         Span::styled(format!(" {mode}"), Style::new().fg(Color::Magenta)),
         Span::styled(badge, Style::new().fg(Color::Cyan)),

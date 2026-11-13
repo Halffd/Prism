@@ -320,3 +320,97 @@ fn mode_command_accepts_ids_and_rejects_junk() {
     assert!(last.content.contains("unknown mode"), "{}", last.content);
     let _ = before;
 }
+
+// ---- mode mixing, capability editing, permission editing -----------------
+
+#[test]
+fn mix_unions_capabilities_and_unmix_removes_them() {
+    let (_g, _dir, mut app, tx) = fresh_app("mix");
+    assert!(!app.session.feature(prism_core::modes::Feature::Tools));
+    type_line(&mut app, &tx, "/mix agent");
+    assert_eq!(app.session.mixed, vec![prism_cli::state::IMode::Agent]);
+    assert!(app.session.feature(prism_core::modes::Feature::Tools));
+    assert!(app.session.feature(prism_core::modes::Feature::Subagents));
+    type_line(&mut app, &tx, "/unmix agent");
+    assert!(app.session.mixed.is_empty());
+    assert!(!app.session.feature(prism_core::modes::Feature::Tools));
+}
+
+#[test]
+fn mix_rejects_unknown_modes_and_the_primary() {
+    let (_g, _dir, mut app, tx) = fresh_app("mix-bad");
+    type_line(&mut app, &tx, "/mix nonsense");
+    let last = &app.conv.messages[app.conv.messages.len() - 1];
+    assert_eq!(last.role, "system");
+    assert!(last.content.contains("unknown mode"), "{}", last.content);
+    assert!(app.session.mixed.is_empty());
+
+    // The primary mode cannot be mixed into itself.
+    type_line(&mut app, &tx, "/mix chat");
+    assert!(app.session.mixed.is_empty());
+}
+
+#[test]
+fn cap_toggles_a_capability_on_and_off() {
+    let (_g, _dir, mut app, tx) = fresh_app("cap");
+    type_line(&mut app, &tx, "/cap media on");
+    assert!(app.session.feature(prism_core::modes::Feature::Media));
+    type_line(&mut app, &tx, "/cap media off");
+    assert!(!app.session.feature(prism_core::modes::Feature::Media));
+}
+
+#[test]
+fn cap_rejects_unknown_capabilities() {
+    let (_g, _dir, mut app, tx) = fresh_app("cap-bad");
+    type_line(&mut app, &tx, "/cap nonsense on");
+    let last = &app.conv.messages[app.conv.messages.len() - 1];
+    assert_eq!(last.role, "system");
+    assert!(last.content.contains("unknown capability"), "{}", last.content);
+}
+
+#[test]
+fn perm_edits_the_policy_for_an_advertised_tool() {
+    let (_g, _dir, mut app, tx) = fresh_app("perm");
+    // Chat advertises no tools, so there is nothing to edit yet.
+    type_line(&mut app, &tx, "/perm calculator allow");
+    let last = &app.conv.messages[app.conv.messages.len() - 1];
+    assert!(last.content.contains("no such tool"), "{}", last.content);
+
+    // Switch to agent, which advertises tools, then edit.
+    app.set_imode(prism_cli::state::IMode::Agent);
+    type_line(&mut app, &tx, "/perm calculator ask");
+    assert_eq!(
+        app.session.permission_for("calculator"),
+        prism_core::session::PermissionLevel::Ask
+    );
+}
+
+#[test]
+fn perm_rejects_unknown_levels() {
+    let (_g, _dir, mut app, tx) = fresh_app("perm-bad");
+    app.set_imode(prism_cli::state::IMode::Agent);
+    type_line(&mut app, &tx, "/perm calculator maybe");
+    let last = &app.conv.messages[app.conv.messages.len() - 1];
+    assert_eq!(last.role, "system");
+    assert!(last.content.contains("usage:"), "{}", last.content);
+}
+
+#[test]
+fn agent_gate_follows_the_session_not_the_primary_mode() {
+    let (_g, _dir, mut app, tx) = fresh_app("gate");
+    // Chat alone: no tools.
+    type_line(&mut app, &tx, "/agent do something");
+    assert!(app
+        .conv
+        .messages
+        .iter()
+        .any(|m| m.content.contains("no tools")));
+
+    // Mix in agent: the gate opens because the session has tools.
+    type_line(&mut app, &tx, "/mix agent");
+    assert!(app.session.feature(prism_core::modes::Feature::Tools));
+
+    // Revoke tools with /cap: the gate closes again.
+    type_line(&mut app, &tx, "/cap tools off");
+    assert!(!app.session.feature(prism_core::modes::Feature::Tools));
+}

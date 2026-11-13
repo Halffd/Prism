@@ -250,26 +250,7 @@ pub mod agent_job {
         // scoped to the workspace root. Mutating tools stay on Ask =>
         // headless deny unless the user flips them with /agent-perms.
         std::thread::spawn(move || {
-            let registry = ToolRegistry::new();
-            registry.register(std::sync::Arc::new(CalculatorTool));
-            native_tools::register_all(&registry, &workspace_root);
-
-            // Opted-in guarded shell: the sandbox policy is the permission
-            // boundary, so the tool registers at the default Allow and
-            // every call runs guard → denylist → enforced subprocess.
-            #[cfg(all(target_os = "linux", feature = "native-transport"))]
-            if let Some((res, _used)) = &sandbox {
-                registry.register(std::sync::Arc::new(
-                    prism_core::sandbox::GuardedShellTool { res: res.clone() },
-                ));
-            }
-            #[cfg(not(all(target_os = "linux", feature = "native-transport")))]
-            {
-                // Policy posture was validated before spawn; neither the
-                // guard nor the enforcement layer exists on this host, so
-                // no shell tool is registered.
-                let _ = sandbox;
-            }
+            let registry = build_registry(&workspace_root, &sandbox);
 
             let result: AgentResult = {
                 let mut step_fn = |system: &str, hist: &[StepMessage]| {
@@ -281,5 +262,44 @@ pub mod agent_job {
             let _ = tx.send(Event::AgentDone(result));
         });
         Ok(())
+    }
+
+    /// Build the tool registry the agent loop runs with. Shared by the
+    /// spawn path and the permission editor so the editor lists exactly
+    /// the tools the loop will have.
+    fn build_registry(
+        workspace_root: &std::path::Path,
+        sandbox: &Option<(ResolvedSandbox, prism_core::sandbox::SandboxUsed)>,
+    ) -> ToolRegistry {
+        let registry = ToolRegistry::new();
+        registry.register(std::sync::Arc::new(CalculatorTool));
+        native_tools::register_all(&registry, workspace_root);
+
+        // Opted-in guarded shell: the sandbox policy is the permission
+        // boundary, so the tool registers at the default Allow and every
+        // call runs guard → denylist → enforced subprocess.
+        #[cfg(all(target_os = "linux", feature = "native-transport"))]
+        if let Some((res, _used)) = sandbox {
+            registry.register(std::sync::Arc::new(
+                prism_core::sandbox::GuardedShellTool { res: res.clone() },
+            ));
+        }
+        #[cfg(not(all(target_os = "linux", feature = "native-transport")))]
+        {
+            // Policy posture was validated before spawn; neither the
+            // guard nor the enforcement layer exists on this host, so
+            // no shell tool is registered.
+            let _ = sandbox;
+        }
+        registry
+    }
+
+    /// The tool names the agent loop would run with on this host. The
+    /// permission editor renders this list.
+    pub fn available_tool_names() -> Vec<String> {
+        let root = std::path::PathBuf::from(".");
+        // No sandbox policy here: the list is the same either way, and
+        // probing the policy would read the environment for no reason.
+        build_registry(&root, &None).tool_names()
     }
 }
