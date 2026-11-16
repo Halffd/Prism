@@ -1138,3 +1138,197 @@
     gap: var(--spacing-sm);
   }
 }
+
+// Session list panel: filters, tag chips, read/archive actions and the
+// import/export controls.
+.session-list-panel {
+  .session-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-xs);
+    margin-bottom: var(--spacing-sm);
+
+    .session-filter-input,
+    .session-filter-select {
+      background: var(--surface-container-high);
+      color: var(--on-surface);
+      border: 1px solid var(--ghost-border-primary);
+      border-radius: var(--radius-pill);
+      padding: 4px 10px;
+      font-size: var(--label-sm);
+      min-width: 0;
+
+      &:focus {
+        outline: none;
+        box-shadow: 0 0 0 2px var(--ghost-border-primary);
+      }
+    }
+
+    .session-filter-input {
+      flex: 1 1 120px;
+    }
+  }
+
+  .session-transfer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-xs);
+    margin-bottom: var(--spacing-sm);
+
+    .menu-action-btn {
+      margin-bottom: 0;
+      font-size: var(--label-sm);
+      text-align: center;
+    }
+  }
+
+  .session-transfer-status {
+    font-size: var(--label-sm);
+    color: var(--on-surface-variant);
+    margin-bottom: var(--spacing-xs);
+  }
+
+  .session-transfer-error,
+  .session-corrupt-warning {
+    font-size: var(--label-sm);
+    color: var(--error);
+    background: var(--surface-container-high);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-sm);
+    margin-bottom: var(--spacing-xs);
+  }
+
+  .no-sessions {
+    font-size: var(--font-sm);
+    color: var(--on-surface-variant);
+    padding: var(--spacing-sm) 0;
+  }
+
+  .session-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: var(--spacing-xs);
+    margin-bottom: var(--spacing-sm);
+
+    .session-item-main {
+      flex: 1;
+      min-width: 0;
+
+      > button {
+        width: 100%;
+        text-align: left;
+        background: var(--surface-container-high);
+        border: none;
+        border-radius: var(--radius-lg);
+        padding: var(--spacing-sm);
+        margin-right: 0;
+        cursor: pointer;
+        color: var(--on-surface);
+        display: block;
+
+        &:hover {
+          background: var(--surface-container-highest);
+        }
+
+        &.active {
+          background: var(--primary);
+          color: var(--on-primary);
+        }
+      }
+    }
+
+    .session-title {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--spacing-xs);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 100%;
+    }
+
+    .unread-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--primary);
+      flex: 0 0 auto;
+    }
+
+    .session-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 4px;
+    }
+
+    .session-tag-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      background: var(--surface-container-highest);
+      color: var(--on-surface-variant);
+      border-radius: var(--radius-pill);
+      padding: 1px 6px;
+      font-size: var(--label-sm);
+    }
+
+    .session-tag-remove {
+      background: transparent;
+      border: none;
+      color: inherit;
+      cursor: pointer;
+      padding: 0;
+      width: auto;
+      height: auto;
+      font-size: var(--label-sm);
+
+      &:hover {
+        background: transparent;
+        color: var(--error);
+      }
+    }
+
+    .session-tag-input {
+      background: transparent;
+      border: 1px dashed var(--ghost-border-primary);
+      border-radius: var(--radius-pill);
+      color: var(--on-surface);
+      font-size: var(--label-sm);
+      padding: 1px 6px;
+      width: 72px;
+
+      &:focus {
+        outline: none;
+      }
+    }
+
+    .session-item-actions {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .session-toggle-btn {
+      background: var(--surface-container-high);
+      border: none;
+      border-radius: var(--radius-pill);
+      padding: var(--spacing-xs);
+      cursor: pointer;
+      color: var(--on-surface);
+      font-size: var(--font-sm);
+      width: auto;
+      height: auto;
+
+      &:hover {
+        background: var(--surface-container-highest);
+      }
+    }
+
+    &.archived-session .session-title {
+      opacity: 0.65;
+      font-style: italic;
+    }
+  }
+}

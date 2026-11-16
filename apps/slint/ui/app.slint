@@ -7,12 +7,35 @@ export struct ChatLine {
     role: string,      // "user" | "assistant" | "system"
     content: string,
     thinking: string,  // extracted reasoning; empty = none
+    tags: string,      // comma-separated user tags
+    read: bool,
+    edited: bool,      // the content was edited after it was written
 }
 
 export struct ChatRow {
     id: string,
     title: string,
     confirming: bool,  // delete pressed once; second press deletes
+    tags: string,      // comma-separated session tags
+    unread: bool,
+    archived: bool,
+}
+
+export struct SearchRow {
+    conversation-id: string,
+    conversation-title: string,
+    message-index: int,
+    role: string,
+    preview: string,
+}
+
+export struct ContextRow {
+    id: string,
+    kind: string,
+    title: string,
+    tokens: int,
+    enabled: bool,
+    source: string,
 }
 
 export struct KeyRow {
@@ -135,6 +158,33 @@ export component AppWindow inherits Window {
     in-out property <string> palette-query;
     in property <[PaletteRow]> palette-results;
     in-out property <int> palette-idx: 0;
+    // ---- search ----
+    in-out property <bool> search-open: false;
+    in-out property <string> search-query;
+    in-out property <bool> search-regex: false;
+    in-out property <bool> search-case-sensitive: false;
+    in-out property <int> search-role-idx: 0;    // 0 = any, 1 = user, 2 = assistant, 3 = system
+    in-out property <int> search-sort-idx: 0;    // 0 = newest, 1 = oldest, 2 = title
+    in-out property <bool> search-unread-only: false;
+    in-out property <bool> search-include-archived: false;
+    in-out property <string> search-tag;
+    in-out property <string> search-file;
+    in property <[string]> search-role-labels;
+    in property <[string]> search-sort-labels;
+    in property <[SearchRow]> search-results;
+    in property <string> search-status;
+    // ---- context management ----
+    in property <[ContextRow]> context-items;
+    in-out property <string> context-budget: "4000";
+    in property <string> context-status;
+    // ---- import / export ----
+    in-out property <string> backup-path;
+    in property <string> backup-status;
+    // ---- message editing ----
+    in-out property <int> editing-message-index: -1;
+    in-out property <string> editing-message-text;
+    // ---- session tags ----
+    in-out property <string> new-session-tag;
     // ---- media (image / video / 3D) ----
     in property <[string]> media-kind-labels;
     in property <[string]> media-provider-labels;
@@ -243,6 +293,30 @@ export component AppWindow inherits Window {
     callback tree-open(string);        // relative path of a tree row
     callback editor-changed(string);
     callback editor-save();
+    // ---- search ----
+    callback search-toggle();
+    callback search-run();
+    callback search-jump(string, int);  // conversation id, message index
+    // ---- message actions ----
+    callback message-fork(int);          // message index
+    callback message-edit-start(int);
+    callback message-edit-commit(int, string);
+    callback message-edit-cancel();
+    callback message-toggle-read(int);
+    callback message-tag(int, string);
+    callback message-untag(int, string);
+    // ---- session actions ----
+    callback session-toggle-read(string);
+    callback session-toggle-archive(string);
+    callback session-tag(string, string);
+    callback session-untag(string, string);
+    // ---- context ----
+    callback context-toggle(string, bool);
+    callback context-remove(string);
+    callback context-budget-changed(string);
+    // ---- import / export ----
+    callback backup-export(string);       // path
+    callback backup-import(string);       // path
 
     changed connection-idx => { set-connection(self.connection-idx); }
     changed provider-idx => { set-provider(self.provider-idx); }
@@ -350,26 +424,62 @@ export component AppWindow inherits Window {
                 }
                 ListView {
                     for chat in chats : Rectangle {
-                        height: 32px;
-                        HorizontalLayout {
-                            spacing: 4px;
-                            Rectangle {
-                                horizontal-stretch: 1;
-                                row-ta := TouchArea {
-                                    clicked => { open-chat(chat.id); }
-                                    mouse-cursor: pointer;
+                        height: 44px;
+                        VerticalLayout {
+                            spacing: 2px;
+                            HorizontalLayout {
+                                spacing: 4px;
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    row-ta := TouchArea {
+                                        clicked => { open-chat(chat.id); }
+                                        mouse-cursor: pointer;
+                                    }
+                                    background: row-ta.has-hover ? #222a33 : transparent;
+                                    HorizontalLayout {
+                                        padding-left: 2px;
+                                        spacing: 4px;
+                                        Text {
+                                            text: chat.unread ? "● " : "";
+                                            color: #82aaff;
+                                            font-size: 10px;
+                                            vertical-alignment: center;
+                                        }
+                                        Text {
+                                            text: chat.archived ? "[archived] " + chat.title : chat.title;
+                                            color: row-ta.has-hover ? #ffffff : (chat.archived ? #66707a : #cfd8dc);
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                            horizontal-stretch: 1;
+                                        }
+                                    }
                                 }
-                                background: row-ta.has-hover ? #222a33 : transparent;
-                                Text {
-                                    text: chat.title;
-                                    color: row-ta.has-hover ? #ffffff : #cfd8dc;
-                                    vertical-alignment: center;
-                                    overflow: elide;
+                                Button {
+                                    text: chat.confirming ? "sure?" : "x";
+                                    clicked => { request-delete(chat.id); }
                                 }
                             }
-                            Button {
-                                text: chat.confirming ? "sure?" : "x";
-                                clicked => { request-delete(chat.id); }
+                            HorizontalLayout {
+                                spacing: 3px;
+                                height: 16px;
+                                Button {
+                                    text: chat.unread ? "Read" : "Unread";
+                                    height: 16px;
+                                    clicked => { session-toggle-read(chat.id); }
+                                }
+                                Button {
+                                    text: chat.archived ? "Unarchive" : "Archive";
+                                    height: 16px;
+                                    clicked => { session-toggle-archive(chat.id); }
+                                }
+                                Text {
+                                    text: chat.tags;
+                                    color: #8b95a1;
+                                    font-size: 9px;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                    horizontal-stretch: 1;
+                                }
                             }
                         }
                     }
@@ -435,6 +545,10 @@ export component AppWindow inherits Window {
                     text: "…responding";
                     color: #f5d76e;
                     vertical-alignment: center;
+                }
+                Button {
+                    text: "Search";
+                    clicked => { search-toggle(); }
                 }
                 Button { checkable: true; checked <=> show-settings; text: "Settings"; }
             }
@@ -543,7 +657,7 @@ export component AppWindow inherits Window {
             list := ListView {
                 horizontal-stretch: 1;
                 vertical-stretch: 1;
-                for line in transcript : Rectangle {
+                for line[i] in transcript : Rectangle {
                     height: line-view.preferred-height;
                     line-view := VerticalLayout {
                         padding-top: 6px;
@@ -576,7 +690,12 @@ export component AppWindow inherits Window {
                                 wrap: word-wrap;
                             }
                         }
-                        if line.content != "" : Text {
+                        if editing-message-index == i : TextEdit {
+                            text <=> editing-message-text;
+                            height: 60px;
+                            edited(t) => { editing-message-text = t; }
+                        }
+                        if editing-message-index != i && line.content != "" : Text {
                             text: line.content;
                             color: line.role == "system" ? #f0ad4e : #e8e6e3;
                             font-size: line.role == "system" ? 11px : 14px;
@@ -585,6 +704,52 @@ export component AppWindow inherits Window {
                         if line.role == "assistant" && line.content == "" && streaming : Text {
                             text: "…";
                             color: #66707a;
+                        }
+                        // ---- per-message actions ----
+                        HorizontalLayout {
+                            spacing: 6px;
+                            height: 22px;
+                            visible: editing-message-index != i;
+                            Button {
+                                text: line.read ? "Mark unread" : "Mark read";
+                                height: 20px;
+                                clicked => { message-toggle-read(i); }
+                            }
+                            Button {
+                                text: "Fork";
+                                height: 20px;
+                                clicked => { message-fork(i); }
+                            }
+                            if editing-message-index == i : Button {
+                                text: "Save";
+                                height: 20px;
+                                clicked => { message-edit-commit(i, editing-message-text); }
+                            }
+                            if editing-message-index != i : Button {
+                                text: "Edit";
+                                height: 20px;
+                                clicked => { message-edit-start(i); }
+                            }
+                            if editing-message-index == i : Button {
+                                text: "Cancel";
+                                height: 20px;
+                                clicked => { message-edit-cancel(); }
+                            }
+                            if line.tags != "" : Text {
+                                text: line.tags;
+                                color: #8b95a1;
+                                font-size: 10px;
+                                vertical-alignment: center;
+                            }
+                            Rectangle {
+                                horizontal-stretch: 1;
+                            }
+                            if line.edited : Text {
+                                text: "edited";
+                                color: #66707a;
+                                font-size: 10px;
+                                vertical-alignment: center;
+                            }
                         }
                         Rectangle {
                             height: 1px;
@@ -1094,6 +1259,28 @@ export component AppWindow inherits Window {
                         Text { text: sync-status; color: #8b95a1; font-size: 11px; wrap: word-wrap; }
                     }
 
+                    // ---- local backup ----
+                    VerticalLayout {
+                        spacing: 6px;
+                        Text { text: "Local backup"; color: #9fb0bd; font-weight: 700; }
+                        Text {
+                            text: "Write every chat to a file, or read one back. A file from a newer Prism is refused.";
+                            color: #8b95a1;
+                            font-size: 11px;
+                            wrap: word-wrap;
+                        }
+                        LineEdit {
+                            text <=> backup-path;
+                            placeholder-text: "/path/to/prism-backup.json";
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Button { text: "Export"; clicked => { backup-export(backup-path); } }
+                            Button { text: "Import"; clicked => { backup-import(backup-path); } }
+                        }
+                        Text { text: backup-status; color: #8b95a1; font-size: 11px; wrap: word-wrap; }
+                    }
+
                     // ---- generative mode: media capabilities ----
                     if mode-media : VerticalLayout {
                         spacing: 4px;
@@ -1276,6 +1463,242 @@ export component AppWindow inherits Window {
                     text: "Enter run · Esc close · ↑/↓ select";
                     color: #55606a;
                     font-size: 10px;
+                }
+            }
+        }
+    }
+
+    // ---- search panel (Ctrl+F) ----
+    if search-open : Rectangle {
+        background: #00000066;
+        TouchArea {
+            clicked => { search-toggle(); }
+        }
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: 50px;
+            width: 720px;
+            height: 560px;
+            background: #161b21;
+            border-width: 1px;
+            border-color: #2a3440;
+            drop-shadow-blur: 16px;
+            drop-shadow-color: #00000088;
+            VerticalLayout {
+                padding: 10px;
+                spacing: 8px;
+
+                search-input := FocusScope {
+                    LineEdit {
+                        text <=> search-query;
+                        placeholder-text: "Search messages…";
+                        edited(t) => { search-run(); }
+                        accepted => { search-run(); }
+                    }
+                    init => { search-input.focus(); }
+                }
+
+                // ---- filters ----
+                HorizontalLayout {
+                    spacing: 8px;
+                    CheckBox {
+                        text: "Regex";
+                        checked <=> search-regex;
+                        toggled => { search-run(); }
+                    }
+                    CheckBox {
+                        text: "Match case";
+                        checked <=> search-case-sensitive;
+                        toggled => { search-run(); }
+                    }
+                    CheckBox {
+                        text: "Unread only";
+                        checked <=> search-unread-only;
+                        toggled => { search-run(); }
+                    }
+                    CheckBox {
+                        text: "Include archived";
+                        checked <=> search-include-archived;
+                        toggled => { search-run(); }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: "Role";
+                        color: #66707a;
+                        font-size: 11px;
+                        vertical-alignment: center;
+                    }
+                    ComboBox {
+                        model: search-role-labels;
+                        current-index <=> search-role-idx;
+                        selected => { search-run(); }
+                    }
+                    Text {
+                        text: "Sort";
+                        color: #66707a;
+                        font-size: 11px;
+                        vertical-alignment: center;
+                    }
+                    ComboBox {
+                        model: search-sort-labels;
+                        current-index <=> search-sort-idx;
+                        selected => { search-run(); }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    LineEdit {
+                        placeholder-text: "Tag";
+                        text <=> search-tag;
+                        edited(t) => { search-run(); }
+                    }
+                    LineEdit {
+                        placeholder-text: "File / URL filter";
+                        text <=> search-file;
+                        edited(t) => { search-run(); }
+                    }
+                }
+
+                Text {
+                    text: search-status;
+                    color: #66707a;
+                    font-size: 11px;
+                }
+
+                Rectangle {
+                    height: 1px;
+                    background: #232a31;
+                }
+
+                ListView {
+                    vertical-stretch: 1;
+                    for r in search-results : Rectangle {
+                        height: 44px;
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            spacing: 8px;
+                            TouchArea {
+                                clicked => { search-jump(r.conversation-id, r.message-index); }
+                                mouse-cursor: pointer;
+                            }
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 1px;
+                                Text {
+                                    text: r.conversation-title;
+                                    color: #82aaff;
+                                    font-size: 11px;
+                                    overflow: elide;
+                                }
+                                Text {
+                                    text: r.preview;
+                                    color: #cfd8dc;
+                                    font-size: 12px;
+                                    overflow: elide;
+                                }
+                            }
+                            Text {
+                                text: r.role;
+                                color: #66707a;
+                                font-size: 10px;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Button {
+                        text: "Close";
+                        clicked => { search-toggle(); }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- context panel ----
+    if context-items.length > 0 : Rectangle {
+        x: parent.width - 260px;
+        y: 40px;
+        width: 250px;
+        height: 260px;
+        background: #161b21;
+        border-width: 1px;
+        border-color: #2a3440;
+        VerticalLayout {
+            padding: 8px;
+            spacing: 6px;
+            Text {
+                text: "Context";
+                color: #cfd8dc;
+                font-weight: 700;
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Text {
+                    text: "Budget";
+                    color: #66707a;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
+                LineEdit {
+                    text <=> context-budget;
+                    edited(t) => { context-budget = t; }
+                }
+            }
+            Text {
+                text: context-status;
+                color: #66707a;
+                font-size: 10px;
+            }
+            ListView {
+                vertical-stretch: 1;
+                for item in context-items : Rectangle {
+                    height: 40px;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        CheckBox {
+                            checked <=> item.enabled;
+                            toggled => { context-toggle(item.id, self.checked); }
+                        }
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            spacing: 1px;
+                            Text {
+                                text: item.title;
+                                color: #cfd8dc;
+                                font-size: 11px;
+                                overflow: elide;
+                            }
+                            Text {
+                                text: item.source;
+                                color: #66707a;
+                                font-size: 10px;
+                                overflow: elide;
+                            }
+                        }
+                        Text {
+                            text: item.tokens;
+                            color: #66707a;
+                            font-size: 10px;
+                            vertical-alignment: center;
+                        }
+                        Button {
+                            text: "×";
+                            width: 24px;
+                            clicked => { context-remove(item.id); }
+                        }
+                    }
                 }
             }
         }

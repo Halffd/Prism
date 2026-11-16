@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useAuth } from '../auth-provider';
 import { Icon } from '@prism/ui-components';
@@ -10,11 +10,14 @@ import {
   saveChatHistory,
   loadChatHistory,
   getChatSessions,
+  getChatSessionsDetailed,
   deleteChatSession,
   savePromptShortcut,
   getPromptShortcuts,
   deletePromptShortcut,
   getSnippets,
+  updateChatSessionMeta,
+  type DBChatSession,
 } from '@prism/shared-db';
 import type { PromptShortcut, Snippet } from '@prism/shared-types';
 import { matchSnippet } from '@prism/shared-types';
@@ -65,6 +68,14 @@ import {
   customModelOptions,
   resolveRequestConfig,
 } from '../chat/custom-model';
+import { SessionListPanel } from './SessionListPanel';
+import {
+  getProviderOptions,
+  loadProviderOptions,
+  type ProviderOption,
+} from './provider-catalog';
+import { modelsForProvider, resolveModels } from './model-cache';
+import { loadBackupSettings, runBackupNow } from './auto-backup';
 
 // Initialize with default settings - will be overridden by stored settings
 const defaultAIConfig: AIConfig = {
@@ -79,6 +90,18 @@ const defaultAIConfig: AIConfig = {
 };
 
 let client = new UnifiedAIClient({ aiConfig: defaultAIConfig });
+
+/**
+ * Keep the selected model in the offered list.
+ *
+ * A provider may stop advertising a model the user still has selected;
+ * dropping it from the list would silently change their configuration.
+ */
+function withSelectedModel(models: string[], selected?: string): string[] {
+  if (!selected) return models;
+  if (models.includes(selected)) return models;
+  return [selected, ...models];
+}
 
 export function Popup() {
   const dispatch = useDispatch<AppDispatch>();
@@ -107,6 +130,16 @@ export function Popup() {
   const [autoSyncIntervalId, setAutoSyncIntervalId] =
     useState<NodeJS.Timeout | null>(null);
   const [isOnline, setIsOnline] = useState(true); // Track network status
+  // The provider catalogue is shared with the core; the synchronous list
+  // paints immediately and the async one adds the core's labels.
+  const [providerOptions, setProviderOptions] = useState<ProviderOption[]>(
+    () => getProviderOptions(),
+  );
+  // The stored sessions, including their tags/read/archive state.
+  const [storedSessions, setStoredSessions] = useState<DBChatSession[]>([]);
+  const [corruptSessions, setCorruptSessions] = useState<
+    Array<{ id: string; reason: string }>
+  >([]);
   const [theme, setTheme] = useState<
     'dark' | 'light' | 'high-contrast' | 'monokai' | 'material' | 'github'
   >('dark');
@@ -476,9 +509,72 @@ export function Popup() {
     fetchAvailableModels(reduxAIConfig);
   }, [reduxAIConfig.provider]); // Only re-fetch when provider changes
 
+  // Enrich the provider list with the core's labels and default models.
+  // The synchronous list is already in place, so a missing wasm package
+  // or an offline start-up changes nothing.
+  useEffect(() => {
+    let cancelled = false;
+    loadProviderOptions()
+      .then((options) => {
+        if (!cancelled) setProviderOptions(options);
+      })
+      .catch(() => {
+        // The synchronous fallback is already in place.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Automatic local backup.
+  //
+  // A snapshot is written after the transcript changes and on a timer
+  // while the popup is open. The settings page owns the toggle and the
+  // retention count; the popup only performs the writes.
+  const lastBackupAtRef = useRef(0);
+
+  const writeBackupSnapshot = useCallback(async () => {
+    try {
+      const settings = await loadBackupSettings();
+      if (!settings.enabled) return;
+      // Do not write a snapshot for every keystroke-sized change: one
+      // per minute is enough to keep the history close.
+      if (Date.now() - lastBackupAtRef.current < 60_000) return;
+      lastBackupAtRef.current = Date.now();
+      await runBackupNow(settings.retention);
+    } catch (error) {
+      console.warn('Automatic backup failed:', error);
+    }
+  }, []);
+
+  // A snapshot after every change to the transcript.
+  useEffect(() => {
+    void writeBackupSnapshot();
+  }, [messages.length, currentSessionId, writeBackupSnapshot]);
+
+  // A snapshot on a timer, so the backup follows the sessions even when
+  // the popup is left open without a new message.
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | null = null;
+
+    void loadBackupSettings().then((settings) => {
+      if (cancelled || !settings.enabled) return;
+      timer = setInterval(() => void writeBackupSnapshot(), settings.intervalMs);
+    });
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+  }, [writeBackupSnapshot]);
 
   // Listen for tab updates to refresh context when switching between tabs
   useEffect(() => {
@@ -610,7 +706,11 @@ export function Popup() {
 
   const loadChatSessionsFromDB = async () => {
     try {
-      const sessions = await getChatSessions();
+      // The detailed read migrates old-shaped rows and reports the ones
+      // that cannot be parsed instead of failing the whole list.
+      const { sessions, corrupt } = await getChatSessionsDetailed();
+      setStoredSessions(sessions);
+      setCorruptSessions(corrupt);
       // Map DBChatSession to shared-types ChatSession (title optional in shared type)
       dispatch(
         setSessions(
@@ -621,11 +721,36 @@ export function Popup() {
             messages: [],
             createdAt: s.createdAt,
             updatedAt: s.updatedAt,
+            tags: s.tags,
+            read: s.read,
+            archived: s.archived,
+            forkedFrom: s.forkedFrom,
+            forkedAtMessage: s.forkedAtMessage,
           })),
         ),
       );
     } catch (error) {
       console.error('Failed to load chat sessions:', error);
+    }
+  };
+
+  /**
+   * Updates the metadata of a session (tags, read state, archive state)
+   * and refreshes the list.
+   */
+  const patchSessionMeta = async (
+    sessionId: string,
+    patch: {
+      tags?: string[];
+      read?: boolean;
+      archived?: boolean;
+    },
+  ) => {
+    try {
+      await updateChatSessionMeta(sessionId, patch);
+      await loadChatSessionsFromDB();
+    } catch (error) {
+      console.error('Failed to update session metadata:', error);
     }
   };
 
@@ -1371,54 +1496,21 @@ export function Popup() {
         return;
       }
 
-      // Create a temporary client with the current AI config
-      const tempClient = new UnifiedAIClient({
-        aiConfig: config,
-        prismApiUrl: config.apiUrl,
+      // The network fetch may fail (no key, no network, provider down).
+      // The resolver then falls back to the locally cached list for the
+      // provider, so model selection keeps working offline.
+      const { models } = await resolveModels(config, async (current) => {
+        const tempClient = new UnifiedAIClient({
+          aiConfig: current,
+          prismApiUrl: current.apiUrl,
+        });
+        return tempClient.getAvailableModels();
       });
-      const models = await tempClient.getAvailableModels();
-      setAvailableModels(models);
+      setAvailableModels(withSelectedModel(models, config.model));
     } catch (error) {
       console.error('Error fetching available models:', error);
-      // Set some default models based on the provider
-      switch (config.provider) {
-        case 'openai':
-          setAvailableModels([
-            'gpt-3.5-turbo',
-            'gpt-4',
-            'gpt-4o',
-            'gpt-4-turbo',
-          ]);
-          break;
-        case 'gemini':
-          setAvailableModels([
-            'gemini-2.5-flash',
-            'gemini-2.5-pro',
-            'gemini-1.5-pro',
-            'gemini-1.5-flash',
-            'gemini-pro',
-          ]);
-          break;
-        case 'claude':
-          setAvailableModels([
-            'claude-opus-5-5',
-            'claude-sonnet-5-5',
-            'claude-haiku-5-5',
-            'claude-fable-5-1',
-            'claude-fable-5',
-            'claude-opus-5',
-            'claude-opus-4-8',
-            'claude-opus-4-7',
-            'claude-opus-4-6',
-            'claude-opus-4-5',
-            'claude-sonnet-5',
-            'claude-sonnet-4-6',
-            'claude-haiku-4-5',
-          ]);
-          break;
-        default:
-          setAvailableModels([]);
-      }
+      const cached = await modelsForProvider(config);
+      setAvailableModels(withSelectedModel(cached, config.model));
     } finally {
       setFetchingModels(false);
     }
@@ -1870,26 +1962,27 @@ export function Popup() {
               >
                 + New Chat
               </button>
-              {sessions.map((session) => (
-                <div key={session.id} className="session-item">
-                  <button
-                    onClick={() => {
-                      switchToSession(session.id);
-                      setShowMenu(false);
-                    }}
-                    className={session.id === currentSessionId ? 'active' : ''}
-                  >
-                    {session.title}
-                  </button>
-                  <button
-                    onClick={() => deleteSession(session.id)}
-                    className="delete-session-btn"
-                  >
-                    <Icon name="delete" title="Delete session" />
-                  </button>
-                </div>
-              ))}
             </div>
+            <SessionListPanel
+              sessions={storedSessions}
+              currentSessionId={currentSessionId}
+              corruptSessions={corruptSessions}
+              onSelect={(sessionId) => {
+                void switchToSession(sessionId);
+                setShowMenu(false);
+              }}
+              onDelete={(sessionId) => void deleteSession(sessionId)}
+              onToggleRead={(sessionId, read) =>
+                void patchSessionMeta(sessionId, { read })
+              }
+              onToggleArchive={(sessionId, archived) =>
+                void patchSessionMeta(sessionId, { archived })
+              }
+              onSetTags={(sessionId, tags) =>
+                void patchSessionMeta(sessionId, { tags })
+              }
+              onRefresh={() => void loadChatSessionsFromDB()}
+            />
           </div>
 
           <div className="menu-section">
@@ -2110,6 +2203,7 @@ export function Popup() {
         availableModels={availableModels}
         fetchingModels={fetchingModels}
         isOnline={isOnline}
+        providerOptions={providerOptions}
         setShowMenu={setShowMenu}
         updateAIConfig={(config) => {
           dispatch(updateAIConfig(config));

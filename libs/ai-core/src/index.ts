@@ -49,6 +49,21 @@ export interface WasmCoreModule {
     providerDefault?: string | null,
   ): string;
   agent_subagent_clamp_tools(name: string, advertised: string[]): string;
+  // Session ops: fork, overwrite, edit
+  session_fork_branch(reqJson: string): string;
+  session_overwrite_at(reqJson: string): string;
+  session_edit_message(reqJson: string): string;
+  session_set_message_read(reqJson: string): string;
+  session_set_message_tag(reqJson: string): string;
+  // Search
+  search_messages(reqJson: string): string;
+  // Context budget
+  context_apply_budget(reqJson: string): string;
+  estimate_tokens(text: string): number;
+  // Backup
+  backup_export(reqJson: string): string;
+  backup_parse(raw: string): string;
+  backup_import(reqJson: string): string;
 }
 
 export type WasmCore = WasmCoreModule & Record<string, unknown>;
@@ -705,11 +720,320 @@ export function macroContext(
   return {
     char: card.name,
     user: persona.name,
-    description: card.description ?? '',
-    personality: card.personality ?? '',
-    scenario: card.scenario ?? '',
+    description: persona.description ?? '',
+    personality: persona.personality ?? '',
+    scenario: persona.scenario ?? '',
     persona: personaExpanded,
     first_mes: card.first_mes ?? '',
     mes_example: card.mes_example ?? '',
   };
+}
+
+// ---- session ops ----------------------------------------------------------
+
+/** A stored message, as the core shapes it. */
+export interface CoreStoredMessage {
+  role: string;
+  content: string;
+  thinking?: string | null;
+  id?: string | null;
+  tags?: string[];
+  read?: boolean;
+  edited_at?: number | null;
+}
+
+/** A conversation, as the core shapes it. */
+export interface CoreConversation {
+  id: string;
+  title: string;
+  created_at: number;
+  updated_at: number;
+  messages: CoreStoredMessage[];
+  tags?: string[];
+  archived?: boolean;
+  read?: boolean;
+  forked_from?: string | null;
+  forked_at_message?: number | null;
+}
+
+/** Unwrap a `{"Ok": ...}` / `{"Err": ...}` envelope. */
+function unwrap<T>(raw: string, what: string): T {
+  const parsed = JSON.parse(raw) as { Ok?: T; Err?: unknown };
+  if (parsed.Err !== undefined) {
+    const reason =
+      typeof parsed.Err === 'string'
+        ? parsed.Err
+        : JSON.stringify(parsed.Err);
+    throw new Error(`${what}: ${reason}`);
+  }
+  return parsed.Ok as T;
+}
+
+/**
+ * Branch a copy of a conversation at `atIndex` into a new one.
+ *
+ * The source conversation is left untouched. The returned conversation
+ * records where it came from (`forked_from` / `forked_at_message`).
+ */
+export function forkBranch(
+  core: WasmCore,
+  conversation: CoreConversation,
+  atIndex: number,
+  newId: string,
+  nowMs?: number,
+): CoreConversation {
+  return unwrap<CoreConversation>(
+    core.session_fork_branch(
+      JSON.stringify({
+        conversation,
+        at_index: atIndex,
+        new_id: newId,
+        ...(nowMs === undefined ? {} : { now_ms: nowMs }),
+      }),
+    ),
+    'fork branch',
+  );
+}
+
+/**
+ * Replace one message and drop the stale tail after it.
+ *
+ * The tail goes because it was an answer to the text that was replaced.
+ */
+export function overwriteAt(
+  core: WasmCore,
+  conversation: CoreConversation,
+  atIndex: number,
+  content: string,
+  nowMs?: number,
+): CoreConversation {
+  return unwrap<CoreConversation>(
+    core.session_overwrite_at(
+      JSON.stringify({
+        conversation,
+        at_index: atIndex,
+        content,
+        ...(nowMs === undefined ? {} : { now_ms: nowMs }),
+      }),
+    ),
+    'overwrite',
+  );
+}
+
+/** Replace one message's content, keeping the rest of the transcript. */
+export function editMessage(
+  core: WasmCore,
+  conversation: CoreConversation,
+  atIndex: number,
+  content: string,
+  nowMs?: number,
+): CoreConversation {
+  return unwrap<CoreConversation>(
+    core.session_edit_message(
+      JSON.stringify({
+        conversation,
+        at_index: atIndex,
+        content,
+        ...(nowMs === undefined ? {} : { now_ms: nowMs }),
+      }),
+    ),
+    'edit message',
+  );
+}
+
+/** Set a message's read flag. */
+export function setMessageRead(
+  core: WasmCore,
+  conversation: CoreConversation,
+  atIndex: number,
+  read: boolean,
+): CoreConversation {
+  return unwrap<CoreConversation>(
+    core.session_set_message_read(
+      JSON.stringify({ conversation, at_index: atIndex, read }),
+    ),
+    'set message read',
+  );
+}
+
+/** Add or remove a tag on one message. */
+export function setMessageTag(
+  core: WasmCore,
+  conversation: CoreConversation,
+  atIndex: number,
+  tag: string,
+  remove = false,
+): CoreConversation {
+  return unwrap<CoreConversation>(
+    core.session_set_message_tag(
+      JSON.stringify({ conversation, at_index: atIndex, tag, remove }),
+    ),
+    'set message tag',
+  );
+}
+
+// ---- search ---------------------------------------------------------------
+
+/** How search results are ordered. */
+export type CoreSearchSort = 'newest' | 'oldest' | 'title';
+
+/** The filters a search can apply. */
+export interface CoreSearchQuery {
+  text: string;
+  regex?: boolean;
+  case_sensitive?: boolean;
+  role?: string | null;
+  tag?: string | null;
+  unread_only?: boolean;
+  include_archived?: boolean;
+  file_filter?: string | null;
+  limit?: number;
+  sort?: CoreSearchSort;
+}
+
+/** One matching message. */
+export interface CoreSearchHit {
+  conversation_id: string;
+  conversation_title: string;
+  message_index: number;
+  role: string;
+  preview: string;
+  text_matched: boolean;
+}
+
+/** Find messages across conversations. */
+export function searchMessages(
+  core: WasmCore,
+  conversations: CoreConversation[],
+  query: CoreSearchQuery,
+): CoreSearchHit[] {
+  return unwrap<CoreSearchHit[]>(
+    core.search_messages(JSON.stringify({ conversations, query })),
+    'search',
+  );
+}
+
+// ---- context budget -------------------------------------------------------
+
+/** One piece of context attached to a request. */
+export interface CoreContextItem {
+  id: string;
+  kind: string;
+  title: string;
+  content: string;
+  tokens: number;
+  enabled: boolean;
+  source: string;
+  priority: number;
+}
+
+/**
+ * Trim context items to fit a token budget.
+ *
+ * Items are admitted in priority order (lowest number first); an item
+ * that does not fit on its own is skipped rather than blocking the
+ * rest. The skipped items come back disabled.
+ */
+export function applyContextBudget(
+  core: WasmCore,
+  items: CoreContextItem[],
+  maxTokens: number,
+): CoreContextItem[] {
+  return unwrap<CoreContextItem[]>(
+    core.context_apply_budget(JSON.stringify({ items, max_tokens: maxTokens })),
+    'context budget',
+  );
+}
+
+/** Estimate the token cost of a string. */
+export function estimateTokens(core: WasmCore, text: string): number {
+  return core.estimate_tokens(text);
+}
+
+// ---- backup ---------------------------------------------------------------
+
+/** One conversation inside a backup file. */
+export interface CoreBackupConversation {
+  id: string;
+  title: string;
+  created_at: number;
+  updated_at: number;
+  messages: CoreStoredMessage[];
+  tags?: string[];
+  archived?: boolean;
+  read?: boolean;
+  forked_from?: string | null;
+  forked_at_message?: number | null;
+}
+
+/** A complete backup file. */
+export interface CoreBackupEnvelope {
+  app: string;
+  version: number;
+  exported_at: number;
+  conversations: CoreBackupConversation[];
+}
+
+/** Why an import failed. */
+export type CoreImportOutcome =
+  | { Imported: { count: number; migrated: boolean } }
+  | { Corrupt: { reason: string } }
+  | { Unsupported: { version: number } };
+
+/** Build a backup envelope from conversations. */
+export function exportBackup(
+  core: WasmCore,
+  conversations: CoreConversation[],
+  nowMs?: number,
+): CoreBackupEnvelope {
+  return unwrap<CoreBackupEnvelope>(
+    core.backup_export(
+      JSON.stringify({
+        conversations,
+        ...(nowMs === undefined ? {} : { now_ms: nowMs }),
+      }),
+    ),
+    'backup export',
+  );
+}
+
+/**
+ * Parse a backup file.
+ *
+ * Returns the conversations, or the outcome that says why the file was
+ * refused.
+ */
+export function parseBackup(
+  core: WasmCore,
+  raw: string,
+): CoreConversation[] | CoreImportOutcome {
+  const parsed = JSON.parse(core.backup_parse(raw)) as {
+    Ok?: CoreConversation[];
+    Err?: CoreImportOutcome;
+  };
+  if (parsed.Err !== undefined) {
+    return parsed.Err;
+  }
+  return parsed.Ok ?? [];
+}
+
+/** Import a backup file into an existing conversation list. */
+export function importBackup(
+  core: WasmCore,
+  raw: string,
+  existing: CoreConversation[],
+  mode: 'replace' | 'merge' = 'merge',
+): {
+  outcome: CoreImportOutcome;
+  conversations: CoreConversation[];
+} {
+  return unwrap<{
+    outcome: CoreImportOutcome;
+    conversations: CoreConversation[];
+  }>(
+    core.backup_import(
+      JSON.stringify({ raw, existing, mode }),
+    ),
+    'backup import',
+  );
 }

@@ -123,3 +123,45 @@ fn providers_and_defaults_are_sane() {
     assert_eq!(defaults["provider"], "openai");
     assert_eq!(defaults["max_tokens"], 2048);
 }
+
+/// The subagent model resolution is exported to the JS hosts.
+///
+/// A `#[wasm_bindgen]` attribute that is glued to the end of a doc
+/// comment is part of the comment, not an attribute: the function
+/// compiles, the crate builds, and the binding is simply missing from
+/// the generated pkg. The JS host then fails with
+/// `TypeError: <fn> is not a function`, far away from the cause.
+///
+/// Calling the binding here is what catches it: the test would not
+/// link without the export.
+#[wasm_bindgen_test]
+fn subagent_model_resolution_is_exported() {
+    let session: Value = serde_json::from_str(&prism_wasm::agent_subagent_resolve_model(
+        "explore",
+        "session-model",
+        None,
+    ))
+    .unwrap();
+    assert_eq!(session["model"], "session-model");
+    assert_eq!(session["tier"], "session");
+
+    // Without a session model the provider default is the last tier.
+    let fallback: Value = serde_json::from_str(&prism_wasm::agent_subagent_resolve_model(
+        "bugbot",
+        "",
+        Some("provider-default".into()),
+    ))
+    .unwrap();
+    assert_eq!(fallback["model"], "provider-default");
+    assert_eq!(fallback["tier"], "provider_default");
+
+    // Nothing to resolve: the binding reports why.
+    let unresolved: Value = serde_json::from_str(&prism_wasm::agent_subagent_resolve_model(
+        "bugbot",
+        "",
+        None,
+    ))
+    .unwrap();
+    assert!(unresolved["error"].as_str().is_some(), "{unresolved}");
+}
+

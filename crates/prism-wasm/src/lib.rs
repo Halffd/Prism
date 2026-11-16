@@ -32,6 +32,16 @@ fn result_json<T: Serialize>(r: &Result<T, String>) -> String {
     }
 }
 
+/// Like `result_json`, but the error side is a structured payload
+/// rather than a string (used by the import outcome, which carries a
+/// reason or a version number).
+fn result_json_value<T: Serialize, E: Serialize>(r: &Result<T, E>) -> String {
+    match r {
+        Ok(v) => serde_json::json!({ "Ok": v }).to_string(),
+        Err(e) => serde_json::json!({ "Err": e }).to_string(),
+    }
+}
+
 /// OpenAI-compatible SSE decoder. Feed response-body bytes; collect the
 /// returned event JSON arrays; call `finish` when the stream ends.
 #[wasm_bindgen]
@@ -181,6 +191,282 @@ pub fn ollama_root_url(base_url: &str) -> String {
 #[wasm_bindgen]
 pub fn now_ms() -> u64 {
     conversations::now_ms()
+}
+
+// ---------------------------------------------------------------------------
+// Session ops: fork, overwrite, edit
+// ---------------------------------------------------------------------------
+
+/// Fork a conversation at `at_index` into a new branch.
+///
+/// Input: JSON `{"conversation": <Conversation>, "at_index": n,
+/// "new_id": "..."}`. The new id and the timestamp are supplied by the
+/// host so the result is deterministic and testable.
+///
+/// Returns JSON `{"Ok": <forked Conversation>}` /
+/// `{"Err": message}`.
+#[wasm_bindgen]
+pub fn session_fork_branch(req_json: &str) -> String {
+    #[derive(serde::Deserialize)]
+    struct Req {
+        conversation: conversations::Conversation,
+        at_index: usize,
+        new_id: String,
+        #[serde(default)]
+        now_ms: Option<u64>,
+    }
+
+    result_json(
+        &parse_req::<Req>(req_json).map(|req| {
+            let now = req.now_ms.unwrap_or_else(conversations::now_ms);
+            prism_core::session_ops::fork_branch(
+                &req.conversation,
+                req.at_index,
+                req.new_id,
+                now,
+            )
+        }),
+    )
+}
+
+/// Overwrite one message and drop the stale tail after it.
+///
+/// Input: JSON `{"conversation": <Conversation>, "at_index": n,
+/// "content": "...", "now_ms": n?}`. The conversation is mutated and
+/// returned in full.
+#[wasm_bindgen]
+pub fn session_overwrite_at(req_json: &str) -> String {
+    #[derive(serde::Deserialize)]
+    struct Req {
+        conversation: conversations::Conversation,
+        at_index: usize,
+        content: String,
+        #[serde(default)]
+        now_ms: Option<u64>,
+    }
+
+    result_json(
+        &parse_req::<Req>(req_json).map(|mut req| {
+            let now = req.now_ms.unwrap_or_else(conversations::now_ms);
+            prism_core::session_ops::overwrite_at(
+                &mut req.conversation,
+                req.at_index,
+                &req.content,
+                now,
+            );
+            req.conversation
+        }),
+    )
+}
+
+/// Replace one message's content, keeping the rest of the transcript.
+#[wasm_bindgen]
+pub fn session_edit_message(req_json: &str) -> String {
+    #[derive(serde::Deserialize)]
+    struct Req {
+        conversation: conversations::Conversation,
+        at_index: usize,
+        content: String,
+        #[serde(default)]
+        now_ms: Option<u64>,
+    }
+
+    result_json(
+        &parse_req::<Req>(req_json).map(|mut req| {
+            let now = req.now_ms.unwrap_or_else(conversations::now_ms);
+            prism_core::session_ops::edit_message(
+                &mut req.conversation,
+                req.at_index,
+                &req.content,
+                now,
+            );
+            req.conversation
+        }),
+    )
+}
+
+/// Set a message's read flag. Returns the conversation.
+#[wasm_bindgen]
+pub fn session_set_message_read(req_json: &str) -> String {
+    #[derive(serde::Deserialize)]
+    struct Req {
+        conversation: conversations::Conversation,
+        at_index: usize,
+        read: bool,
+    }
+
+    result_json(
+        &parse_req::<Req>(req_json).map(|mut req| {
+            prism_core::session_ops::set_message_read(
+                &mut req.conversation,
+                req.at_index,
+                req.read,
+            );
+            req.conversation
+        }),
+    )
+}
+
+/// Add or remove a tag on one message. Returns the conversation.
+///
+/// `remove: true` removes the tag instead of adding it.
+#[wasm_bindgen]
+pub fn session_set_message_tag(req_json: &str) -> String {
+    #[derive(serde::Deserialize)]
+    struct Req {
+        conversation: conversations::Conversation,
+        at_index: usize,
+        tag: String,
+        #[serde(default)]
+        remove: bool,
+    }
+
+    result_json(
+        &parse_req::<Req>(req_json).map(|mut req| {
+            if req.remove {
+                prism_core::session_ops::remove_message_tag(
+                    &mut req.conversation,
+                    req.at_index,
+                    &req.tag,
+                );
+            } else {
+                prism_core::session_ops::add_message_tag(
+                    &mut req.conversation,
+                    req.at_index,
+                    &req.tag,
+                );
+            }
+            req.conversation
+        }),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------------
+
+/// Search messages across conversations.
+///
+/// Input: JSON `{"conversations": [<Conversation>...], "query": <SearchQuery>}`.
+/// Returns JSON `{"Ok": [<SearchHit>...]}` / `{"Err": message}`.
+#[wasm_bindgen]
+pub fn search_messages(req_json: &str) -> String {
+    #[derive(serde::Deserialize)]
+    struct Req {
+        conversations: Vec<conversations::Conversation>,
+        query: prism_core::search::SearchQuery,
+    }
+
+    result_json(
+        &parse_req::<Req>(req_json)
+            .map(|req| prism_core::search::search(&req.conversations, &req.query)),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Context budget
+// ---------------------------------------------------------------------------
+
+/// Trim context items to fit a token budget.
+///
+/// Input: JSON `{"items": [<ContextItem>...], "max_tokens": n}`.
+/// Returns JSON `{"Ok": [<ContextItem>...]}` / `{"Err": message}`.
+#[wasm_bindgen]
+pub fn context_apply_budget(req_json: &str) -> String {
+    #[derive(serde::Deserialize)]
+    struct Req {
+        items: Vec<prism_core::context::ContextItem>,
+        max_tokens: usize,
+    }
+
+    result_json(
+        &parse_req::<Req>(req_json)
+            .map(|req| prism_core::context::context_budget(&req.items, req.max_tokens)),
+    )
+}
+
+/// Estimate the token cost of a string.
+#[wasm_bindgen]
+pub fn estimate_tokens(text: &str) -> usize {
+    prism_core::context::estimate_tokens(text)
+}
+
+// ---------------------------------------------------------------------------
+// Backup: export / import
+// ---------------------------------------------------------------------------
+
+/// Build a backup envelope from conversations.
+///
+/// Input: JSON `{"conversations": [...], "now_ms": n?}`.
+/// Returns JSON `{"Ok": <BackupEnvelope>}` / `{"Err": message}`.
+#[wasm_bindgen]
+pub fn backup_export(req_json: &str) -> String {
+    #[derive(serde::Deserialize)]
+    struct Req {
+        conversations: Vec<conversations::Conversation>,
+        #[serde(default)]
+        now_ms: Option<u64>,
+    }
+
+    result_json(
+        &parse_req::<Req>(req_json).map(|req| {
+            prism_core::backup::export_backup(
+                &req.conversations,
+                req.now_ms.unwrap_or_else(conversations::now_ms),
+            )
+        }),
+    )
+}
+
+/// Parse a backup file.
+///
+/// Returns JSON `{"Ok": [<Conversation>...]}` on success, or
+/// `{"Err": {"Corrupt": {"reason": "..."}}}` /
+/// `{"Err": {"Unsupported": {"version": n}}}` on failure.
+#[wasm_bindgen]
+pub fn backup_parse(raw: &str) -> String {
+    let outcome: Result<Vec<conversations::Conversation>, prism_core::backup::ImportOutcome> =
+        prism_core::backup::parse_backup(raw);
+    result_json_value(&outcome)
+}
+/// Import a backup file into an existing conversation list.
+///
+/// Input: JSON `{"raw": "<file text>", "existing": [<Conversation>...],
+/// "mode": "replace" | "merge"}`. Returns the merged list plus the
+/// outcome.
+#[wasm_bindgen]
+pub fn backup_import(req_json: &str) -> String {
+    #[derive(serde::Deserialize)]
+    struct Req {
+        raw: String,
+        #[serde(default)]
+        existing: Vec<conversations::Conversation>,
+        #[serde(default = "merge_mode")]
+        mode: prism_core::backup::ImportMode,
+    }
+
+    fn merge_mode() -> prism_core::backup::ImportMode {
+        prism_core::backup::ImportMode::Merge
+    }
+
+    // The import itself can fail with a structured outcome (corrupt
+    // file, unsupported version); only the JSON parse of the request
+    // fails with a plain message.
+    type ImportResult = (
+        Result<prism_core::backup::ImportOutcome, prism_core::backup::ImportOutcome>,
+        Vec<conversations::Conversation>,
+    );
+
+    let outcome: Result<ImportResult, String> = parse_req::<Req>(req_json).map(|mut req| {
+        let imported = prism_core::backup::import_backup(
+            &req.raw,
+            &mut req.existing,
+            req.mode,
+        );
+        (imported, req.existing)
+    });
+
+    result_json_value(&outcome)
 }
 
 // ---------------------------------------------------------------------------
@@ -493,7 +779,8 @@ pub fn agent_subagents_list() -> String {
 /// Forced-model resolution for one subagent — the daemon's documented
 /// order: the spec's `forced_model`, then the session host model, then
 /// the provider default. Returns `{model, tier: subagent_forced|session|
-/// provider_default}` or JSON error when nothing resolves.#[wasm_bindgen]
+/// provider_default}` or JSON error when nothing resolves.
+#[wasm_bindgen]
 pub fn agent_subagent_resolve_model(name: &str, session_model: &str, provider_default: Option<String>) -> String {
     let reg = prism_core::subagents::SubagentRegistry::default();
     match reg.resolve_model(name, session_model, provider_default) {

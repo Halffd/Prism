@@ -447,3 +447,24 @@
     }
   }
 }
+
+// Local backup settings: status, snapshot list and restore actions.
+.backup-settings {
+  .backup-snapshot-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+    margin-top: var(--spacing-xs);
+  }
+
+  .backup-snapshot-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border: 1px solid var(--ghost-border-primary);
+    border-radius: var(--radius-lg);
+    font-size: var(--font-sm);
+  }
+}

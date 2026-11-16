@@ -67,6 +67,10 @@
     flex: 1;
     overflow-y: auto;
     padding: var(--spacing-lg) var(--spacing-md);
+    // The message jumper floats at the right edge of the list; the
+    // padding keeps it clear of the message text.
+    padding-right: calc(var(--spacing-md) + 44px);
+    position: relative;
     background: var(--surface);
 
     .empty-state {

@@ -235,6 +235,10 @@ impl SyncEnvelope {
                             role,
                             content,
                             thinking,
+                            id: m.id.clone(),
+                            tags: Vec::new(),
+                            read: true,
+                            edited_at: None,
                         }
                     })
                     .collect();
@@ -244,6 +248,11 @@ impl SyncEnvelope {
                     created_at: c.created_at,
                     updated_at: c.updated_at,
                     messages,
+                    tags: Vec::new(),
+                    archived: false,
+                    read: true,
+                    forked_from: None,
+                    forked_at_message: None,
                 }
             })
             .collect()

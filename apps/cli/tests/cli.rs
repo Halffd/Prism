@@ -13,7 +13,6 @@ use prism_core::client::StreamEvent;
 use prism_core::host;
 use prism_core::settings::{Connection, Settings};
 use std::sync::mpsc;
-use std::sync::Mutex;
 
 fn env_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
@@ -413,4 +412,152 @@ fn agent_gate_follows_the_session_not_the_primary_mode() {
     // Revoke tools with /cap: the gate closes again.
     type_line(&mut app, &tx, "/cap tools off");
     assert!(!app.session.feature(prism_core::modes::Feature::Tools));
+}
+
+// ---------------------------------------------------------------------------
+// The non-interactive feature commands (search, tag, archive, fork,
+// export, import).
+// ---------------------------------------------------------------------------
+
+/// A conversation stored in the temp config dir, with the given content.
+fn store_conversation(id: &str, title: &str, contents: &[(&str, &str)]) -> String {
+    let messages = contents
+        .iter()
+        .map(|(role, content)| prism_core::conversations::StoredMessage {
+            role: (*role).into(),
+            content: (*content).into(),
+            thinking: None,
+            id: None,
+            tags: Vec::new(),
+            read: true,
+            edited_at: None,
+        })
+        .collect();
+    let conv = prism_core::conversations::Conversation {
+        id: id.into(),
+        title: title.into(),
+        created_at: 1,
+        updated_at: 2,
+        messages,
+        tags: Vec::new(),
+        archived: false,
+        read: true,
+        forked_from: None,
+        forked_at_message: None,
+    };
+    host::save_conversation(&conv).unwrap();
+    conv.id
+}
+
+fn args(list: &[&str]) -> Vec<String> {
+    list.iter().map(|s| (*s).to_string()).collect()
+}
+
+#[test]
+fn search_finds_a_message_across_chats() {
+    let (_g, _dir, _app, _tx) = fresh_app("cli-search");
+    store_conversation(
+        "aaaa1111",
+        "First",
+        &[("user", "where is the needle"), ("assistant", "not here")],
+    );
+    store_conversation(
+        "bbbb2222",
+        "Second",
+        &[("user", "nothing to see"), ("assistant", "the needle is in here")],
+    );
+
+    let hits = prism_core::search::search(
+        &prism_cli::features::load_conversations_for_test(),
+        &prism_core::search::SearchQuery {
+            text: "needle".into(),
+            ..Default::default()
+        },
+    );
+    assert_eq!(hits.len(), 2);
+    assert!(hits.iter().any(|h| h.conversation_id == "bbbb2222"));
+}
+
+#[test]
+fn tag_and_archive_persist_to_the_conversation_file() {
+    let (_g, _dir, _app, _tx) = fresh_app("cli-tag");
+    let id = store_conversation("cccc3333", "Third", &[("user", "hello")]);
+
+    prism_cli::features::tag_cli(&args(&[&id, "work"])).unwrap();
+    let conv = host::load_conversation(&id).unwrap();
+    assert_eq!(conv.tags, vec!["work".to_string()]);
+
+    prism_cli::features::archive_cli(&args(&[&id]), true).unwrap();
+    let conv = host::load_conversation(&id).unwrap();
+    assert!(conv.archived);
+
+    prism_cli::features::untag_cli(&args(&[&id, "work"])).unwrap();
+    let conv = host::load_conversation(&id).unwrap();
+    assert!(conv.tags.is_empty());
+}
+
+#[test]
+fn fork_creates_a_branch_that_links_back_to_the_source() {
+    let (_g, _dir, _app, _tx) = fresh_app("cli-fork");
+    let id = store_conversation(
+        "dddd4444",
+        "Fourth",
+        &[("user", "one"), ("assistant", "two"), ("user", "three")],
+    );
+
+    prism_cli::features::fork_cli(&args(&[&id, "1"])).unwrap();
+
+    let metas = host::list_conversations();
+    let fork = metas
+        .iter()
+        .find(|m| m.id != id)
+        .expect("a fork was created");
+    let fork_conv = host::load_conversation(&fork.id).unwrap();
+    assert_eq!(fork_conv.messages.len(), 2);
+    assert_eq!(fork_conv.forked_from.as_deref(), Some(id.as_str()));
+    assert_eq!(fork_conv.forked_at_message, Some(1));
+}
+
+#[test]
+fn export_then_import_roundtrips_the_chats() {
+    let (_g, _dir, _app, _tx) = fresh_app("cli-backup");
+    store_conversation("eeee5555", "Fifth", &[("user", "hello"), ("assistant", "hi")]);
+
+    let path = std::env::temp_dir().join(format!(
+        "prism-cli-backup-{}.json",
+        std::process::id()
+    ));
+    let path_str = path.to_string_lossy().to_string();
+
+    prism_cli::features::export_cli(&args(&[&path_str])).unwrap();
+    assert!(path.exists());
+
+    // Remove the chat, then import it back.
+    host::delete_conversation("eeee5555").unwrap();
+    assert!(host::list_conversations().is_empty());
+
+    prism_cli::features::import_cli(&args(&[&path_str])).unwrap();
+    let restored = host::load_conversation("eeee5555").expect("the chat came back");
+    assert_eq!(restored.messages.len(), 2);
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn import_refuses_a_file_that_is_not_a_prism_backup() {
+    let (_g, _dir, _app, _tx) = fresh_app("cli-bad-backup");
+    let path = std::env::temp_dir().join(format!(
+        "prism-cli-not-a-backup-{}.json",
+        std::process::id()
+    ));
+    std::fs::write(&path, r#"{"hello":"world"}"#).unwrap();
+
+    let err = prism_cli::features::import_cli(&args(&[&path.to_string_lossy()]))
+        .expect_err("a non-Prism file is refused");
+    assert!(
+        format!("{err}").contains("import failed"),
+        "unexpected error: {err}"
+    );
+
+    let _ = std::fs::remove_file(&path);
 }

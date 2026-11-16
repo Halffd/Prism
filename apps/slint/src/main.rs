@@ -6,6 +6,7 @@
 //! requests spawn on the core's shared runtime and report back over
 //! std channels drained by a 50 ms UI timer.
 
+mod features;
 mod shared;
 
 fn main() {

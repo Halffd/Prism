@@ -367,11 +367,116 @@ Manifest has `"type": "module"` (ESM dynamic import works) and
 `wasm-unsafe-eval` CSP; the pkg is copied to both the dist root (SW
 chunk) and `assets/` (hashed page chunks) by the vite build.
 
+## Session features: tags, fork, search, context, backup (2026-11-14)
+
+**DONE** — all six areas shipped across the core, WASM, Slint, CLI and
+the extension.
+
+Six feature areas landed on top of the single core. The rules live in
+`prism-core`; every surface is a thin shell over them.
+
+### Data model
+
+`StoredMessage` and `Conversation` gained optional fields, all
+`#[serde(default)]` so every file written before this change still
+loads:
+
+| Field | On | Meaning |
+|---|---|---|
+| `id` | message | stable identity for edits and forks |
+| `tags` | message, conversation | user labels |
+| `read` | message, conversation | `false` = unread; missing means read |
+| `edited_at` | message | when the content was last edited |
+| `archived` | conversation | hidden from the default list, still searchable |
+| `forked_from` | conversation | the conversation it branched from |
+| `forked_at_message` | conversation | the index it branched at |
+
+`read` defaults to *true*, not false: treating old files as unread
+would flood the sidebar with badges on first upgrade.
+
+### Core modules
+
+- **`prism_core::session_ops`** — `fork_branch`, `overwrite_at`,
+  `edit_message`, `truncate_after`, plus per-message tag and read
+  toggles. Pure functions over data: no I/O, no clock of their own.
+- **`prism_core::search`** — scoped search over conversations. Filters:
+  text (literal or regex), case sensitivity, role, tag, unread-only,
+  archived, file/URL. Sorts: newest, oldest, title. A regex that does
+  not compile falls back to a literal match rather than erroring.
+- **`prism_core::context`** — `estimate_tokens` (4 chars/token, CJK
+  counted per character) and `context_budget`, which admits items in
+  priority order until the budget is spent. An oversized item is
+  skipped, not fatal.
+- **`prism_core::backup`** — a versioned envelope (`app: "prism"`,
+  `version: 1`). Import is strict: a non-Prism file is `Corrupt`, a
+  file from a newer Prism is `Unsupported`. Both carry a reason the
+  user can read.
+
+### Surfaces
+
+- **Slint** (`apps/slint/src/features.rs`): search panel, per-message
+  fork / edit / read / tag, per-session read / archive / tag, the
+  context panel with a token budget, and import / export.
+- **CLI** (`apps/cli/src/features.rs`): `prism chats`, `prism search`,
+  `prism tag` / `untag`, `prism archive` / `unarchive`, `prism read` /
+  `unread`, `prism fork`, `prism export` / `import`.
+- **Extension**: the chat page gets the message jumper, per-message
+  actions, the context panel and the search panel; the popup gets the
+  session list with tag / read / archive filters and the import /
+  export and backup controls.
+
+### The extension's TypeScript mirror
+
+The extension keeps its own TypeScript implementation of the pure
+session rules in `apps/extension/src/chat/chat-features.ts`
+(`forkMessages`, `overwriteMessage`, `editMessage`, `addTag`,
+`removeTag`, `searchChatSessions`, `sortSearchHits`, `estimateTokens`,
+`contextBudget`). The rules are the same as the core's — the same
+priority-order budget admission, the same 4-characters-per-token
+estimate with CJK counted per character, the same tail-dropping
+overwrite.
+
+The duplication is deliberate and narrow: these functions are pure data
+transformations over the extension's own `Message` type, and the
+extension's chat pages call them synchronously while rendering. Routing
+every message edit through a WASM call would add an async boundary to
+a hot render path for no gain.
+
+The TS file filter is *wider* than the core's: it matches the
+extension's richer `ContextData` (url, title, appName, metadata),
+while the core matches the persisted message content, because the
+core's `StoredMessage` does not carry the extension's context shape.
+That difference is a consequence of the persisted shapes, not a
+divergence in the rules.
+
+### Offline model selection
+
+The provider list comes from the shared catalogue
+(`apps/extension/src/popup/provider-catalog.ts`), not a hand-kept
+copy of `<option>` elements. Model lists are cached per provider in
+`chrome.storage.local`; when the network fetch fails the cached list
+is used, and the provider's defaults are the last resort. Selecting a
+provider and model therefore works signed-out and offline. The Prism
+API sync buttons are disabled (not broken) when the user is signed out
+or the API is unreachable.
+
 ## Environment realities
 
 - This dev box is headless: verification bar is compile + tests
   (cargo test, wasm-pack test). GUI behavior needs a display; iOS
   needs a Mac.
+- The core's wasm pkg (`libs/ai-core/src/wasm-pkg-{node,web}/`) is a
+  build artifact and is gitignored. Every JS surface loads the core
+  from it, so CI builds it before the JS jobs: the `js` job builds
+  both the node and the web pkg, the `firefox` job builds the web pkg
+  that the extension's vite build copies into the bundle. Without
+  that step the JS jobs have no core to load.
+- A `#[wasm_bindgen]` attribute that is glued to the end of a doc
+  comment is part of the comment, not an attribute: the function is
+  silently not exported. The symptom is a `TypeError: <fn> is not a
+  function` in the JS host, far from the Rust that caused it. The
+  binding for the subagent model resolution was missing this way; the
+  wasm conformance test now calls it so the export is checked.
 - If WASM-in-extension ever proves unworkable (CSP is a one-line
   manifest change; the extension already calls providers from page
   context, bypassing the service worker), the fallback is a sanctioned

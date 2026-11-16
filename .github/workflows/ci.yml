@@ -125,6 +125,27 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The extension, web and TUI surfaces load the core from the
+      # wasm pkg under libs/ai-core/src/. That directory is a build
+      # artifact (gitignored), so it has to be built here or every
+      # surface that reads the core has nothing to load.
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      - name: Build core wasm (web)
+        run: wasm-pack build --target web --out-dir ../../libs/ai-core/src/wasm-pkg-web crates/prism-wasm
+
+      - name: Build core wasm (node)
+        run: wasm-pack build --target nodejs --out-dir ../../libs/ai-core/src/wasm-pkg-node crates/prism-wasm
+
       - name: Typecheck
         run: npx nx run-many -t typecheck
 
@@ -155,6 +176,24 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # The extension loads the core from the wasm pkg under
+      # libs/ai-core/src/, which is a gitignored build artifact. The
+      # extension's vite build copies it into the bundle, so it has to
+      # exist before the build runs.
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      - name: Build core wasm (web)
+        run: wasm-pack build --target web --out-dir ../../libs/ai-core/src/wasm-pkg-web crates/prism-wasm
 
       - name: Build extension
         run: npx nx build @prism/extension

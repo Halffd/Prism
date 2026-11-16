@@ -21,10 +21,12 @@
 //! the spec.
 
 pub mod agent;
+pub mod backup;
 pub mod cards;
 pub mod catalog;
 pub mod client;
 pub mod commands;
+pub mod context;
 pub mod conversations;
 #[cfg(feature = "native-transport")]
 pub mod host;
@@ -38,8 +40,10 @@ pub mod prompt_history;
 pub mod prompt_picker;
 pub mod providers;
 pub mod sandbox;
-pub mod settings;
+pub mod search;
 pub mod session;
+pub mod session_ops;
+pub mod settings;
 pub mod storage;
 pub mod subagents;
 pub mod sync;

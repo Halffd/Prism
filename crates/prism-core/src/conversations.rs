@@ -21,6 +21,26 @@ pub struct StoredMessage {
     pub content: String,
     #[serde(default)]
     pub thinking: Option<String>,
+    /// Stable id, assigned on first save. Used as the anchor for
+    /// forking, editing and per-message state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// User-assigned labels on this message.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    /// False = unread. `#[serde(default = "default_read")]` keeps older
+    /// files readable: everything that was already stored was seen.
+    #[serde(default = "default_read")]
+    pub read: bool,
+    /// Unix epoch millis of the last content edit, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edited_at: Option<u64>,
+}
+
+/// Older files have no `read` field; treating them as read keeps the
+/// sidebar from flooding the user with unread badges on first upgrade.
+fn default_read() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -32,6 +52,21 @@ pub struct Conversation {
     /// Unix epoch milliseconds; bumped on every save.
     pub updated_at: u64,
     pub messages: Vec<StoredMessage>,
+    /// User-assigned labels on the whole conversation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    /// Archived conversations stay searchable but leave the default list.
+    #[serde(default)]
+    pub archived: bool,
+    /// False = unread. Older files default to read.
+    #[serde(default = "default_read")]
+    pub read: bool,
+    /// Id of the conversation this one was forked from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forked_from: Option<String>,
+    /// Index in the source conversation the fork branched at.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forked_at_message: Option<usize>,
 }
 
 /// Listing entry (no message bodies) for the sidebar.
@@ -40,6 +75,9 @@ pub struct ConversationMeta {
     pub id: String,
     pub title: String,
     pub updated_at: u64,
+    pub tags: Vec<String>,
+    pub archived: bool,
+    pub read: bool,
 }
 
 pub fn now_ms() -> u64 {
@@ -56,6 +94,18 @@ pub fn new_id() -> String {
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     format!("{nanos:x}")
+}
+
+/// Give every message without an id one. Called before saving so a
+/// message keeps its identity across edits, forks and re-imports.
+pub fn ensure_message_ids(conv: &mut Conversation) {
+    for (i, msg) in conv.messages.iter_mut().enumerate() {
+        if msg.id.is_none() {
+            // The index is mixed in so two messages saved in the same
+            // nanosecond still get different ids.
+            msg.id = Some(format!("{}-{i}", new_id()));
+        }
+    }
 }
 
 /// Auto-title: first user message, truncated on a char boundary.
@@ -151,6 +201,9 @@ pub fn list_conversations(storage: &dyn Storage, dir: &Path) -> Vec<Conversation
             id: conv.id,
             title: conv.title,
             updated_at: conv.updated_at,
+            tags: conv.tags,
+            archived: conv.archived,
+            read: conv.read,
         });
     }
     metas.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
@@ -167,6 +220,10 @@ mod tests {
             role: role.into(),
             content: content.into(),
             thinking: None,
+            id: None,
+            tags: Vec::new(),
+            read: true,
+            edited_at: None,
         }
     }
 
@@ -182,8 +239,17 @@ mod tests {
                     role: "assistant".into(),
                     content: "hi there".into(),
                     thinking: Some("hm".into()),
+                    id: None,
+                    tags: Vec::new(),
+                    read: true,
+                    edited_at: None,
                 },
             ],
+            tags: Vec::new(),
+            archived: false,
+            read: true,
+            forked_from: None,
+            forked_at_message: None,
         }
     }
 

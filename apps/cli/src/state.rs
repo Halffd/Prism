@@ -90,6 +90,11 @@ impl App {
                 created_at: conversations::now_ms(),
                 updated_at: conversations::now_ms(),
                 messages: Vec::new(),
+                tags: Vec::new(),
+                archived: false,
+                read: true,
+                forked_from: None,
+                forked_at_message: None,
             },
             metas: host::list_conversations(),
             selected: 0,
@@ -208,6 +213,10 @@ impl App {
             role: role.into(),
             content: content.into(),
             thinking: None,
+            id: None,
+            tags: Vec::new(),
+            read: true,
+            edited_at: None,
         });
         self.invalidate_search();
         self.save();
@@ -230,6 +239,9 @@ impl App {
             id: self.conv.id.clone(),
             title: self.conv.title.clone(),
             updated_at: self.conv.updated_at,
+            tags: self.conv.tags.clone(),
+            archived: self.conv.archived,
+            read: self.conv.read,
         };
         if let Some(pos) = self.metas.iter().position(|m| m.id == meta.id) {
             self.metas[pos] = meta;
@@ -300,11 +312,19 @@ impl App {
                 role: "user".into(),
                 content: self.last_agent_task.clone(),
                 thinking: None,
+                id: None,
+                tags: Vec::new(),
+                read: true,
+                edited_at: None,
             });
             self.conv.messages.push(StoredMessage {
                 role: "assistant".into(),
                 content: result.answer.clone(),
                 thinking: None,
+                id: None,
+                tags: Vec::new(),
+                read: true,
+                edited_at: None,
             });
             self.save();
             self.status = "agent finished".into();
@@ -401,6 +421,10 @@ impl App {
                     role: "assistant".into(),
                     content: String::new(),
                     thinking: None,
+                    id: None,
+                    tags: Vec::new(),
+                    read: true,
+                    edited_at: None,
                 });
                 self.streaming = Some(StreamState {
                     aborted: false,
@@ -448,6 +472,11 @@ impl App {
                     created_at: conversations::now_ms(),
                     updated_at: conversations::now_ms(),
                     messages: Vec::new(),
+                    tags: Vec::new(),
+                    archived: false,
+                    read: true,
+                    forked_from: None,
+                    forked_at_message: None,
                 };
                 self.search = None;
                 self.matches.clear();
@@ -485,6 +514,11 @@ impl App {
                                         created_at: conversations::now_ms(),
                                         updated_at: conversations::now_ms(),
                                         messages: Vec::new(),
+                                        tags: Vec::new(),
+                                        archived: false,
+                                        read: true,
+                                        forked_from: None,
+                                        forked_at_message: None,
                                     };
                                     self.save();
                                 }
@@ -888,6 +922,11 @@ impl App {
                     created_at: conversations::now_ms(),
                     updated_at: conversations::now_ms(),
                     messages: Vec::new(),
+                    tags: Vec::new(),
+                    archived: false,
+                    read: true,
+                    forked_from: None,
+                    forked_at_message: None,
                 };
                 self.search = None;
                 self.matches.clear();

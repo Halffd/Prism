@@ -7,11 +7,31 @@ import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { UnifiedAIClient } from '@prism/api-client';
 import type { ChatSession, PromptShortcut } from '@prism/shared-types';
 import { ImageGenerationService } from '@prism/image-gen';
-import type { Message, ContextData, AIConfig } from '@prism/shared-types';
+import type {
+  Message,
+  ContextData,
+  AIConfig,
+  SessionContextItem,
+} from '@prism/shared-types';
+import { MessageJumper } from './MessageJumper';
+import { MessageActions } from './MessageActions';
+import { ContextPanel } from './ContextPanel';
+import { SearchPanel } from './SearchPanel';
+import {
+  addTag,
+  contextItemsFromMessages,
+  forkMessages,
+  forkTitle,
+  overwriteMessage as overwriteMessageContent,
+  removeTag,
+  withNewMessageIds,
+  type ChatSessionView,
+} from './chat-features';
 import { VoiceInput } from '../popup/VoiceInput';
 import { MediaPanel } from '../components/MediaPanel';
 import { ErrorModalHost } from '../components/ErrorModal';
 import '../popup/Popup.scss'; // Reuse popup styles
+import './ChatFeatures.scss';
 
 // Initialize with default settings - will be overridden by stored settings
 const defaultAIConfig: AIConfig = {
@@ -95,7 +115,15 @@ export function StandaloneChatPage() {
 
   const [historyMissing, setHistoryMissing] = useState(false);
 
+  // Message navigation and session features.
+  const [currentMessageIndex, setCurrentMessageIndex] = useState(0);
+  const [showMessageSearch, setShowMessageSearch] = useState(false);
+  const [showContextPanel, setShowContextPanel] = useState(false);
+  const [contextItems, setContextItems] = useState<SessionContextItem[]>([]);
+  const [contextTokenBudget, setContextTokenBudget] = useState(4000);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // Load AI configuration from localStorage (since we're not in extension context)
@@ -365,6 +393,170 @@ export function StandaloneChatPage() {
       console.error('Failed to save chat to database:', error);
     }
   };
+
+  /**
+   * Scrolls to a message and marks it read.
+   */
+  const jumpToMessage = async (index: number) => {
+    if (index < 0 || index >= messages.length) {
+      return;
+    }
+    setCurrentMessageIndex(index);
+    const container = messagesContainerRef.current;
+    const element = container?.querySelector<HTMLElement>(
+      `[data-message-index="${index}"]`,
+    );
+    element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const target = messages[index];
+    if (target && target.read === false) {
+      const updated = messages.map((message, position) =>
+        position === index ? { ...message, read: true } : message,
+      );
+      setMessages(updated);
+      await saveCurrentChatToDB(updated);
+    }
+  };
+
+  /** Marks a message read or unread and stores the change. */
+  const toggleMessageRead = async (message: Message) => {
+    const index = messages.findIndex((entry) => entry.id === message.id);
+    if (index === -1) {
+      return;
+    }
+    const updated = messages.map((entry, position) =>
+      position === index ? { ...entry, read: entry.read === false } : entry,
+    );
+    setMessages(updated);
+    await saveCurrentChatToDB(updated);
+  };
+
+  /** Adds a tag to a message, or removes it when it is already there. */
+  const setMessageTag = async (message: Message, tag: string) => {
+    const index = messages.findIndex((entry) => entry.id === message.id);
+    if (index === -1) {
+      return;
+    }
+    const current = messages[index];
+    const hasTag = (current.tags ?? []).some(
+      (entry) => entry.toLowerCase() === tag.toLowerCase(),
+    );
+    const next = hasTag ? removeTag(current, tag) : addTag(current, tag);
+    const updated = messages.map((entry, position) =>
+      position === index ? next : entry,
+    );
+    setMessages(updated);
+    await saveCurrentChatToDB(updated);
+  };
+
+  /**
+   * Forks the conversation into a new session and opens it.
+   */
+  const forkConversation = async (index: number) => {
+    if (index < 0 || index >= messages.length) {
+      return;
+    }
+    const { messages: forkedMessages, atMessage } = forkMessages(messages, index);
+    const newSessionId = `session_fork_${Date.now()}`;
+    // The transcript is keyed by the message id, so the copies get their
+    // own ids instead of overwriting the source messages.
+    const forked = withNewMessageIds(forkedMessages, newSessionId);
+    const sourceTitle =
+      sessions.find((session) => session.id === currentSessionId)?.title ||
+      'Chat';
+    try {
+      localStorage.setItem(
+        `chatHistory_${newSessionId}`,
+        JSON.stringify(forked),
+      );
+      const now = Date.now();
+      const updatedSessions = [
+        ...sessions,
+        {
+          id: newSessionId,
+          userId: 'standalone-user',
+          title: forkTitle(sourceTitle),
+          messages: forked,
+          createdAt: now,
+          updatedAt: now,
+          forkedFrom: currentSessionId,
+          forkedAtMessage: atMessage,
+          read: false,
+          archived: false,
+        },
+      ];
+      setSessions(updatedSessions);
+      localStorage.setItem('chatSessions', JSON.stringify(updatedSessions));
+      setCurrentSessionId(newSessionId);
+      setMessages(forked);
+      setCurrentMessageIndex(atMessage);
+    } catch (error) {
+      console.error('Failed to fork conversation:', error);
+    }
+  };
+
+  /**
+   * Replaces the content of a message in place and stores the change.
+   *
+   * The messages after it are dropped: they answered the old text, so
+   * they are stale after the replacement. This is the same operation as
+   * the core's `overwrite_at`.
+   */
+  const overwriteMessage = async (
+    message: Message,
+    index: number,
+    content: string,
+  ) => {
+    const updated = overwriteMessageContent(messages, index, content);
+    setMessages(updated);
+    await saveCurrentChatToDB(updated);
+  };
+
+  /** Stores the context items of the current session. */
+  const persistContextItems = (items: SessionContextItem[]) => {
+    setContextItems(items);
+    try {
+      const updatedSessions = sessions.map((session) =>
+        session.id === currentSessionId
+          ? { ...session, contextItems: items, updatedAt: Date.now() }
+          : session,
+      );
+      setSessions(updatedSessions);
+      localStorage.setItem('chatSessions', JSON.stringify(updatedSessions));
+    } catch (error) {
+      console.error('Failed to save context items:', error);
+    }
+  };
+
+  /** Reads the context items of the current session. */
+  const loadContextItems = () => {
+    const stored = sessions.find((session) => session.id === currentSessionId);
+    const known = stored?.contextItems ?? [];
+    setContextItems(contextItemsFromMessages(messages, known));
+  };
+
+  /** Builds the session views the search panel searches. */
+  const searchableSessions = (): ChatSessionView[] =>
+    sessions.map((session) => ({
+      id: session.id,
+      title: session.title ?? 'Untitled Chat',
+      updatedAt: session.updatedAt,
+      archived: session.archived,
+      tags: session.tags,
+      read: session.read,
+      forkedFrom: session.forkedFrom,
+      forkedAtMessage: session.forkedAtMessage,
+      messages:
+        session.id === currentSessionId
+          ? messages
+          : (() => {
+              try {
+                const stored = localStorage.getItem(`chatHistory_${session.id}`);
+                return stored ? (JSON.parse(stored) as Message[]) : [];
+              } catch {
+                return [];
+              }
+            })(),
+    }));
 
   const switchToSession = async (sessionId: string) => {
     setCurrentSessionId(sessionId);
@@ -1080,6 +1272,27 @@ export function StandaloneChatPage() {
             </select>
           )}
 
+          <button
+            onClick={() => setShowMessageSearch((open) => !open)}
+            className="search-messages-btn"
+            title="Search messages"
+            aria-label="Search messages"
+          >
+            ⌕
+          </button>
+          <button
+            onClick={() => {
+              setShowContextPanel((open) => !open);
+              if (!showContextPanel) {
+                loadContextItems();
+              }
+            }}
+            className="context-panel-btn"
+            title="Session context"
+            aria-label="Session context"
+          >
+            🗎
+          </button>
           <button onClick={() => setShowMenu(true)} className="menu-btn">
             📋
           </button>
@@ -1093,19 +1306,23 @@ export function StandaloneChatPage() {
       </div>
 
       <div className="popup-body">
-        <div className="messages-container">
+        <div className="messages-container" ref={messagesContainerRef}>
+          <MessageJumper
+            messages={messages}
+            currentIndex={currentMessageIndex}
+            onJump={(index) => void jumpToMessage(index)}
+            scrollRef={messagesContainerRef}
+          />
           {messages.length === 0 ? (
             <div className="empty-state">
               <p>👋 Start a new conversation!</p>
               <p>Ask anything and I'll help you find answers.</p>
             </div>
           ) : (
-            messages.map((msg) => {
+            messages.map((msg, index) => {
               const currentMsgDate = new Date(msg.timestamp);
               const previousMsgDate =
-                messages.indexOf(msg) > 0
-                  ? new Date(messages[messages.indexOf(msg) - 1].timestamp)
-                  : null;
+                index > 0 ? new Date(messages[index - 1].timestamp) : null;
               const showDateSeparator =
                 !previousMsgDate ||
                 currentMsgDate.toDateString() !==
@@ -1147,7 +1364,10 @@ export function StandaloneChatPage() {
                     </div>
                   )}
                   <div
-                    className={`message ${msg.role === 'user' ? 'user' : 'assistant'}`}
+                    className={`message ${msg.role === 'user' ? 'user' : 'assistant'}${
+                      msg.read === false ? ' unread' : ''
+                    }`}
+                    data-message-index={index}
                   >
                     <div className="message-header">
                       <div className="timestamp-container">
@@ -1180,12 +1400,10 @@ export function StandaloneChatPage() {
                         )}
                       </div>
                     </div>
-                    {messages.indexOf(msg) > 0 && (
+                    {index > 0 && (
                       <div className="time-since-previous">
                         {Math.floor(
-                          (msg.timestamp -
-                            messages[messages.indexOf(msg) - 1].timestamp) /
-                            60000,
+                          (msg.timestamp - messages[index - 1].timestamp) / 60000,
                         )}
                         m after previous
                       </div>
@@ -1278,6 +1496,20 @@ export function StandaloneChatPage() {
                         🔗 {msg.context.title || msg.context.url}
                       </div>
                     )}
+                    <MessageActions
+                      message={msg}
+                      index={index}
+                      onToggleRead={(message) => void toggleMessageRead(message)}
+                      onSetTag={(message, tag) =>
+                        void setMessageTag(message, tag)
+                      }
+                      onFork={(_message, messageIndex) =>
+                        void forkConversation(messageIndex)
+                      }
+                      onOverwrite={(message, messageIndex, content) =>
+                        void overwriteMessage(message, messageIndex, content)
+                      }
+                    />
                   </div>
                 </React.Fragment>
               );
@@ -1286,6 +1518,44 @@ export function StandaloneChatPage() {
 
           <div ref={messagesEndRef} />
         </div>
+
+        {showContextPanel ? (
+          <ContextPanel
+            items={contextItems}
+            budget={contextTokenBudget}
+            onBudgetChange={setContextTokenBudget}
+            onToggle={(id) => {
+              persistContextItems(
+                contextItems.map((item) =>
+                  item.id === id ? { ...item, enabled: !item.enabled } : item,
+                ),
+              );
+            }}
+            onRemove={(id) => {
+              persistContextItems(
+                contextItems.filter((item) => item.id !== id),
+              );
+            }}
+          />
+        ) : null}
+
+        {showMessageSearch ? (
+          <SearchPanel
+            currentSessionId={currentSessionId}
+            sessions={searchableSessions()}
+            onClose={() => setShowMessageSearch(false)}
+            onSelect={(sessionId, messageIndex) => {
+              setShowMessageSearch(false);
+              if (sessionId === currentSessionId) {
+                void jumpToMessage(messageIndex);
+              } else {
+                void switchToSession(sessionId).then(() => {
+                  setCurrentMessageIndex(messageIndex);
+                });
+              }
+            }}
+          />
+        ) : null}
 
         {generatedImage && (
           <div className="generated-image-container">

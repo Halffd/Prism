@@ -12,6 +12,7 @@ import {
 import { UnifiedAIClient } from '@prism/api-client';
 import { logger, type LogLevel } from '@prism/logging';
 import { ModelRecentsEditor } from './ModelRecentsEditor';
+import { BackupSettingsPanel } from './BackupSettings';
 import { CustomModelManager } from '../chat/CustomModelManager';
 import { customModelOptions } from '../chat/custom-model';
 import { exportData, importData, clearData, downloadEnvelope, parseImport } from '../chat/sync';
@@ -34,7 +35,13 @@ import {
   saveImageGenConfig,
   getHotkeys,
   saveHotkey,
+  getChatSessionsDetailed,
 } from '@prism/shared-db';
+import {
+  applyBackupEnvelope,
+  buildBackupEnvelope,
+  parseBackupEnvelope,
+} from '../popup/session-data';
 import './Settings.scss';
 
 // Initialize with default settings - will be overridden by stored settings
@@ -62,6 +69,7 @@ export function Settings({ onClose }: SettingsProps) {
   );
   const [syncStatus, setSyncStatus] = useState<string>('');
   const syncFileRef = useRef<HTMLInputElement>(null);
+  const sessionBackupFileRef = useRef<HTMLInputElement>(null);
   const [mediaSettings, setMediaSettings] =
     useState<MediaSettings>(defaultMediaSettings);
   const [excludedSites, setExcludedSites] = useState<string[]>([]);
@@ -2355,6 +2363,80 @@ export function Settings({ onClose }: SettingsProps) {
           </div>
           {syncStatus && <small className="form-hint">{syncStatus}</small>}
         </div>
+
+        <div className="settings-section">
+          <h3>Session Backup File</h3>
+          <small className="form-hint">
+            A session backup is a portable JSON file that carries the
+            conversations with their tags, read state and archive state.
+            Files that are not Prism backups, or that were written by a
+            newer Prism, are refused with a reason.
+          </small>
+          <div className="form-group" style={{ display: 'flex', gap: 8 }}>
+            <button
+              className="btn btn-secondary"
+              onClick={async () => {
+                try {
+                  const { sessions } = await getChatSessionsDetailed();
+                  const envelope = await buildBackupEnvelope(sessions);
+                  const blob = new Blob([JSON.stringify(envelope, null, 2)], {
+                    type: 'application/json',
+                  });
+                  const url = URL.createObjectURL(blob);
+                  const anchor = document.createElement('a');
+                  anchor.href = url;
+                  anchor.download = 'prism-sessions.json';
+                  document.body.appendChild(anchor);
+                  anchor.click();
+                  anchor.remove();
+                  URL.revokeObjectURL(url);
+                  setSyncStatus(
+                    `exported ${envelope.conversations.length} sessions`,
+                  );
+                } catch (error) {
+                  setSyncStatus(`export failed: ${(error as Error).message}`);
+                }
+              }}
+            >
+              Export sessions
+            </button>
+            <button
+              className="btn btn-secondary"
+              onClick={() => sessionBackupFileRef.current?.click()}
+            >
+              Import sessions
+            </button>
+            <input
+              ref={sessionBackupFileRef}
+              type="file"
+              accept="application/json,.json"
+              style={{ display: 'none' }}
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                e.target.value = '';
+                if (!file) return;
+                try {
+                  const text = await file.text();
+                  const parsed = parseBackupEnvelope(text);
+                  if (!parsed.ok) {
+                    setSyncStatus(parsed.failure.reason);
+                    return;
+                  }
+                  const count = await applyBackupEnvelope(parsed.envelope);
+                  setSyncStatus(
+                    `imported ${count} sessions${
+                      parsed.migrated ? ' (migrated from an older format)' : ''
+                    }`,
+                  );
+                } catch (error) {
+                  setSyncStatus(`import failed: ${(error as Error).message}`);
+                }
+              }}
+            />
+          </div>
+        </div>
+
+        <BackupSettingsPanel />
 
         <div className="settings-section">
           <h3>Logging & Monitoring</h3>

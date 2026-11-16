@@ -35,12 +35,22 @@ export interface ImageGenerationConfig {
   updatedAt: number;
 }
 
+/**
+ * A chat message as it is stored in the `chatHistory` table.
+ *
+ * The transcript tables store the session a message belongs to next to
+ * the message itself, so a session can be read without a second lookup.
+ */
+export interface StoredChatMessageRow extends Message {
+  sessionId: string;
+}
+
 class PrismDexie extends Dexie {
   settings!: Table<ExtensionSetting>;
   siteFilters!: Table<SiteFilter>;
   imageGenConfigs!: Table<ImageGenerationConfig>;
   chatSessions!: Table<DBChatSession>;
-  chatHistory!: Table<Message>;
+  chatHistory!: Table<StoredChatMessageRow>;
   promptShortcuts!: Table<PromptShortcut>;
   characters!: Table<CharacterCard>;
   personas!: Table<PersonaProfile>;

@@ -1,12 +1,14 @@
 import type { AIConfig } from '@prism/shared-types';
 import { Icon } from '@prism/ui-components';
+import type { ProviderOption } from './provider-catalog';
 
 interface HeaderSectionProps {
-  context: any;
+  context: { title?: string; type?: string } | null;
   aiConfig: AIConfig;
   availableModels: string[];
   fetchingModels: boolean;
   isOnline: boolean;
+  providerOptions: ProviderOption[];
   setShowMenu: (value: boolean) => void;
   updateAIConfig: (config: AIConfig) => void;
   updateModel: (model: string) => void;
@@ -14,12 +16,36 @@ interface HeaderSectionProps {
   syncFromAPI: () => void;
   syncToAPI: () => void;
   toggleAutoSync: () => void;
-  user: any;
+  user: { displayName?: string | null; email?: string | null } | null;
   isAuthenticated: boolean;
   signInWithGoogle: () => void;
   signOut: () => void;
   autoSyncEnabled: boolean;
 }
+
+/** The icon shown next to the provider name. */
+const PROVIDER_ICONS: Record<string, string> = {
+  openai: '🤖',
+  gemini: '⭐',
+  claude: '🤝',
+  qwen: '☁️',
+  'prism-api': '💎',
+  koboldcpp: '👻',
+  llamacpp: '🦙',
+  ollama: '🦙',
+  sglang: '⚡',
+  transformers: '🔄',
+  deepseek: '🔍',
+  grok: '🤖',
+  openrouter: '🌐',
+  poe: '💬',
+  'nvidia-nim': '🟢',
+  groq: '⚡',
+  cerebras: '🔥',
+  'cloudflare-workers': '🟠',
+  fireworks: '🎆',
+  zai: '🟣',
+};
 
 export const HeaderSection: React.FC<HeaderSectionProps> = ({
   context,
@@ -27,6 +53,7 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
   availableModels,
   fetchingModels,
   isOnline,
+  providerOptions,
   setShowMenu,
   updateAIConfig,
   updateModel,
@@ -40,6 +67,16 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
   signOut,
   autoSyncEnabled,
 }) => {
+  // The Prism API sync is optional: it needs a signed-in user and a
+  // reachable API. Normal use — picking a provider, picking a model,
+  // chatting — never depends on it.
+  const syncDisabled = !isOnline || !isAuthenticated;
+  const syncTitle = !isAuthenticated
+    ? 'Sign in to sync with the Prism API'
+    : !isOnline
+      ? 'The Prism API is unreachable'
+      : 'Sync with the Prism API';
+
   return (
     <div className="popup-header">
       <h1>💎 Prism</h1>
@@ -80,27 +117,13 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
           }}
           className="provider-selector"
           title="Select AI provider"
+          aria-label="Select AI provider"
         >
-          <option value="openai">OpenAI</option>
-          <option value="gemini">Gemini</option>
-          <option value="claude">Claude</option>
-          <option value="qwen">Qwen</option>
-          <option value="prism-api">Prism API</option>
-          <option value="koboldcpp">KoboldCPP</option>
-          <option value="llamacpp">Llama.cpp</option>
-          <option value="ollama">Ollama</option>
-          <option value="sglang">SGLang</option>
-          <option value="transformers">Transformers</option>
-          <option value="deepseek">DeepSeek</option>
-          <option value="grok">Grok</option>
-          <option value="openrouter">OpenRouter</option>
-          <option value="poe">Poe</option>
-          <option value="nvidia-nim">NVIDIA NIM</option>
-          <option value="groq">Groq</option>
-          <option value="cerebras">Cerebras</option>
-          <option value="cloudflare-workers">Cloudflare Workers</option>
-          <option value="fireworks">Fireworks</option>
-          <option value="zai">Z.AI</option>
+          {providerOptions.map((provider) => (
+            <option key={provider.id} value={provider.id}>
+              {provider.label}
+            </option>
+          ))}
         </select>
 
         {(aiConfig.customModels ?? []).length > 0 && (
@@ -136,6 +159,7 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
           onChange={(e) => updateModel(e.target.value)}
           className="model-selector"
           title="Select AI model"
+          aria-label="Select AI model"
           disabled={fetchingModels || availableModels.length === 0}
         >
           {fetchingModels ? (
@@ -166,24 +190,33 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
         <button
           onClick={syncFromAPI}
           className="sync-from-btn"
-          title="Sync from Prism API"
-          disabled={!isOnline}
+          title={`${syncTitle} (from)`}
+          aria-label="Sync from Prism API"
+          disabled={syncDisabled}
         >
           📥
         </button>
         <button
           onClick={syncToAPI}
           className="sync-to-btn"
-          title="Sync to Prism API"
-          disabled={!isOnline}
+          title={`${syncTitle} (to)`}
+          aria-label="Sync to Prism API"
+          disabled={syncDisabled}
         >
           📤
         </button>
         <button
           onClick={toggleAutoSync}
           className="autosync-btn"
-          title={autoSyncEnabled ? 'Stop Auto-Sync' : 'Start Auto-Sync'}
-          disabled={!isOnline}
+          title={
+            syncDisabled
+              ? syncTitle
+              : autoSyncEnabled
+                ? 'Stop Auto-Sync'
+                : 'Start Auto-Sync'
+          }
+          aria-label="Toggle auto-sync with the Prism API"
+          disabled={syncDisabled}
         >
           {autoSyncEnabled ? '⏸️' : '▶️'}
         </button>
@@ -230,26 +263,7 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
           className="provider-indicator"
           title={`Current provider: ${aiConfig.provider}`}
         >
-          {aiConfig.provider === 'openai' && '🤖'}
-          {aiConfig.provider === 'gemini' && '⭐'}
-          {aiConfig.provider === 'claude' && '🤝'}
-          {aiConfig.provider === 'qwen' && '☁️'}
-          {aiConfig.provider === 'prism-api' && '💎'}
-          {aiConfig.provider === 'koboldcpp' && '👻'}
-          {aiConfig.provider === 'llamacpp' && '🦙'}
-          {aiConfig.provider === 'ollama' && '🦙'}
-          {aiConfig.provider === 'sglang' && '⚡'}
-          {aiConfig.provider === 'transformers' && '🔄'}
-          {aiConfig.provider === 'deepseek' && '🔍'}
-          {aiConfig.provider === 'grok' && '🤖'}
-          {aiConfig.provider === 'openrouter' && '🌐'}
-          {aiConfig.provider === 'poe' && '💬'}
-          {aiConfig.provider === 'nvidia-nim' && '🟢'}
-          {aiConfig.provider === 'groq' && '⚡'}
-          {aiConfig.provider === 'cerebras' && '🔥'}
-          {aiConfig.provider === 'cloudflare-workers' && '🟠'}
-          {aiConfig.provider === 'fireworks' && '🎆'}
-          {aiConfig.provider === 'zai' && '🟣'}
+          {PROVIDER_ICONS[aiConfig.provider] ?? '🔌'}
           <span className="provider-name">{aiConfig.provider}</span>
         </span>
       </div>

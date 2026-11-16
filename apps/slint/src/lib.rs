@@ -12,6 +12,7 @@
 //! checks, this desktop entry keeps the reference graph alive so the
 //! media poll/drain wiring (and everything else) does not warn as dead.
 
+mod features;
 mod shared;
 
 #[cfg(target_os = "android")]

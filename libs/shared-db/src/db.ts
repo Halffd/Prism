@@ -9,6 +9,7 @@ import type {
   WorldInfoEntry,
   GroupChatMode,
   CustomAgent,
+  SessionContextItem,
 } from '@prism/shared-types';
 
 // Define types for our database
@@ -18,6 +19,16 @@ export interface DBChatSession {
   createdAt: number;
   updatedAt: number;
   tags?: string[];
+  /** False means unread. Missing means read, so old sessions are not flooded with unread badges. */
+  read?: boolean;
+  /** Archived sessions stay searchable but leave the default list. */
+  archived?: boolean;
+  /** Id of the session this one was forked from. */
+  forkedFrom?: string;
+  /** Index in the source session the fork branched at. */
+  forkedAtMessage?: number;
+  /** Extra context material attached to this session. */
+  contextItems?: SessionContextItem[];
   characterIds?: string[]; // Multiple characters for group chat
   groupChatMode?: GroupChatMode; // 'round-robin' | 'reactive' | 'selective' | undefined (single)
 }
@@ -324,10 +335,24 @@ export async function saveChatHistory(
   const existingSession = await sessionsStore.get(sessionId);
   const session: DBChatSession = {
     id: sessionId,
-    title: messages[0]?.content?.substring(0, 50) || `Chat ${now}`,
+    // A session keeps the title it was given (a fork's title says where
+    // it came from); only a session without one is named after its first
+    // message.
+    title:
+      existingSession?.title ||
+      messages[0]?.content?.substring(0, 50) ||
+      `Chat ${now}`,
     createdAt: existingSession?.createdAt || now,
     updatedAt: now,
+    // Session metadata belongs to the session, not to its transcript:
+    // saving messages must not throw away tags, archive state or the
+    // link to the session a fork came from.
     tags: existingSession?.tags,
+    read: existingSession?.read,
+    archived: existingSession?.archived,
+    forkedFrom: existingSession?.forkedFrom,
+    forkedAtMessage: existingSession?.forkedAtMessage,
+    contextItems: existingSession?.contextItems,
     characterIds: existingSession?.characterIds || [],
     groupChatMode: existingSession?.groupChatMode,
   };
@@ -349,13 +374,152 @@ export async function loadChatHistory(sessionId: string): Promise<Message[]> {
 }
 
 export async function getChatSessions(): Promise<DBChatSession[]> {
-  const db = await getDatabase();
-  const tx = db.transaction(SESSIONS_STORE, 'readonly');
-  const store = tx.objectStore(SESSIONS_STORE);
-  const sessions = await store.getAll();
+  const { sessions } = await getChatSessionsDetailed();
+  return sessions;
+}
 
-  // Sort by most recent
-  return sessions.sort((a, b) => b.updatedAt - a.updatedAt);
+/**
+ * Reads every session, repairing the rows written by older versions.
+ *
+ * A row without the newer fields is filled in with the defaults
+ * (`tags: []`, `read: true`, `archived: false`) so the rest of the app
+ * never has to deal with a missing field. A row that cannot be read at
+ * all is reported as corrupt instead of breaking the whole list.
+ */
+export async function getChatSessionsDetailed(): Promise<{
+  sessions: DBChatSession[];
+  corrupt: Array<{ id: string; reason: string }>;
+}> {
+  const db = await getDatabase();
+  const readTx = db.transaction(SESSIONS_STORE, 'readonly');
+  const rows = await readTx.objectStore(SESSIONS_STORE).getAll();
+  await readTx.done;
+
+  const sessions: DBChatSession[] = [];
+  const corrupt: Array<{ id: string; reason: string }> = [];
+  const migrated: DBChatSession[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') {
+      corrupt.push({ id: '', reason: 'not an object' });
+      continue;
+    }
+    const candidate = row as Partial<DBChatSession>;
+    if (typeof candidate.id !== 'string' || candidate.id.length === 0) {
+      corrupt.push({ id: String(candidate.id ?? ''), reason: 'missing id' });
+      continue;
+    }
+    const needsMigration =
+      !Array.isArray(candidate.tags) ||
+      typeof candidate.read !== 'boolean' ||
+      typeof candidate.archived !== 'boolean' ||
+      typeof candidate.title !== 'string';
+    const session: DBChatSession = {
+      ...candidate,
+      id: candidate.id,
+      title: candidate.title ?? 'Untitled Chat',
+      createdAt: candidate.createdAt ?? 0,
+      updatedAt: candidate.updatedAt ?? 0,
+      tags: candidate.tags ?? [],
+      read: candidate.read ?? true,
+      archived: candidate.archived ?? false,
+      characterIds: candidate.characterIds ?? [],
+    };
+    sessions.push(session);
+    if (needsMigration) {
+      migrated.push(session);
+    }
+  }
+
+  // The repair is written back, so the migration happens once instead of
+  // on every read.
+  if (migrated.length > 0) {
+    const writeTx = db.transaction(SESSIONS_STORE, 'readwrite');
+    const store = writeTx.objectStore(SESSIONS_STORE);
+    for (const session of migrated) {
+      await store.put(session);
+    }
+    await writeTx.done;
+  }
+
+  sessions.sort((a, b) => b.updatedAt - a.updatedAt);
+  return { sessions, corrupt };
+}
+
+/**
+ * Merges metadata into an existing chat session.
+ *
+ * Only the fields present in `patch` are changed; every other field of
+ * the stored session is kept. A session that does not exist yet is
+ * created, so a fork can record its source link before its transcript
+ * is written.
+ */
+export async function updateChatSessionMeta(
+  sessionId: string,
+  patch: Partial<
+    Pick<
+      DBChatSession,
+      | 'title'
+      | 'tags'
+      | 'read'
+      | 'archived'
+      | 'forkedFrom'
+      | 'forkedAtMessage'
+      | 'contextItems'
+      | 'updatedAt'
+    >
+  >,
+): Promise<void> {
+  const db = await getDatabase();
+  const tx = db.transaction(SESSIONS_STORE, 'readwrite');
+  const store = tx.objectStore(SESSIONS_STORE);
+  const existing = await store.get(sessionId);
+  const now = Date.now();
+  const session: DBChatSession = {
+    id: sessionId,
+    title: existing?.title ?? `Chat ${now}`,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: patch.updatedAt ?? now,
+    tags: existing?.tags,
+    read: existing?.read,
+    archived: existing?.archived,
+    forkedFrom: existing?.forkedFrom,
+    forkedAtMessage: existing?.forkedAtMessage,
+    contextItems: existing?.contextItems,
+    characterIds: existing?.characterIds ?? [],
+    groupChatMode: existing?.groupChatMode,
+    ...patch,
+  };
+  await store.put(session);
+  await tx.done;
+}
+
+/** One stored message together with the session it belongs to. */
+export interface StoredChatMessage {
+  sessionId: string;
+  message: Message;
+}
+
+/**
+ * Reads every stored message of every session.
+ *
+ * Global search needs all transcripts at once; reading them session by
+ * session would make one IndexedDB transaction per conversation.
+ */
+export async function getAllChatHistory(): Promise<StoredChatMessage[]> {
+  const db = await getDatabase();
+  const tx = db.transaction(CHAT_HISTORY_STORE, 'readonly');
+  const store = tx.objectStore(CHAT_HISTORY_STORE);
+  const messages = await store.getAll();
+  await tx.done;
+  return messages
+    .map((message) => {
+      const stored = message as Message & { sessionId?: string };
+      return {
+        sessionId: stored.sessionId ?? '',
+        message: stored,
+      };
+    })
+    .filter((entry) => entry.sessionId.length > 0);
 }
 
 export async function deleteChatSession(sessionId: string): Promise<void> {

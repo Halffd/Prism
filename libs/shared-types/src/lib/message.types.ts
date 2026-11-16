@@ -8,6 +8,30 @@ export interface Message {
   tokens?: number;
   characterId?: string;
   metrics?: ResponseMetrics;
+  /** User-assigned labels on this message. */
+  tags?: string[];
+  /** False means unread. Missing means read, so old transcripts are not flooded with unread badges. */
+  read?: boolean;
+  /** Unix epoch milliseconds of the last content edit, if any. */
+  editedAt?: number;
+}
+
+/**
+ * One piece of extra material attached to a session.
+ *
+ * The extension keeps these in the session record so the context panel
+ * survives a reload. Lower `priority` numbers are admitted first when
+ * the token budget is tight.
+ */
+export interface SessionContextItem {
+  id: string;
+  kind: string;
+  title: string;
+  content: string;
+  tokens: number;
+  enabled: boolean;
+  source: string;
+  priority: number;
 }
 
 export interface ResponseMetrics {
@@ -54,6 +78,18 @@ export interface ChatSession {
   parentSessionId?: string;
   forkedFromMessageId?: string;
   meta?: ChatMeta;
+  /** User-assigned labels on the whole conversation. */
+  tags?: string[];
+  /** Archived conversations stay searchable but leave the default list. */
+  archived?: boolean;
+  /** False means unread. Missing means read, so old sessions are not flooded with unread badges. */
+  read?: boolean;
+  /** Id of the conversation this one was forked from. */
+  forkedFrom?: string;
+  /** Index in the source conversation the fork branched at. */
+  forkedAtMessage?: number;
+  /** Extra context material attached to this conversation. */
+  contextItems?: SessionContextItem[];
 }
 
 export interface ChatHistoryState {

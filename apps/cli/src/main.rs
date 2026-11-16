@@ -38,7 +38,8 @@ impl Drop for TerminalGuard {
 }
 
 fn main() -> anyhow::Result<()> {
-    if let Some(arg) = std::env::args().nth(1) {
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(arg) = args.get(1) {
         match arg.as_str() {
             "--version" | "-V" => {
                 println!("prism {}", env!("CARGO_PKG_VERSION"));
@@ -47,6 +48,29 @@ fn main() -> anyhow::Result<()> {
             "--help" | "-h" => {
                 println!("prism — native terminal harness over prism-core");
                 println!("usage: prism [--version] [--help] [sandbox preflight]");
+                println!();
+                println!("commands:");
+                println!("  chats                         list the stored chats");
+                println!("  search [QUERY] [flags]        search every chat");
+                println!("    --regex                    treat QUERY as a regular expression");
+                println!("    --case-sensitive            match case exactly");
+                println!("    --role <role>               only user | assistant | system");
+                println!("    --tag <tag>                 only messages carrying the tag");
+                println!("    --unread                    only unread messages");
+                println!("    --include-archived          include archived chats");
+                println!("    --sort <newest|oldest|title>  result order");
+                println!("    --limit <n>                 maximum hits (default 50)");
+                println!("  tag <chat> <tag>              add a tag to a chat");
+                println!("  untag <chat> <tag>            remove a tag from a chat");
+                println!("  archive <chat>                archive a chat");
+                println!("  unarchive <chat>              unarchive a chat");
+                println!("  read <chat>                   mark a chat read");
+                println!("  unread <chat>                 mark a chat unread");
+                println!("  fork <chat> <message-index>   branch a chat at a message");
+                println!("  export <path.json>            write every chat to a backup file");
+                println!("  import <path.json> [--replace]  read a backup file back");
+                println!("  sandbox preflight             probe the host sandbox");
+                println!();
                 println!(
                     "env: PRISM_CONFIG_DIR (config root), PRISM_CONVERSATIONS_DIR (chat storage)"
                 );
@@ -56,6 +80,17 @@ fn main() -> anyhow::Result<()> {
                 return Ok(());
             }
             "sandbox" => return sandbox_cli(std::env::args().skip(2)),
+            "chats" => return prism_cli::features::chats_cli(&args_after(&args, 2)),
+            "search" => return prism_cli::features::search_cli(&args_after(&args, 2)),
+            "tag" => return prism_cli::features::tag_cli(&args_after(&args, 2)),
+            "untag" => return prism_cli::features::untag_cli(&args_after(&args, 2)),
+            "archive" => return prism_cli::features::archive_cli(&args_after(&args, 2), true),
+            "unarchive" => return prism_cli::features::archive_cli(&args_after(&args, 2), false),
+            "read" => return prism_cli::features::read_cli(&args_after(&args, 2), true),
+            "unread" => return prism_cli::features::read_cli(&args_after(&args, 2), false),
+            "fork" => return prism_cli::features::fork_cli(&args_after(&args, 2)),
+            "export" => return prism_cli::features::export_cli(&args_after(&args, 2)),
+            "import" => return prism_cli::features::import_cli(&args_after(&args, 2)),
             other => anyhow::bail!("unknown argument: {other} (see prism --help)"),
         }
     }
@@ -74,6 +109,11 @@ fn main() -> anyhow::Result<()> {
     // Persist whatever happened before exiting.
     app.save();
     res
+}
+
+/// The arguments after the subcommand name.
+fn args_after(args: &[String], skip: usize) -> Vec<String> {
+    args.iter().skip(skip).cloned().collect()
 }
 
 fn run_loop(

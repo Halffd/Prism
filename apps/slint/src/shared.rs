@@ -76,9 +76,28 @@ pub struct Line {
     pub content: String,
     /// Reasoning extracted from `<thinking>` tags at stream end.
     pub thinking: Option<String>,
+    /// User-assigned labels on this message.
+    pub tags: Vec<String>,
+    /// False = unread.
+    pub read: bool,
+    /// The content was edited after it was written.
+    pub edited: bool,
 }
 
 impl Line {
+    /// A fresh line with the default per-message state (read, no tags,
+    /// not edited).
+    pub fn new(role: &str, content: impl Into<String>) -> Line {
+        Line {
+            role: role.into(),
+            content: content.into(),
+            thinking: None,
+            tags: Vec::new(),
+            read: true,
+            edited: false,
+        }
+    }
+
     pub fn to_widget(&self) -> ChatLine {
         let (content, thinking) = if self.role == "assistant" {
             match &self.thinking {
@@ -95,6 +114,9 @@ impl Line {
             role: self.role.as_str().into(),
             content: content.into(),
             thinking: thinking.unwrap_or_default().into(),
+            tags: self.tags.join(", ").into(),
+            read: self.read,
+            edited: self.edited,
         }
     }
 }
@@ -156,6 +178,20 @@ pub struct State {
     /// Editor buffer contents; `editor_dirty` set when edited.
     pub editor_text: String,
     pub editor_dirty: bool,
+    /// Tags on the current session.
+    pub session_tags: Vec<String>,
+    /// The current session is archived (hidden from the default list).
+    pub session_archived: bool,
+    /// The current session is unread.
+    pub session_read: bool,
+    /// The conversation this session was forked from, if any.
+    pub forked_from: Option<String>,
+    /// The message index in the source the fork branched at.
+    pub forked_at_message: Option<usize>,
+    /// Context items attached to the next request.
+    pub context_items: Vec<prism_core::context::ContextItem>,
+    /// Token budget for the attached context.
+    pub context_budget: usize,
 }
 
 impl State {
@@ -200,6 +236,13 @@ impl State {
             open_rel: None,
             editor_text: String::new(),
             editor_dirty: false,
+            session_tags: Vec::new(),
+            session_archived: false,
+            session_read: true,
+            forked_from: None,
+            forked_at_message: None,
+            context_items: Vec::new(),
+            context_budget: 4000,
         }
     }
 }
@@ -1498,6 +1541,9 @@ pub fn refresh_chats(ui: &AppWindow, state: &Rc<RefCell<State>>) {
             id: c.id.clone().into(),
             title: c.title.clone().into(),
             confirming: st.confirm_delete.as_deref() == Some(c.id.as_str()),
+            tags: c.tags.join(", ").into(),
+            unread: !c.read,
+            archived: c.archived,
         })
         .collect();
     ui.set_chats(ModelRc::from(Rc::new(VecModel::from(rows))));
@@ -1511,11 +1557,7 @@ pub fn push_system(
 ) {
     {
         let mut st = state.borrow_mut();
-        st.lines.push(Line {
-            role: "system".into(),
-            content: text,
-            thinking: None,
-        });
+        st.lines.push(Line::new("system", text));
     }
     let lines = state.borrow().lines.clone();
     refresh_transcript(ui, lines_model, &lines);
@@ -1563,6 +1605,10 @@ pub fn persist_current(
                 role: l.role.clone(),
                 content: l.content.clone(),
                 thinking: l.thinking.clone(),
+                id: None,
+                tags: l.tags.clone(),
+                read: l.read,
+                edited_at: if l.edited { Some(now) } else { None },
             })
             .collect();
         Some(Conversation {
@@ -1571,6 +1617,11 @@ pub fn persist_current(
             created_at: st.current_created,
             updated_at: now,
             messages,
+            tags: st.session_tags.clone(),
+            archived: st.session_archived,
+            read: st.session_read,
+            forked_from: st.forked_from.clone(),
+            forked_at_message: st.forked_at_message,
         })
     };
     if let Some(conv) = conv {
@@ -1629,11 +1680,7 @@ pub fn drain_events(
             }
             Ok(StreamEvent::Error(e)) => {
                 st.streaming = false;
-                st.lines.push(Line {
-                    role: "system".into(),
-                    content: format!("Error: {e}"),
-                    thinking: None,
-                });
+                st.lines.push(Line::new("system", format!("Error: {e}")));
                 finished = true;
                 break;
             }
@@ -1762,16 +1809,8 @@ pub fn send(
         .collect();
     history.push(ChatMessage::text("user", &content));
 
-    st.lines.push(Line {
-        role: "user".into(),
-        content: content.clone(),
-        thinking: None,
-    });
-    st.lines.push(Line {
-        role: "assistant".into(),
-        content: String::new(),
-        thinking: None,
-    });
+    st.lines.push(Line::new("user", content.clone()));
+    st.lines.push(Line::new("assistant", String::new()));
 
     let (tx, rx) = mpsc::channel::<StreamEvent>();
 
@@ -1954,6 +1993,18 @@ pub fn run_ui() {
                 .collect::<Vec<_>>(),
         ))));
         refresh_custom_provider_rows(&ui, &st.settings);
+        ui.set_search_role_labels(ModelRc::from(Rc::new(VecModel::from(
+            crate::features::SEARCH_ROLE_LABELS
+                .iter()
+                .map(|l| SharedString::from(*l))
+                .collect::<Vec<_>>(),
+        ))));
+        ui.set_search_sort_labels(ModelRc::from(Rc::new(VecModel::from(
+            crate::features::SEARCH_SORT_LABELS
+                .iter()
+                .map(|l| SharedString::from(*l))
+                .collect::<Vec<_>>(),
+        ))));
         ui.set_provider(st.settings.provider.as_str().into());
         let total = PROVIDERS.len() + st.settings.custom_providers.len();
         let pos = (0..total)
@@ -2539,16 +2590,8 @@ pub fn run_ui() {
                 // Append final answer to transcript
                 let provider = { let st = state_c.borrow(); st.settings.provider.clone() };
                 let mut st = state_c.borrow_mut();
-                st.lines.push(Line {
-                    role: "user".into(),
-                    content: provider,
-                    thinking: None,
-                });
-                st.lines.push(Line {
-                    role: "assistant".into(),
-                    content: result.answer.clone(),
-                    thinking: None,
-                });
+                st.lines.push(Line::new("user", provider));
+                st.lines.push(Line::new("assistant", result.answer.clone()));
                 refresh_transcript(&ui, &lines_c, &st.lines);
                 st.chats = host::list_conversations();
                 // TODO: persist conversation
@@ -2605,6 +2648,9 @@ pub fn run_ui() {
                             role: m.role.clone(),
                             content: m.content.clone(),
                             thinking: m.thinking.clone(),
+                            tags: m.tags.clone(),
+                            read: m.read,
+                            edited: m.edited_at.is_some(),
                         })
                         .collect();
                     st.current_id = Some(c.id);
@@ -2667,6 +2713,175 @@ pub fn run_ui() {
                 1 => Connection::PrismApi,
                 _ => Connection::Direct,
             };
+        });
+    }
+
+    // ---- new feature callbacks ----
+    {
+        let ui_w = ui.as_weak();
+        ui.on_search_toggle(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            let open = !ui.get_search_open();
+            ui.set_search_open(open);
+            if open {
+                crate::features::run_search(&ui);
+            }
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        ui.on_search_run(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            crate::features::run_search(&ui);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        let lines_c = lines_model.clone();
+        ui.on_search_jump(move |conversation_id, message_index| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            crate::features::jump_to_message(
+                &ui,
+                &state_c,
+                &lines_c,
+                &conversation_id.to_string(),
+                message_index,
+            );
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        let lines_c = lines_model.clone();
+        ui.on_message_fork(move |index| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            crate::features::fork_at(&ui, &state_c, &lines_c, index);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_message_edit_start(move |index| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            crate::features::edit_start(&ui, &state_c, index);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        ui.on_message_edit_cancel(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            crate::features::edit_cancel(&ui);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        let lines_c = lines_model.clone();
+        ui.on_message_edit_commit(move |index, text| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            crate::features::edit_commit(&ui, &state_c, &lines_c, index, &text.to_string());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        let lines_c = lines_model.clone();
+        ui.on_message_toggle_read(move |index| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            crate::features::toggle_message_read(&ui, &state_c, &lines_c, index);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        let lines_c = lines_model.clone();
+        ui.on_message_tag(move |index, tag| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            crate::features::tag_message(&ui, &state_c, &lines_c, index, &tag.to_string());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        let lines_c = lines_model.clone();
+        ui.on_message_untag(move |index, tag| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            crate::features::untag_message(&ui, &state_c, &lines_c, index, &tag.to_string());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        let lines_c = lines_model.clone();
+        ui.on_session_toggle_read(move |_| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            crate::features::toggle_session_read(&ui, &state_c, &lines_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        let lines_c = lines_model.clone();
+        ui.on_session_toggle_archive(move |_| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            crate::features::toggle_session_archive(&ui, &state_c, &lines_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        let lines_c = lines_model.clone();
+        ui.on_session_tag(move |_, tag| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            crate::features::tag_session(&ui, &state_c, &lines_c, &tag.to_string());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        let lines_c = lines_model.clone();
+        ui.on_session_untag(move |_, tag| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            crate::features::untag_session(&ui, &state_c, &lines_c, &tag.to_string());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_context_toggle(move |id, enabled| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            crate::features::toggle_context_item(&ui, &state_c, &id.to_string(), enabled);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_context_remove(move |id| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            crate::features::remove_context_item(&ui, &state_c, &id.to_string());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_context_budget_changed(move |budget| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            crate::features::set_context_budget(&ui, &state_c, &budget.to_string());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        ui.on_backup_export(move |path| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            crate::features::export_backup(&ui, &path.to_string());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        ui.on_backup_import(move |path| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            crate::features::import_backup(&ui, &path.to_string());
         });
     }
     {
