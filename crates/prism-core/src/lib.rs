@@ -34,6 +34,8 @@ pub mod host;
 pub mod native_tools;
 pub mod media;
 pub mod modes;
+#[cfg(feature = "native-transport")]
+pub mod mcp;
 pub mod local;
 pub mod memory_graph;
 pub mod prompt_history;
