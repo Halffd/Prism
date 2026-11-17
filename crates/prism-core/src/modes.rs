@@ -19,19 +19,18 @@
 use serde::{Deserialize, Serialize};
 
 /// The six interaction modes. Each is a contract on the same runtime:
-/// same transports, same models, different constraints (ChatGPT /
-/// opencode / Cursor / SillyTavern / Hermes / ComfyUI-style).
+/// same transports, same models, different constraints (the shapes
+/// several established clients converge on).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Mode {
-    /// No tools, plain conversation (ChatGPT-style).
+    /// No tools, plain conversation.
     Chat,
-    /// Full tool surface, permissions, subagents (Claude Code /
-    /// opencode-style autonomous work).
+    /// Full tool surface, permissions, subagents (autonomous agent
+    /// work).
     Agent,
     /// Style-only code assistance: refactor and format text with no
-    /// tool execution and no role-play/jailbreak contamination
-    /// (Cursor-style).
+    /// tool execution and no role-play/jailbreak contamination.
     Code,
     /// Character cards, personas, lore (SillyTavern-style).
     Creative,

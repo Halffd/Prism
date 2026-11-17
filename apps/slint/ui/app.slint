@@ -206,7 +206,7 @@ export component AppWindow inherits Window {
     in property <string> media-result-url;
     in property <bool> media-busy: false;
     in property <bool> media-pending: false;
-    // ---- IDE (three surface modes, like Cursor's composer toggles) ----
+    // ---- IDE (three surface modes) ----
     // 0 = Chat, 1 = Agent (input drives the agent loop), 2 = IDE
     // (workspace editor + the agent in a sidebar column).
     in-out property <int> ui-mode: 0;
@@ -510,7 +510,7 @@ export component AppWindow inherits Window {
                     width: 180px;
                 }
                 Rectangle { horizontal-stretch: 1; }
-                // Surface modes, like Cursor's composer counts: Chat is
+                // Surface modes: Chat is
                 // the plain client, Agent routes the composer into the
                 // agent loop, IDE puts the workspace editor beside it.
                 Rectangle {
@@ -644,7 +644,7 @@ export component AppWindow inherits Window {
                 // Agent / chat column: the transcript plus composer. In
                 // Chat mode it is the whole surface; in Agent mode the
                 // composer routes into the agent loop; in IDE mode it
-                // becomes Cursor-style agent sidebar beside the editor.
+                // becomes an agent sidebar beside the editor.
                 VerticalLayout {
                     horizontal-stretch: 2;
                     spacing: 4px;

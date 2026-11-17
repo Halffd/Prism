@@ -168,7 +168,7 @@ pub struct State {
     /// Media capability panel state.
     pub media: crate::shared::media::MediaState,
     /// Surface mode: 0 = Chat, 1 = Agent, 2 = IDE (editor + agent
-    /// sidebar). Mirrors Cursor's composer toggles; the composer's
+    /// sidebar). The composer's
     /// routing follows it (`on_send` observes `ui.get_ui_mode()`).
     pub ui_mode: usize,
     /// Open IDE workspace folder (None until `ide.workspace.open`).
@@ -585,7 +585,7 @@ pub fn run_agent_from_palette(
     eprintln!("agent feature not enabled");
 }
 
-// ---- IDE surface (three modes like Cursor's composer toggles) ----
+// ---- IDE surface (three surface modes) ----
 
 /// Composer placeholder per surface mode: the connection to the person
 /// typing changes even though the same LineEdit drives both.
@@ -1463,8 +1463,8 @@ pub fn palette_execute(
             }
             push_system(ui, state, lines_model, detail);
         }
-        // Surface modes — same three counts Cursor offers: plain chat,
-        // agent-first composer, and the editor + agent sidebar pair.
+        // Surface modes — plain chat, agent-first composer, and the
+        // editor + agent sidebar pair.
         "ide.mode.chat" => set_mode(ui, state, 0),
         "ide.mode.agent" => set_mode(ui, state, 1),
         "ide.mode.agent_sidebar" => set_mode(ui, state, 2),
