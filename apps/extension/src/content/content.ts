@@ -1319,7 +1319,13 @@ if (isTopFrame) {
     if (removed) {
       return;
     }
-    const observer = new MutationObserver((mutationsList) => {
+    const observer = new MutationObserver(() => {
+      // The page can be torn down while the observer is still pending, and
+      // `document` itself is gone by then. Nothing left to re-inject into.
+      if (typeof document === 'undefined' || !document.body) {
+        observer.disconnect();
+        return;
+      }
       if (!document.getElementById('prism-floating-button')) {
         setTimeout(() => injectFloatingButton(), 500); // Small delay to allow page to load
       }
@@ -1336,6 +1342,16 @@ if (isTopFrame) {
       childList: true,
       subtree: true,
     });
+
+    // Stop observing when the page goes away, so a pending callback does
+    // not fire against a torn-down document.
+    window.addEventListener(
+      'pagehide',
+      () => {
+        observer.disconnect();
+      },
+      { once: true },
+    );
   });
 }
 
