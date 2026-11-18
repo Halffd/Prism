@@ -17,6 +17,7 @@ pub const HELP_LINES: &[&str] = &[
     "mixing: /mix <id> blends another mode in (capabilities union, prompt voice stays primary) · /unmix <id> removes it · /cap tools|subagents|commands|character-cards|media|tasks|strategy [on|off] toggles one capability · /perm <tool> allow|ask|deny edits the policy",
     "agent shell: PRISM_AGENT_SANDBOX_POLICY (JSON or file) adds the sandboxed `shell` tool · prism sandbox preflight [--policy FILE] [--json] probes the host",
     "keys: Enter send · Esc stop/clear · Ctrl+F search (n/N navigate) · PgUp/PgDn scroll · Ctrl+T thinking · Alt+N new chat · Alt+P/K pick chat · Alt+O open · Alt+M mode · Ctrl+U clear input · Ctrl+W del word · Ctrl+C quit",
+    "plugins: /snippets.list · /snippets.add <trigger> <body> · /memory.save <type> <scope> <text> · /memory.read [day] · /memory.search <q> · /ponytail.mode <off|lite|full|ultra> · /planning.plan|plans|read|link|spec|done · /usage.show · /skills.list",
 ];
 
 const LEFT_WIDTH: u16 = 26;
@@ -332,6 +333,15 @@ fn draw_details(f: &mut Frame, app: &App, area: Rect) {
             .join(" ")
     };
     rows.push(kv("perms", &perm_text));
+    rows.push(RtLine::from(""));
+    rows.push(kv("plugins", &format!("{} active", app.plugins.ids().len())));
+    let pstatus = app.plugins.status(
+        &*prism_core::host::storage(),
+        prism_core::host::config_dir().as_deref(),
+    );
+    if !pstatus.is_empty() {
+        rows.push(kv("pluginext", &pstatus));
+    }
     let block = Block::new()
         .borders(Borders::ALL)
         .title(Span::styled(" session ", Style::new().fg(Color::Cyan)));

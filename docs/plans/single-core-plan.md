@@ -460,6 +460,43 @@ provider and model therefore works signed-out and offline. The Prism
 API sync buttons are disabled (not broken) when the user is signed out
 or the API is unreachable.
 
+## Plugin system (post-v1, native ports)
+
+The OpenCode plugin host's rich surface (queue steering, TUI components,
+marketplace installs) is out of scope, but its *feature set* ported
+natively into the core and surfaces, one implementation each:
+
+**Core API** (`crates/prism-core/src/plugins/`): a `Plugin` trait with
+sync hooks — `commands()` (slash commands the host dispatches as
+`/<plugin>.<cmd> [args]`), `before_send()` (rewrite outgoing user text:
+snippet expansion, tone suffix, counters), `format_output()` (rewrite
+completed text: table alignment), `system_prompt_suffix()`, `status()`
+(one status-line contribution). A `Registry` owns plugins and runs the
+pipeline in registration order (first writer wins per hook). Everything
+is transport-free and goes through the `Storage` trait, so plugins run
+identically on native and WASM. Built-ins ship in
+`plugins::builtins`: snippets, memory, ponytail, planning, usage,
+tableformat, skills.
+
+**Retry** (native host only): `host::RetryPolicy::from_env()` honors
+`PRISM_RETRY_MAX` / `PRISM_RETRY_BASE_MS` / `PRISM_RETRY_MAX_MS`;
+`spawn_stream`/`spawn_ollama_chat`/`spawn_api_chat` retry transient
+errors (rate limit / 429 / 5xx / cloud 503) with exponential backoff and
+emit `StreamEvent::Retrying { attempt, max, delay_ms, reason }` so
+surfaces can show "retry 2/5 in 4.0s (…)".
+
+**Surface integration**: `apps/cli` (App owns a `Registry`; `/help`
+lists plugin commands; details pane shows "plugins: N active" plus
+plugin status) and `apps/slint` (`send()` runs `before_send`, `drain_events`
+renders `Retrying`). egui/web are unchanged for now — the same three
+calls (`before_send`, `system_prompt_suffix`, `format_output`) drop in
+where those hosts build their request.
+
+**Plugin state** lives at `<config>/plugins/<name>/` (e.g.
+`snippets/snippets.json`, `memory/<YYYY-MM-DD>.logfmt`,
+`ponytail/mode`, `planning/plans|specs/`, `usage/usage.json`), written
+through the core `Storage` trait.
+
 ## Environment realities
 
 - This dev box is headless: verification bar is compile + tests

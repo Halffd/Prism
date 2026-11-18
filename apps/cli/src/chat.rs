@@ -40,6 +40,21 @@ pub fn start_job(
                     ChatMessage::text("system", settings.system_prompt.trim()),
                 );
             }
+            // Plugin system-prompt suffixes (communication tone, skills).
+            let registry = prism_core::plugins::Registry::with_defaults();
+            let suffix = registry.system_prompt_suffix(
+                &*host::storage(),
+                host::config_dir().as_deref(),
+                settings,
+            );
+            if !suffix.trim().is_empty() {
+                let combined = format!(
+                    "{}\n\n{}",
+                    settings.system_prompt.trim(),
+                    suffix.trim()
+                );
+                history.insert(0, ChatMessage::text("system", &combined));
+            }
             if settings.thinking_enabled {
                 history = thinking::apply_thinking_to_messages(&history);
             }

@@ -16,6 +16,7 @@ use crate::transport::{ReqwestTransport, Transport};
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::sync::OnceLock;
+use std::future::Future;
 use tokio::runtime::Runtime;
 
 /// Shared tokio runtime for background HTTP work. Built lazily on
@@ -31,7 +32,7 @@ pub fn runtime() -> &'static Runtime {
     })
 }
 
-fn storage() -> &'static FsStorage {
+pub fn storage() -> &'static FsStorage {
     static S: OnceLock<FsStorage> = OnceLock::new();
     S.get_or_init(|| FsStorage)
 }
@@ -289,26 +290,145 @@ pub fn reachable_locals(base_urls: &std::collections::HashMap<String, String>) -
 
 pub fn spawn_stream(req: StreamRequest, tx: Sender<StreamEvent>) {
     runtime().spawn(async move {
-        if let Err(e) = run_stream(transport(), &req, &tx).await {
-            let _ = tx.send(StreamEvent::Error(e));
+        let policy = RetryPolicy::from_env();
+        let res: Result<(), anyhow::Error> = policy
+            .run(&tx, || async { run_stream(transport(), &req, &tx).await.map_err(anyhow::Error::msg) }, is_transient_error)
+            .await;
+        if let Err(e) = res {
+            let _ = tx.send(StreamEvent::Error(e.to_string()));
         }
     });
 }
 
 pub fn spawn_ollama_chat(req: OllamaChatRequest, tx: Sender<StreamEvent>) {
     runtime().spawn(async move {
-        if let Err(e) = run_ollama_chat(transport(), &req, &tx).await {
-            let _ = tx.send(StreamEvent::Error(e));
+        let policy = RetryPolicy::from_env();
+        let res: Result<(), anyhow::Error> = policy
+            .run(&tx, || async { run_ollama_chat(transport(), &req, &tx).await.map_err(anyhow::Error::msg) }, is_transient_error)
+            .await;
+        if let Err(e) = res {
+            let _ = tx.send(StreamEvent::Error(e.to_string()));
         }
     });
 }
 
 pub fn spawn_api_chat(req: ApiChatRequest, tx: Sender<StreamEvent>) {
     runtime().spawn(async move {
-        if let Err(e) = run_api_chat(transport(), &req, &tx).await {
-            let _ = tx.send(StreamEvent::Error(e));
+        let policy = RetryPolicy::from_env();
+        let res: Result<(), anyhow::Error> = policy
+            .run(&tx, || async { run_api_chat(transport(), &req, &tx).await.map_err(anyhow::Error::msg) }, is_transient_error)
+            .await;
+        if let Err(e) = res {
+            let _ = tx.send(StreamEvent::Error(e.to_string()));
         }
     });
+}
+
+/// Retry policy for provider requests, from env (all optional):
+/// - `PRISM_RETRY_MAX` — attempts total (default 1 = disabled)
+/// - `PRISM_RETRY_BASE_MS` — base backoff (default 2000)
+/// - `PRISM_RETRY_MAX_MS` — cap (default 60000)
+///
+/// Port of the OpenCode rate-limit-retry plugin, native in the host:
+/// the retry happens before the first chunk is acknowledged, so a
+/// recoverable provider error never reaches the UI as a failed turn.
+#[derive(Debug, Clone, Copy)]
+pub struct RetryPolicy {
+    pub attempts: u32,
+    pub base_ms: u64,
+    pub max_ms: u64,
+    /// Marks errors transient (rate limit / 429 / 5xx / cloud 503).
+    pub transient_only: bool,
+}
+
+impl RetryPolicy {
+    /// Read the policy from env; default disabled (attempts = 1).
+    pub fn from_env() -> Self {
+        let attempts = std::env::var("PRISM_RETRY_MAX")
+            .ok()
+            .and_then(|v| v.trim().parse::<u32>().ok())
+            .unwrap_or(1)
+            .max(1);
+        let base_ms = std::env::var("PRISM_RETRY_BASE_MS")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .unwrap_or(2000);
+        let max_ms = std::env::var("PRISM_RETRY_MAX_MS")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .unwrap_or(60_000);
+        Self {
+            attempts,
+            base_ms,
+            max_ms: max_ms.max(base_ms),
+            transient_only: true,
+        }
+    }
+
+    /// Backoff for a 1-based attempt (attempt 1 = base, doubling, capped).
+    fn delay_ms(&self, attempt: u32) -> u64 {
+        let mut d = self.base_ms.saturating_mul(2u64.saturating_pow(attempt - 1));
+        if d > self.max_ms {
+            d = self.max_ms;
+        }
+        d
+    }
+
+    /// Run `job` under the policy. `job` is called fresh per attempt;
+    /// `is_transient` filters which errors retry when
+    /// `transient_only` is set.
+    pub async fn run<T, F, Fut>(
+        self,
+        tx: &Sender<StreamEvent>,
+        job: F,
+        is_transient: impl Fn(&anyhow::Error) -> bool,
+    ) -> Result<T, anyhow::Error>
+    where
+        F: Fn() -> Fut,
+        Fut: Future<Output = Result<T, anyhow::Error>>, // edition 2021: `use std::future::Future` at top
+    {
+        let mut attempt = 1;
+        loop {
+            match job().await {
+                Ok(v) => return Ok(v),
+                Err(e) => {
+                    let retryable = !self.transient_only || is_transient(&e);
+                    if attempt >= self.attempts || !retryable {
+                        return Err(e);
+                    }
+                    let delay = std::time::Duration::from_millis(self.delay_ms(attempt));
+                    let _ = tx.send(StreamEvent::Retrying {
+                        attempt: attempt + 1,
+                        max: self.attempts,
+                        delay_ms: delay.as_millis() as u64,
+                        reason: e.to_string(),
+                    });
+                    tokio::time::sleep(delay).await;
+                    attempt += 1;
+                }
+            }
+        }
+    }
+}
+
+/// True for provider errors that are worth another attempt: rate limits,
+/// overload, and transient transport failures (not 401/404/bad-config).
+pub fn is_transient_error(e: &anyhow::Error) -> bool {
+    let msg = e.to_string().to_lowercase();
+    if msg.contains("rate limit")
+        || msg.contains("rate_limit")
+        || msg.contains("429")
+        || msg.contains("too many requests")
+        || msg.contains("quota")
+        || msg.contains("overloaded")
+        || msg.contains("503")
+        || msg.contains("service unavailable")
+        || msg.contains("timeout")
+        || msg.contains("timed out")
+    {
+        return true;
+    }
+    false
 }
 
 pub fn spawn_models_fetch(req: ModelsRequest, tx: Sender<ModelsEvent>) {

@@ -40,6 +40,7 @@ pub mod local;
 pub mod memory_graph;
 pub mod prompt_history;
 pub mod prompt_picker;
+pub mod plugins;
 pub mod providers;
 pub mod sandbox;
 pub mod search;

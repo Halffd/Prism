@@ -107,6 +107,19 @@ pub enum StreamEvent {
     Chunk(String),
     Done,
     Error(String),
+    /// Provider asked to retry (rate limit / transient); a retry is
+    /// scheduled. Emitted by the host's retry policy (`PRISM_RETRY_*`).
+    /// Surfaces may show this as a notice; request state is unchanged.
+    Retrying {
+        /// 1-based attempt number being scheduled (2 = first retry).
+        attempt: u32,
+        /// Total attempts allowed by the policy.
+        max: u32,
+        /// Delay before the retry, in milliseconds.
+        delay_ms: u64,
+        /// Why the retry happens (the error that triggered it).
+        reason: String,
+    },
 }
 
 /// Events for background model-list fetches.

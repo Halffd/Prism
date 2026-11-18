@@ -1684,6 +1684,20 @@ pub fn drain_events(
                 finished = true;
                 break;
             }
+            Ok(StreamEvent::Retrying {
+                attempt,
+                max,
+                delay_ms,
+                reason,
+            }) => {
+                st.lines.push(Line::new(
+                    "system",
+                    format!(
+                        "provider retry {attempt}/{max} in {:.1}s ({reason})",
+                        delay_ms as f32 / 1000.0
+                    ),
+                ));
+            }
             Err(TryRecvError::Empty) => break,
             Err(TryRecvError::Disconnected) => {
                 st.streaming = false;
@@ -1807,6 +1821,14 @@ pub fn send(
         .filter(|l| l.role != "system")
         .map(|l| ChatMessage::text(&l.role, &l.content))
         .collect();
+    // Plugin pipeline (snippets, tone) — registry is per-call, cheap.
+    let registry = prism_core::plugins::Registry::with_defaults();
+    let content = registry.before_send(
+        &*host::storage(),
+        host::config_dir().as_deref(),
+        &content,
+        &st.settings,
+    );
     history.push(ChatMessage::text("user", &content));
 
     st.lines.push(Line::new("user", content.clone()));

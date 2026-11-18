@@ -44,6 +44,7 @@ pub use prism_core::modes::Mode as IMode;
 
 pub struct App {
     pub settings: prism_core::settings::Settings,
+    pub plugins: prism_core::plugins::Registry,
     pub conv: Conversation,
     pub metas: Vec<ConversationMeta>,
     pub selected: usize,
@@ -84,6 +85,7 @@ impl App {
     pub fn new(settings: prism_core::settings::Settings) -> Self {
         let mut app = App {
             settings,
+            plugins: prism_core::plugins::Registry::with_defaults(),
             conv: Conversation {
                 id: conversations::new_id(),
                 title: String::new(),
@@ -359,7 +361,13 @@ impl App {
                 if let Some(last) = self.conv.messages.last_mut() {
                     if last.role == "assistant" {
                         let (clean, reasoning) = thinking::strip_thinking(&last.content);
-                        last.content = clean;
+                        // Plugin pipeline: table alignment etc. (pure text).
+                        let content = self.plugins.format_output(
+                            &*host::storage(),
+                            host::config_dir().as_deref(),
+                            &clean,
+                        );
+                        last.content = content;
                         last.thinking = reasoning;
                     }
                 }
@@ -385,6 +393,21 @@ impl App {
                 self.queue_paused = true;
                 self.push_message("system", &format!("error: {e}"));
                 self.status = "stream error — queue paused (send to resume)".into();
+            }
+            StreamEvent::Retrying {
+                attempt,
+                max,
+                delay_ms,
+                reason,
+            } => {
+                self.push_message(
+                    "system",
+                    &format!(
+                        "provider retry {attempt}/{max} in {:.1}s ({reason})",
+                        delay_ms as f32 / 1000.0
+                    ),
+                );
+                self.status = format!("retrying ({attempt}/{max})…");
             }
         }
     }
@@ -412,6 +435,13 @@ impl App {
         }
         self.queue_paused = false;
         let mut history = self.history();
+        // Plugin pipeline: snippet expansion, tone suffix, counters.
+        let content = self.plugins.before_send(
+            &*host::storage(),
+            host::config_dir().as_deref(),
+            &content,
+            &self.settings,
+        );
         history.push(prism_core::client::ChatMessage::text("user", &content));
 
         match chat::start_job(&self.settings, history, tx) {
@@ -763,7 +793,32 @@ impl App {
                 }
             }
             "quit" | "q" => self.quit = true,
-            other => self.push_message("system", &format!("unknown command /{other} — try /help")),
+            other => {
+                // Plugin commands are namespaced: /memory.save, /snippets.add...
+                // Rewrite `/memory.save foo` -> `plugins.run_command("memory.save", "foo")`.
+                if let Some((plugin_id, sub)) = other.split_once('.') {
+                    let res = self.plugins.run_command(
+                        &*host::storage(),
+                        host::config_dir().as_deref(),
+                        &format!("{plugin_id}.{sub}"),
+                        &arg,
+                    );
+                    match res {
+                        Some(Ok(lines)) => {
+                            for line in lines {
+                                self.push_message("system", &line);
+                            }
+                        }
+                        Some(Err(e)) => self.push_message("system", &format!("{plugin_id}.{sub} failed: {e}")),
+                        None => self.push_message(
+                            "system",
+                            &format!("unknown command /{other} — try /help"),
+                        ),
+                    }
+                } else {
+                    self.push_message("system", &format!("unknown command /{other} — try /help"));
+                }
+            }
         }
     }
 

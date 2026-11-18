@@ -138,6 +138,10 @@ pub struct Settings {
     /// base URL, or add a bare OpenAI-compatible endpoint. Keyed by
     /// provider id.
     pub custom_providers: HashMap<String, ConfigProvider>,
+    /// Communication tone preset for the ponytail plugin
+    /// ("off" | "lite" | "full" | "ultra"). The plugin's persisted mode
+    /// file wins when present; this field is the default.
+    pub communication_mode: String,
 }
 
 impl Default for Settings {
@@ -161,6 +165,7 @@ impl Default for Settings {
             prism_api_url: "http://localhost:3000".into(),
             prism_api_token: String::new(),
             custom_providers: HashMap::new(),
+            communication_mode: "off".into(),
         }
     }
 }

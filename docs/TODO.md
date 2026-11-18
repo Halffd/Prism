@@ -98,6 +98,16 @@ hardware modes, agent memories. See TUI.
 | Chat + streaming + queue               | done    | Inline streaming, abort, queue drains on done, error pauses queue                              |
 | Settings persistence                   | done    | Commands update + persist settings; restores most recent conversation on restart               |
 | Behavior tests                         | done    | 9 tests covering stream/drain/abort/error/queue/commands/credentials/search/persistence         |
+| **Plugin system (core `plugins::Registry`)** | done | Sync trait hooks (commands / before_send / format_output / status / system_prompt_suffix) over the `Storage` trait; both-target safe; native ports of the OpenCode plugins |
+| Plugin ports — snippets                | done    | `/snippets.list|add|del`; `#tag` expansion in the send pipeline; status `snip:N`               |
+| Plugin ports — memory                  | done    | `/memory.save|read|search` over `<config>/plugins/memory/<day>.logfmt`; status `mem:Nd`        |
+| Plugin ports — ponytail                | done    | `/ponytail.mode <off\|lite\|full\|ultra>`→ system-prompt suffix; status `tone:<mode>`        |
+| Plugin ports — planning                | done    | `/planning.plan\|plans\|read\|link\|spec\|done` over `<config>/plugins/planning/{plans,specs}` |
+| Plugin ports — usage                   | done    | `/usage.show` counters saved per day; status `req:N`                                                 |
+| Plugin ports — tableformat             | done    | Markdown table column alignment applied to completed assistant text                             |
+| Plugin ports — skills                  | done    | `/skills.list`; skill discovery guidance + `SKILL.md` scanning under `<config>/plugins/skills/` |
+| Plugin ports — retry (native host)     | done    | `PRISM_RETRY_MAX/BASE_MS/MAX_MS` exponential backoff in `host::spawn_*`; `StreamEvent::Retrying` surfaces "retry N/M in Xs (reason)" |
+| Plugin reports (not ported)             | —      | no entries yet                                                                                     |
 
 ## Mobile (Slint, single-core plan item 4)
 
