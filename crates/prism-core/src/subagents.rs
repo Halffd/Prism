@@ -69,6 +69,73 @@ impl SubagentRegistry {
         }
     }
 
+    /// Validate + upsert the `subagents` entries from the shared config
+    /// file (`mcp.json` — the same file the MCP servers come from).
+    /// Same-name entries replace the shipped spec; a malformed entry is
+    /// reported and skipped, never fatal. Returns (applied, errors).
+    pub fn upsert_config_specs(
+        &mut self,
+        entries: &[serde_json::Value],
+    ) -> (usize, Vec<String>) {
+        let mut applied = 0;
+        let mut errors = Vec::new();
+        for (i, e) in entries.iter().enumerate() {
+            let label = format!("subagents[{i}]");
+            let name = e.get("name").and_then(|v| v.as_str());
+            let valid_name = name
+                .map(|n| {
+                    let mut chars = n.chars();
+                    matches!(chars.next(), Some(c) if c.is_ascii_lowercase())
+                        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+                })
+                .unwrap_or(false);
+            if !valid_name {
+                errors.push(format!(
+                    "{label}: \"name\" must be kebab/snake-case ([a-z][a-z0-9_-]*)"
+                ));
+                continue;
+            }
+            let Some(description) = e.get("description").and_then(|v| v.as_str()) else {
+                errors.push(format!("{label}: \"description\" must be a string"));
+                continue;
+            };
+            let forced_model = match e.get("forced_model") {
+                None | Some(serde_json::Value::Null) => None,
+                Some(v) => match v.as_str() {
+                    Some(s) => Some(s.to_string()),
+                    None => {
+                        errors.push(format!("{label}: \"forced_model\" must be a string"));
+                        continue;
+                    }
+                },
+            };
+            let tool_allowlist = match e.get("tool_allowlist") {
+                None => Vec::new(),
+                Some(v) => match v.as_array().map(|arr| {
+                    arr.iter()
+                        .map(|t| t.as_str().map(String::from))
+                        .collect::<Option<Vec<String>>>()
+                }) {
+                    Some(Some(list)) => list,
+                    _ => {
+                        errors.push(format!(
+                            "{label}: \"tool_allowlist\" must be an array of tool names"
+                        ));
+                        continue;
+                    }
+                },
+            };
+            self.upsert(SubagentSpec {
+                name: name.unwrap().to_string(),
+                description: description.to_string(),
+                forced_model,
+                tool_allowlist,
+            });
+            applied += 1;
+        }
+        (applied, errors)
+    }
+
     pub fn get(&self, name: &str) -> Option<&SubagentSpec> {
         self.specs.iter().find(|s| s.name == name)
     }
@@ -197,6 +264,50 @@ pub fn default_specs() -> Vec<SubagentSpec> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn entry(json: &str) -> serde_json::Value {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn config_specs_upsert_and_replace_shipped_entries() {
+        let mut reg = SubagentRegistry::default();
+        let (applied, errors) = reg.upsert_config_specs(&[
+            entry(r#"{"name":"tui-scout","description":"Quick scout","tool_allowlist":["read_file"]}"#),
+            // same name replaces the shipped entry (core upsert semantics)
+            entry(r#"{"name":"explore","description":"TUI-tuned explorer","forced_model":"cheap-fast-model","tool_allowlist":[]}"#),
+        ]);
+        assert_eq!(applied, 2);
+        assert!(errors.is_empty());
+        let scout = reg.get("tui-scout").unwrap();
+        assert_eq!(scout.description, "Quick scout");
+        assert_eq!(scout.tool_allowlist, vec!["read_file"]);
+        assert_eq!(scout.forced_model, None);
+        let explore = reg.get("explore").unwrap();
+        assert_eq!(explore.description, "TUI-tuned explorer");
+        assert_eq!(explore.forced_model.as_deref(), Some("cheap-fast-model"));
+        // The other shipped specs survive untouched.
+        assert!(reg.get("shell-ops").is_some());
+    }
+
+    #[test]
+    fn malformed_config_entries_are_reported_and_skipped() {
+        let mut reg = SubagentRegistry::default();
+        let (applied, errors) = reg.upsert_config_specs(&[
+            entry(r#"{"name":"Bad Name!","description":"x"}"#),
+            entry(r#"{"name":"ok-name","description":"fine"}"#),
+            entry(r#"{"name":"bad-allow","description":"x","tool_allowlist":"nope"}"#),
+            entry(r#"{"name":"bad-model","description":"x","forced_model":42}"#),
+            entry(r#"{"name":"ok2","description":"fine"}"#),
+        ]);
+        assert_eq!(applied, 2);
+        assert_eq!(errors.len(), 3);
+        assert!(reg.get("ok2").is_some());
+        assert!(reg.get("Bad Name!").is_none());
+        // The shipped six are untouched by the junk.
+        assert!(reg.get("explore").is_some());
+        assert_eq!(reg.get("explore").unwrap().forced_model, None);
+    }
 
     #[test]
     fn shipped_set_is_known() {
