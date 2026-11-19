@@ -144,10 +144,19 @@ pub fn repair_tool_input(raw: &str) -> RepairReport {
         text.pop();
         notes.push("dropped trailing comma".into());
     }
-    if text.chars().any(|c| c != '\n' && c != '\t' && c.is_control()) {
+    if text
+        .chars()
+        .any(|c| c != '\n' && c != '\t' && c.is_control())
+    {
         text = text
             .chars()
-            .map(|c| if c != '\n' && c != '\t' && c.is_control() { ' ' } else { c })
+            .map(|c| {
+                if c != '\n' && c != '\t' && c.is_control() {
+                    ' '
+                } else {
+                    c
+                }
+            })
             .collect();
         notes.push("dropped stray control characters".into());
     }
@@ -242,8 +251,14 @@ pub fn gated_execute(
     let mut observation = registry.execute(tool, &repaired.input, ask);
     let kind = ToolErrorKind::from_observation(&observation);
     if let Some(reason) = kind.detail() {
-        observation.push_str(&format!("\n({reason}; repair notes: {})", 
-            if repaired.notes.is_empty() { "none".into() } else { repaired.notes.join(", ") }));
+        observation.push_str(&format!(
+            "\n({reason}; repair notes: {})",
+            if repaired.notes.is_empty() {
+                "none".into()
+            } else {
+                repaired.notes.join(", ")
+            }
+        ));
     }
     observation
 }

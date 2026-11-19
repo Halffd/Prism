@@ -465,7 +465,11 @@ fn parse_add(t: &[char], pos: &mut usize) -> Result<f64, String> {
         let op = t[*pos];
         *pos += 1;
         let right = parse_mul(t, pos)?;
-        left = if op == '+' { left + right } else { left - right };
+        left = if op == '+' {
+            left + right
+        } else {
+            left - right
+        };
     }
     Ok(left)
 }
@@ -476,7 +480,11 @@ fn parse_mul(t: &[char], pos: &mut usize) -> Result<f64, String> {
         let op = t[*pos];
         *pos += 1;
         let right = parse_atom(t, pos)?;
-        left = if op == '*' { left * right } else { left / right };
+        left = if op == '*' {
+            left * right
+        } else {
+            left / right
+        };
     }
     Ok(left)
 }
@@ -548,7 +556,12 @@ fn run_plan_and_execute(
     ) {
         Ok(r) => r,
         Err(e) => {
-            return AgentResult { answer: String::new(), steps, completed: false, error: Some(e) }
+            return AgentResult {
+                answer: String::new(),
+                steps,
+                completed: false,
+                error: Some(e),
+            }
         }
     };
     let plan = parse_plan(&plan_raw);
@@ -588,7 +601,10 @@ fn run_plan_and_execute(
             }
             let raw = match step_fn(
                 &system,
-                &[StepMessage { role: "user".into(), content: prompt.clone() }],
+                &[StepMessage {
+                    role: "user".into(),
+                    content: prompt.clone(),
+                }],
             ) {
                 Ok(r) => r,
                 Err(e) => {
@@ -651,7 +667,13 @@ fn run_plan_and_execute(
         plan.join(" | "),
         observations.join("\n"),
     );
-    match step_fn(&system, &[StepMessage { role: "user".into(), content: prompt }]) {
+    match step_fn(
+        &system,
+        &[StepMessage {
+            role: "user".into(),
+            content: prompt,
+        }],
+    ) {
         Ok(raw) => {
             let answer = parse_decision(&raw)
                 .filter(|d| d.action == "Final Answer")
@@ -664,9 +686,19 @@ fn run_plan_and_execute(
                 observation: String::new(),
                 phase: "execute".into(),
             });
-            AgentResult { answer, steps, completed: true, error: None }
+            AgentResult {
+                answer,
+                steps,
+                completed: true,
+                error: None,
+            }
         }
-        Err(e) => AgentResult { answer: String::new(), steps, completed: false, error: Some(e) },
+        Err(e) => AgentResult {
+            answer: String::new(),
+            steps,
+            completed: false,
+            error: Some(e),
+        },
     }
 }
 
@@ -694,7 +726,10 @@ mod tests {
         move |_sys, _hist| {
             let idx = i.get();
             i.set(idx + 1);
-            Ok(responses.get(idx).map(|s| s.to_string()).unwrap_or_default())
+            Ok(responses
+                .get(idx)
+                .map(|s| s.to_string())
+                .unwrap_or_default())
         }
     }
 
@@ -784,7 +819,10 @@ mod tests {
         );
         assert!(r.completed, "err={:?}", r.error);
         // The synthetic step is the task itself.
-        assert!(r.steps.iter().any(|s| s.phase == "plan" && s.action_input == "compute"));
+        assert!(r
+            .steps
+            .iter()
+            .any(|s| s.phase == "plan" && s.action_input == "compute"));
         assert_eq!(r.answer, "four");
     }
 
@@ -833,10 +871,11 @@ mod tests {
     fn max_steps_stops_with_error() {
         let reg = ToolRegistry::new();
         reg.register(Arc::new(EchoTool));
-        let responses: Vec<String> =
-            std::iter::repeat(r#"{"thought":"again","action":"echo","action_input":"x"}"#.to_string())
-                .take(5)
-                .collect();
+        let responses: Vec<String> = std::iter::repeat(
+            r#"{"thought":"again","action":"echo","action_input":"x"}"#.to_string(),
+        )
+        .take(5)
+        .collect();
         let idx = std::cell::Cell::new(0usize);
         let mut step = |_sys: &str, _hist: &[StepMessage]| -> Result<String, String> {
             let i = idx.get();
@@ -939,8 +978,13 @@ mod tests {
     #[test]
     fn calculator_evaluates_and_rejects() {
         assert_eq!(CalculatorTool.execute("2+3*4"), "[calculator] 2+3*4 = 14");
-        assert_eq!(CalculatorTool.execute("(2+3)*4"), "[calculator] (2+3)*4 = 20");
-        assert!(CalculatorTool.execute("import os").starts_with("[calculator] Error"));
+        assert_eq!(
+            CalculatorTool.execute("(2+3)*4"),
+            "[calculator] (2+3)*4 = 20"
+        );
+        assert!(CalculatorTool
+            .execute("import os")
+            .starts_with("[calculator] Error"));
     }
 
     #[test]
@@ -966,6 +1010,8 @@ mod tests {
     #[test]
     fn unknown_tool_message() {
         let reg = ToolRegistry::new();
-        assert!(reg.execute("nope", "x", &|_, _| true).contains("not a recognized tool"));
+        assert!(reg
+            .execute("nope", "x", &|_, _| true)
+            .contains("not a recognized tool"));
     }
 }

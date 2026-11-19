@@ -289,10 +289,13 @@ fn entry_matches(entry: &LoreEntry, text: &str) -> bool {
         return false;
     }
     let text = normalize(text, entry.case_sensitive);
-    let primary = entry
-        .keys
-        .iter()
-        .any(|k| contains_word(&text, &normalize(k, entry.case_sensitive), entry.match_whole_words));
+    let primary = entry.keys.iter().any(|k| {
+        contains_word(
+            &text,
+            &normalize(k, entry.case_sensitive),
+            entry.match_whole_words,
+        )
+    });
     if !primary {
         return false;
     }
@@ -305,12 +308,20 @@ fn entry_matches(entry: &LoreEntry, text: &str) -> bool {
     if entry.use_group_scoring {
         // Group scoring: any secondary key suffices.
         keys.iter().any(|k| {
-            contains_word(&text, &normalize(k, entry.case_sensitive), entry.match_whole_words)
+            contains_word(
+                &text,
+                &normalize(k, entry.case_sensitive),
+                entry.match_whole_words,
+            )
         })
     } else {
         // Selective: all must match.
         keys.iter().all(|k| {
-            contains_word(&text, &normalize(k, entry.case_sensitive), entry.match_whole_words)
+            contains_word(
+                &text,
+                &normalize(k, entry.case_sensitive),
+                entry.match_whole_words,
+            )
         })
     }
 }
@@ -518,7 +529,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn parse_v2_file() {
         let json = r#"{"spec":"chara_card_v2","data":{"name":"Bob","description":"tinkerer","mes_example":"<START>\nhi"}}"#;
@@ -567,9 +577,13 @@ mod tests {
             scan_depth: 2,
             token_budget: 2048,
             ..Default::default()
-};
+        };
         let scan = scan_lore(&book, "Check the reactor!", &[]);
-        let flat: Vec<&str> = scan.before_char.iter().map(|e| e.content.as_str()).collect();
+        let flat: Vec<&str> = scan
+            .before_char
+            .iter()
+            .map(|e| e.content.as_str())
+            .collect();
         assert!(flat.contains(&"The reactor hums."));
         assert!(flat.contains(&"Day 3 on deck."));
         assert!(!flat.iter().any(|c| c.contains("never")));
@@ -589,8 +603,15 @@ mod tests {
             ..Default::default()
         };
         // Selective: both secondaries required.
-        assert!(scan_lore(&book, "the ai engine on the ship", &[]).before_char.len() == 1);
-        assert!(scan_lore(&book, "the ai ship only", &[]).before_char.is_empty());
+        assert!(
+            scan_lore(&book, "the ai engine on the ship", &[])
+                .before_char
+                .len()
+                == 1
+        );
+        assert!(scan_lore(&book, "the ai ship only", &[])
+            .before_char
+            .is_empty());
 
         // Group scoring: any secondary is enough.
         entry.use_group_scoring = true;
@@ -708,7 +729,10 @@ mod tests {
         assert!(msgs
             .iter()
             .any(|m| m.content.contains("Stay in character as Aria.")));
-        assert!(msgs.iter().any(|m| m.content.contains("Sam: a pilot".len().to_string().as_str()) || m.content.contains("engineer")));
+        assert!(msgs.iter().any(|m| m
+            .content
+            .contains("Sam: a pilot".len().to_string().as_str())
+            || m.content.contains("engineer")));
         // Example dialogue uses expanded macros.
         // The example dialogue is macro-expanded: the raw placeholder is gone.
         assert!(msgs.iter().any(|m| m.content.contains("Sam: hi")));
@@ -721,7 +745,14 @@ mod tests {
             system_prompt: "card system".into(),
             ..Default::default()
         };
-        let msgs = build_messages(&c, &Persona::default(), &[], &LoreScan::default(), "", Some("host system"));
+        let msgs = build_messages(
+            &c,
+            &Persona::default(),
+            &[],
+            &LoreScan::default(),
+            "",
+            Some("host system"),
+        );
         assert!(msgs.iter().any(|m| m.content == "host system"));
         assert!(!msgs.iter().any(|m| m.content == "card system"));
     }

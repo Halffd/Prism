@@ -702,10 +702,7 @@ mod tests {
             ModeStyle::AssetDescription.style_label(),
             "asset description"
         );
-        assert_eq!(
-            ModeStyle::Conversational.style_label(),
-            "conversational"
-        );
+        assert_eq!(ModeStyle::Conversational.style_label(), "conversational");
 
         assert_eq!(Persistence::Session.label(), "session");
         assert_eq!(Persistence::ChatTree.label(), "chat tree");
@@ -723,7 +720,8 @@ mod tests {
         assert_eq!(t, back);
         // The new fields carry defaults so older session files (written
         // before subagents/commands/style/persistence existed) still load.
-        let legacy = r#"{"tools":true,"card_prompt":false,"media":false,"tasks":false,"strategy":true}"#;
+        let legacy =
+            r#"{"tools":true,"card_prompt":false,"media":false,"tasks":false,"strategy":true}"#;
         let legacy: ModeTraits = serde_json::from_str(legacy).unwrap();
         assert!(legacy.tools);
         assert!(!legacy.subagents);
@@ -862,10 +860,7 @@ mod tests {
             session.merged_with(&tree).persistence,
             Persistence::ChatTree
         );
-        assert_eq!(
-            tree.merged_with(&always).persistence,
-            Persistence::AlwaysOn
-        );
+        assert_eq!(tree.merged_with(&always).persistence, Persistence::AlwaysOn);
         assert_eq!(
             always.merged_with(&session).persistence,
             Persistence::AlwaysOn

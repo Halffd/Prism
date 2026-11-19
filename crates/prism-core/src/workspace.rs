@@ -13,8 +13,19 @@ use std::path::{Path, PathBuf};
 /// Directories that never belong to the file tree (build output,
 /// caches, VCS internals).
 const SKIP_DIRS: &[&str] = &[
-    ".git", ".hg", ".svn", "node_modules", "target", "dist", "out", ".venv",
-    "__pycache__", ".next", ".cache", ".Turbo", "vendor",
+    ".git",
+    ".hg",
+    ".svn",
+    "node_modules",
+    "target",
+    "dist",
+    "out",
+    ".venv",
+    "__pycache__",
+    ".next",
+    ".cache",
+    ".Turbo",
+    "vendor",
 ];
 
 /// Largest read the editor will show: 512 KB.
@@ -54,7 +65,11 @@ pub fn open_root(input: &str) -> Result<PathBuf, String> {
         match home {
             Ok(home) if !home.as_os_str().is_empty() => {
                 let rel = trimmed.strip_prefix('~').unwrap_or("");
-                if rel.is_empty() { home } else { home.join(rel.trim_start_matches(['/', '\\'])) }
+                if rel.is_empty() {
+                    home
+                } else {
+                    home.join(rel.trim_start_matches(['/', '\\']))
+                }
             }
             _ => return Err("open workspace: cannot resolve ~ (no home directory)".into()),
         }
@@ -65,14 +80,19 @@ pub fn open_root(input: &str) -> Result<PathBuf, String> {
         .canonicalize()
         .map_err(|e| format!("open workspace {}: {e}", expanded.display()))?;
     if !canonical.is_dir() {
-        return Err(format!("open workspace {}: not a directory", canonical.display()));
+        return Err(format!(
+            "open workspace {}: not a directory",
+            canonical.display()
+        ));
     }
     Ok(canonical)
 }
 
 impl Workspace {
     pub fn open(input: &str) -> Result<Self, String> {
-        Ok(Self { root: open_root(input)? })
+        Ok(Self {
+            root: open_root(input)?,
+        })
     }
 
     pub fn topic(&self) -> String {
@@ -80,7 +100,9 @@ impl Workspace {
     }
 
     pub fn rel_to(&self, path: &Path) -> Option<String> {
-        path.strip_prefix(&self.root).ok().map(|p| p.to_string_lossy().replace('\\', "/"))
+        path.strip_prefix(&self.root)
+            .ok()
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
     }
 
     /// Depth-first listing: directories first, names sorted case-
@@ -91,7 +113,10 @@ impl Workspace {
     /// mid-directory.
     pub fn list_files(&self) -> Result<Vec<FileEntry>, String> {
         if !self.root.is_dir() {
-            return Err(format!("workspace root {} is not a directory", self.root.display()));
+            return Err(format!(
+                "workspace root {} is not a directory",
+                self.root.display()
+            ));
         }
         let mut rows = Vec::new();
         let hit_cap = self.walk_dir(&self.root, 0, &mut rows)?;
@@ -105,7 +130,12 @@ impl Workspace {
         Ok(rows)
     }
 
-    fn walk_dir(&self, dir: &Path, depth: usize, rows: &mut Vec<FileEntry>) -> Result<bool, String> {
+    fn walk_dir(
+        &self,
+        dir: &Path,
+        depth: usize,
+        rows: &mut Vec<FileEntry>,
+    ) -> Result<bool, String> {
         if rows.len() >= MAX_ENTRIES {
             return Ok(true);
         }
@@ -234,18 +264,21 @@ mod tests {
         write(&tmp.0.join("z.txt"), "");
         write(&tmp.0.join("node_modules/pkg/index.js"), "");
         write(&tmp.0.join(".git/config"), "");
-        write(
-            &tmp.0.join("deep/a/b/c/d/e.txt"),
-            "beyond depth",
-        );
+        write(&tmp.0.join("deep/a/b/c/d/e.txt"), "beyond depth");
         let ws = Workspace::open(tmp.0.to_str().unwrap()).unwrap();
         let rows = ws.list_files().unwrap();
         let rels: Vec<&str> = rows.iter().map(|r| r.rel.as_str()).collect();
         assert!(rels.contains(&"src"), "dirs listed");
         assert!(rels.contains(&"src/main.rs"), "files listed");
-        assert!(!rels.iter().any(|r| r.starts_with("node_modules")), "junk pruned");
+        assert!(
+            !rels.iter().any(|r| r.starts_with("node_modules")),
+            "junk pruned"
+        );
         assert!(!rels.iter().any(|r| r.starts_with(".git")), "vcs pruned");
-        assert!(!rels.iter().any(|r| r.contains("e.txt")), "depth cap enforced");
+        assert!(
+            !rels.iter().any(|r| r.contains("e.txt")),
+            "depth cap enforced"
+        );
         assert!(rels.contains(&"deep/a/b/c"), "up to the depth cap");
         // directories before their own files, sorted inside a directory
         let src_idx = rels.iter().position(|r| *r == "src").unwrap();
@@ -261,7 +294,10 @@ mod tests {
         let ws = Workspace::open(tmp.0.to_str().unwrap()).unwrap();
         assert_eq!(ws.read_file("a.txt").unwrap(), "hello");
         ws.write_file("a.txt", "hello again").unwrap();
-        assert_eq!(std::fs::read_to_string(tmp.0.join("a.txt")).unwrap(), "hello again");
+        assert_eq!(
+            std::fs::read_to_string(tmp.0.join("a.txt")).unwrap(),
+            "hello again"
+        );
 
         // traversal is refused by the same join the tools use
         assert!(ws.read_file("../secrets.txt").is_err());
@@ -298,7 +334,9 @@ mod tests {
     #[test]
     fn non_directory_root_refused() {
         let tmp = TempDir::fresh("nondir");
-        let ws = Workspace { root: tmp.0.join("missing") };
+        let ws = Workspace {
+            root: tmp.0.join("missing"),
+        };
         assert!(ws.list_files().unwrap_err().contains("not a directory"));
     }
 }

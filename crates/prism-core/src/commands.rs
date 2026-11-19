@@ -53,42 +53,216 @@ pub struct CommandDef {
 /// The registry, in palette order (grouped by CommandGroup).
 pub const COMMANDS: &[CommandDef] = &[
     // Chat
-    CommandDef { id: "chat.new", title: "New chat", group: CommandGroup::Chat, takes_arg: false, while_streaming: false },
-    CommandDef { id: "chat.history.back", title: "Previous prompt (↑)", group: CommandGroup::Chat, takes_arg: false, while_streaming: false },
-    CommandDef { id: "chat.history.forward", title: "Next prompt (↓)", group: CommandGroup::Chat, takes_arg: false, while_streaming: false },
+    CommandDef {
+        id: "chat.new",
+        title: "New chat",
+        group: CommandGroup::Chat,
+        takes_arg: false,
+        while_streaming: false,
+    },
+    CommandDef {
+        id: "chat.history.back",
+        title: "Previous prompt (↑)",
+        group: CommandGroup::Chat,
+        takes_arg: false,
+        while_streaming: false,
+    },
+    CommandDef {
+        id: "chat.history.forward",
+        title: "Next prompt (↓)",
+        group: CommandGroup::Chat,
+        takes_arg: false,
+        while_streaming: false,
+    },
     // Models
-    CommandDef { id: "models.pick", title: "Switch model…", group: CommandGroup::Models, takes_arg: true, while_streaming: false },
-    CommandDef { id: "models.fetch", title: "Fetch available models from provider", group: CommandGroup::Models, takes_arg: false, while_streaming: false },
-    CommandDef { id: "models.refresh_catalog", title: "Refresh model catalog (re-fetch /models)", group: CommandGroup::Models, takes_arg: false, while_streaming: false },
+    CommandDef {
+        id: "models.pick",
+        title: "Switch model…",
+        group: CommandGroup::Models,
+        takes_arg: true,
+        while_streaming: false,
+    },
+    CommandDef {
+        id: "models.fetch",
+        title: "Fetch available models from provider",
+        group: CommandGroup::Models,
+        takes_arg: false,
+        while_streaming: false,
+    },
+    CommandDef {
+        id: "models.refresh_catalog",
+        title: "Refresh model catalog (re-fetch /models)",
+        group: CommandGroup::Models,
+        takes_arg: false,
+        while_streaming: false,
+    },
     // Settings
-    CommandDef { id: "settings.connection.direct", title: "Connection: Direct", group: CommandGroup::Settings, takes_arg: false, while_streaming: false },
-    CommandDef { id: "settings.connection.api", title: "Connection: Prism API", group: CommandGroup::Settings, takes_arg: false, while_streaming: false },
-    CommandDef { id: "settings.save", title: "Save settings", group: CommandGroup::Settings, takes_arg: false, while_streaming: false },
-    CommandDef { id: "settings.thinking.toggle", title: "Toggle thinking mode", group: CommandGroup::Settings, takes_arg: false, while_streaming: false },
+    CommandDef {
+        id: "settings.connection.direct",
+        title: "Connection: Direct",
+        group: CommandGroup::Settings,
+        takes_arg: false,
+        while_streaming: false,
+    },
+    CommandDef {
+        id: "settings.connection.api",
+        title: "Connection: Prism API",
+        group: CommandGroup::Settings,
+        takes_arg: false,
+        while_streaming: false,
+    },
+    CommandDef {
+        id: "settings.save",
+        title: "Save settings",
+        group: CommandGroup::Settings,
+        takes_arg: false,
+        while_streaming: false,
+    },
+    CommandDef {
+        id: "settings.thinking.toggle",
+        title: "Toggle thinking mode",
+        group: CommandGroup::Settings,
+        takes_arg: false,
+        while_streaming: false,
+    },
     // Hardware
-    CommandDef { id: "hardware.cycle_gpu", title: "Cycle GPU layers override", group: CommandGroup::Hardware, takes_arg: false, while_streaming: false },
-    CommandDef { id: "hardware.cycle_ctx", title: "Cycle context tokens override", group: CommandGroup::Hardware, takes_arg: false, while_streaming: false },
-    CommandDef { id: "hardware.compute.cpu", title: "Compute: CPU only", group: CommandGroup::Hardware, takes_arg: false, while_streaming: false },
-    CommandDef { id: "hardware.compute.auto", title: "Compute: Auto", group: CommandGroup::Hardware, takes_arg: false, while_streaming: false },
-    CommandDef { id: "hardware.compute.gpu", title: "Compute: GPU auto", group: CommandGroup::Hardware, takes_arg: false, while_streaming: false },
-    CommandDef { id: "hardware.compute.gpu_nvidia", title: "Compute: GPU NVIDIA", group: CommandGroup::Hardware, takes_arg: false, while_streaming: false },
-    CommandDef { id: "hardware.compute.gpu_amd", title: "Compute: GPU AMD", group: CommandGroup::Hardware, takes_arg: false, while_streaming: false },
-    CommandDef { id: "hardware.compute.gpu_intel", title: "Compute: GPU Intel", group: CommandGroup::Hardware, takes_arg: false, while_streaming: false },
+    CommandDef {
+        id: "hardware.cycle_gpu",
+        title: "Cycle GPU layers override",
+        group: CommandGroup::Hardware,
+        takes_arg: false,
+        while_streaming: false,
+    },
+    CommandDef {
+        id: "hardware.cycle_ctx",
+        title: "Cycle context tokens override",
+        group: CommandGroup::Hardware,
+        takes_arg: false,
+        while_streaming: false,
+    },
+    CommandDef {
+        id: "hardware.compute.cpu",
+        title: "Compute: CPU only",
+        group: CommandGroup::Hardware,
+        takes_arg: false,
+        while_streaming: false,
+    },
+    CommandDef {
+        id: "hardware.compute.auto",
+        title: "Compute: Auto",
+        group: CommandGroup::Hardware,
+        takes_arg: false,
+        while_streaming: false,
+    },
+    CommandDef {
+        id: "hardware.compute.gpu",
+        title: "Compute: GPU auto",
+        group: CommandGroup::Hardware,
+        takes_arg: false,
+        while_streaming: false,
+    },
+    CommandDef {
+        id: "hardware.compute.gpu_nvidia",
+        title: "Compute: GPU NVIDIA",
+        group: CommandGroup::Hardware,
+        takes_arg: false,
+        while_streaming: false,
+    },
+    CommandDef {
+        id: "hardware.compute.gpu_amd",
+        title: "Compute: GPU AMD",
+        group: CommandGroup::Hardware,
+        takes_arg: false,
+        while_streaming: false,
+    },
+    CommandDef {
+        id: "hardware.compute.gpu_intel",
+        title: "Compute: GPU Intel",
+        group: CommandGroup::Hardware,
+        takes_arg: false,
+        while_streaming: false,
+    },
     // View
-    CommandDef { id: "view.toggle_chats", title: "Toggle chats sidebar", group: CommandGroup::View, takes_arg: false, while_streaming: true },
-    CommandDef { id: "view.toggle_settings", title: "Toggle settings panel", group: CommandGroup::View, takes_arg: false, while_streaming: true },
-    CommandDef { id: "view.scroll_end", title: "Scroll transcript to end", group: CommandGroup::View, takes_arg: false, while_streaming: true },
+    CommandDef {
+        id: "view.toggle_chats",
+        title: "Toggle chats sidebar",
+        group: CommandGroup::View,
+        takes_arg: false,
+        while_streaming: true,
+    },
+    CommandDef {
+        id: "view.toggle_settings",
+        title: "Toggle settings panel",
+        group: CommandGroup::View,
+        takes_arg: false,
+        while_streaming: true,
+    },
+    CommandDef {
+        id: "view.scroll_end",
+        title: "Scroll transcript to end",
+        group: CommandGroup::View,
+        takes_arg: false,
+        while_streaming: true,
+    },
     // Agent
-    CommandDef { id: "agent.run", title: "Run agent on the system prompt", group: CommandGroup::Agent, takes_arg: false, while_streaming: false },
-    CommandDef { id: "agent.sandbox", title: "Agent sandbox preflight (probe host, plan policy)", group: CommandGroup::Agent, takes_arg: false, while_streaming: false },
+    CommandDef {
+        id: "agent.run",
+        title: "Run agent on the system prompt",
+        group: CommandGroup::Agent,
+        takes_arg: false,
+        while_streaming: false,
+    },
+    CommandDef {
+        id: "agent.sandbox",
+        title: "Agent sandbox preflight (probe host, plan policy)",
+        group: CommandGroup::Agent,
+        takes_arg: false,
+        while_streaming: false,
+    },
     // IDE — three session types: normal chat, agent chat,
     // and the agent working from inside an editor surface.
-    CommandDef { id: "ide.mode.chat", title: "Mode: Chat", group: CommandGroup::Ide, takes_arg: false, while_streaming: false },
-    CommandDef { id: "ide.mode.agent", title: "Mode: Agent (input drives the agent loop)", group: CommandGroup::Ide, takes_arg: false, while_streaming: false },
-    CommandDef { id: "ide.mode.agent_sidebar", title: "Mode: IDE (editor + agent sidebar)", group: CommandGroup::Ide, takes_arg: false, while_streaming: false },
-    CommandDef { id: "ide.workspace.open", title: "Open workspace folder…", group: CommandGroup::Ide, takes_arg: true, while_streaming: false },
-    CommandDef { id: "ide.workspace.refresh", title: "Refresh workspace file tree", group: CommandGroup::Ide, takes_arg: false, while_streaming: true },
-    CommandDef { id: "ide.workspace.save", title: "Save the open editor file", group: CommandGroup::Ide, takes_arg: false, while_streaming: true },
+    CommandDef {
+        id: "ide.mode.chat",
+        title: "Mode: Chat",
+        group: CommandGroup::Ide,
+        takes_arg: false,
+        while_streaming: false,
+    },
+    CommandDef {
+        id: "ide.mode.agent",
+        title: "Mode: Agent (input drives the agent loop)",
+        group: CommandGroup::Ide,
+        takes_arg: false,
+        while_streaming: false,
+    },
+    CommandDef {
+        id: "ide.mode.agent_sidebar",
+        title: "Mode: IDE (editor + agent sidebar)",
+        group: CommandGroup::Ide,
+        takes_arg: false,
+        while_streaming: false,
+    },
+    CommandDef {
+        id: "ide.workspace.open",
+        title: "Open workspace folder…",
+        group: CommandGroup::Ide,
+        takes_arg: true,
+        while_streaming: false,
+    },
+    CommandDef {
+        id: "ide.workspace.refresh",
+        title: "Refresh workspace file tree",
+        group: CommandGroup::Ide,
+        takes_arg: false,
+        while_streaming: true,
+    },
+    CommandDef {
+        id: "ide.workspace.save",
+        title: "Save the open editor file",
+        group: CommandGroup::Ide,
+        takes_arg: false,
+        while_streaming: true,
+    },
 ];
 
 /// Look up a command by id.
@@ -176,7 +350,9 @@ mod tests {
 
     #[test]
     fn filter_matches_case_insensitive_on_title_and_group() {
-        assert!(filter_commands("new chat").iter().any(|c| c.id == "chat.new"));
+        assert!(filter_commands("new chat")
+            .iter()
+            .any(|c| c.id == "chat.new"));
         assert!(filter_commands("hardware").len() >= 8);
         assert!(filter_commands("HARDWARE").len() >= 8);
     }

@@ -120,7 +120,10 @@ pub fn export_backup(conversations: &[Conversation], now_ms: u64) -> BackupEnvel
 }
 
 /// Serialise a backup to JSON text.
-pub fn export_json(conversations: &[Conversation], now_ms: u64) -> Result<String, serde_json::Error> {
+pub fn export_json(
+    conversations: &[Conversation],
+    now_ms: u64,
+) -> Result<String, serde_json::Error> {
     serde_json::to_string_pretty(&export_backup(conversations, now_ms))
 }
 
@@ -138,18 +141,14 @@ pub fn parse_backup(raw: &str) -> Result<Vec<Conversation>, ImportOutcome> {
 /// The migration flag comes from the file's own version field, not
 /// from sniffing the text.
 fn parse_backup_versioned(raw: &str) -> Result<(Vec<Conversation>, bool), ImportOutcome> {
-    let envelope: BackupEnvelope = serde_json::from_str(raw).map_err(|e| {
-        ImportOutcome::Corrupt {
+    let envelope: BackupEnvelope =
+        serde_json::from_str(raw).map_err(|e| ImportOutcome::Corrupt {
             reason: format!("not a readable Prism backup: {e}"),
-        }
-    })?;
+        })?;
 
     if envelope.app != BACKUP_APP {
         return Err(ImportOutcome::Corrupt {
-            reason: format!(
-                "this file is not a Prism backup (app = {:?})",
-                envelope.app
-            ),
+            reason: format!("this file is not a Prism backup (app = {:?})", envelope.app),
         });
     }
 
@@ -274,9 +273,7 @@ mod tests {
 
     #[test]
     fn a_newer_version_is_refused() {
-        let json = format!(
-            r#"{{"app":"prism","version":99,"exported_at":0,"conversations":[]}}"#
-        );
+        let json = format!(r#"{{"app":"prism","version":99,"exported_at":0,"conversations":[]}}"#);
         let err = parse_backup(&json).unwrap_err();
         assert_eq!(err, ImportOutcome::Unsupported { version: 99 });
     }

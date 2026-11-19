@@ -213,7 +213,10 @@ mod tests {
                 ("old", (None, None)),
                 ("mid", (Some("2024-01-01"), None)),
                 ("newest", (Some("2025-06-01"), None)),
-                ("newest-deprecated", (Some("2025-08-01"), Some(ModelStatus::Deprecated))),
+                (
+                    "newest-deprecated",
+                    (Some("2025-08-01"), Some(ModelStatus::Deprecated)),
+                ),
             ]
             .into_iter()
             .map(|(id, (date, status))| {
@@ -277,7 +280,11 @@ mod tests {
             .collect(),
         };
         cat.providers.insert("test".into(), p);
-        let names: Vec<&str> = cat.models_for("test").iter().map(|m| m.id.as_str()).collect();
+        let names: Vec<&str> = cat
+            .models_for("test")
+            .iter()
+            .map(|m| m.id.as_str())
+            .collect();
         assert_eq!(names, vec!["b-new", "a-old", "c-dep"]);
     }
 

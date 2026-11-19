@@ -152,7 +152,11 @@ pub fn result_to_text(result: &serde_json::Value) -> String {
                 .join("\n")
         })
         .unwrap_or_default();
-    if result.get("isError").and_then(|e| e.as_bool()).unwrap_or(false) {
+    if result
+        .get("isError")
+        .and_then(|e| e.as_bool())
+        .unwrap_or(false)
+    {
         if text.is_empty() {
             "Error: mcp tool failed".into()
         } else {
@@ -206,10 +210,7 @@ impl StdioMcpServer {
             .spawn()
             .map_err(|e| format!("failed to start: {e}"))?;
         let stdin = child.stdin.take();
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| "no stdout".to_string())?;
+        let stdout = child.stdout.take().ok_or_else(|| "no stdout".to_string())?;
         let stderr = child.stderr.take();
 
         let inner = Mutex::new(Inner {
@@ -252,18 +253,19 @@ impl StdioMcpServer {
             });
         }
 
-        server.request(
-            "initialize",
-            serde_json::json!({
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": { "name": "prism", "version": env!("CARGO_PKG_VERSION") },
-            }),
-        )
-        .map_err(|e| {
-            server.stop();
-            format!("handshake failed: {e}")
-        })?;
+        server
+            .request(
+                "initialize",
+                serde_json::json!({
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": { "name": "prism", "version": env!("CARGO_PKG_VERSION") },
+                }),
+            )
+            .map_err(|e| {
+                server.stop();
+                format!("handshake failed: {e}")
+            })?;
         server.notify("notifications/initialized");
         Ok(server)
     }
@@ -336,7 +338,11 @@ impl StdioMcpServer {
     /// Send a request and await its result. A timed-out call also
     /// tears the connection down — a server that misses a deadline is
     /// dead weight for the rest of the session.
-    fn request(&self, method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
+    fn request(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
         let (id, rx) = {
             let mut inner = self.inner.lock().unwrap();
             if inner.dead {
@@ -455,11 +461,7 @@ impl McpTool {
             advertised: advertised_name(&server.name, raw),
             server: server.clone(),
             raw: raw.to_string(),
-            description: format!(
-                "MCP ({}): {}",
-                server.name,
-                description.unwrap_or(raw)
-            ),
+            description: format!("MCP ({}): {}", server.name, description.unwrap_or(raw)),
             schema,
         }
     }
@@ -504,7 +506,9 @@ impl McpSurface {
                                 server.clone(),
                                 raw_name,
                                 raw.get("description").and_then(|d| d.as_str()),
-                                raw.get("inputSchema").cloned().unwrap_or(serde_json::json!({})),
+                                raw.get("inputSchema")
+                                    .cloned()
+                                    .unwrap_or(serde_json::json!({})),
                             )));
                         }
                     }

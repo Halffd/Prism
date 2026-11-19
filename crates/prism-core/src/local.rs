@@ -160,8 +160,7 @@ pub fn parse_ollama_tags(body: &str) -> Result<Vec<LocalModel>, String> {
     struct Envelope {
         models: Vec<Tag>,
     }
-    let env: Envelope =
-        serde_json::from_str(body).map_err(|e| format!("ollama tags json: {e}"))?;
+    let env: Envelope = serde_json::from_str(body).map_err(|e| format!("ollama tags json: {e}"))?;
     Ok(env
         .models
         .into_iter()
@@ -188,8 +187,7 @@ pub fn parse_openai_models(body: &str) -> Result<Vec<LocalModel>, String> {
     struct Envelope {
         data: Vec<Entry>,
     }
-    let env: Envelope = serde_json::from_str(body)
-        .map_err(|e| format!("models json: {e}"))?;
+    let env: Envelope = serde_json::from_str(body).map_err(|e| format!("models json: {e}"))?;
     Ok(env
         .data
         .into_iter()
@@ -416,7 +414,14 @@ mod tests {
 
     #[test]
     fn registry_covers_expected_locals() {
-        for id in ["ollama", "lmstudio", "llamacpp", "koboldcpp", "sglang", "vllm"] {
+        for id in [
+            "ollama",
+            "lmstudio",
+            "llamacpp",
+            "koboldcpp",
+            "sglang",
+            "vllm",
+        ] {
             assert!(find(id).is_some(), "missing {id}");
         }
         assert!(is_local("llamacpp"));
@@ -445,7 +450,10 @@ mod tests {
             lm.models_url("http://localhost:1234/v1"),
             "http://localhost:1234/v1/models"
         );
-        assert_eq!(lm.models_url("http://localhost:1234/v1/"), "http://localhost:1234/v1/models");
+        assert_eq!(
+            lm.models_url("http://localhost:1234/v1/"),
+            "http://localhost:1234/v1/models"
+        );
     }
 
     #[test]
@@ -519,7 +527,7 @@ mod tests {
         b.extend_from_slice(&3u32.to_le_bytes()); // version
         b.extend_from_slice(&1u64.to_le_bytes()); // tensor count
         b.extend_from_slice(&1u64.to_le_bytes()); // kv count
-        // key: "test.name"
+                                                  // key: "test.name"
         let key = b"test.name";
         b.extend_from_slice(&(key.len() as u64).to_le_bytes());
         b.extend_from_slice(key);

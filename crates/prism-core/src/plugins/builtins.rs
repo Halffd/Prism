@@ -43,7 +43,11 @@ fn parse_snippets(text: &str) -> Vec<(String, String)> {
     };
     arr.iter()
         .filter_map(|s| {
-            let trigger = s.get("trigger")?.as_str()?.trim_start_matches('#').to_string();
+            let trigger = s
+                .get("trigger")?
+                .as_str()?
+                .trim_start_matches('#')
+                .to_string();
             let body = s.get("body")?.as_str()?.to_string();
             Some((trigger, body))
         })
@@ -67,13 +71,30 @@ impl Plugin for Snippets {
 
     fn commands(&self) -> Vec<CommandSpec> {
         vec![
-            CommandSpec { name: "list", usage: "", help: "list configured snippets" },
-            CommandSpec { name: "add", usage: "<trigger> <body>", help: "add/update a snippet" },
-            CommandSpec { name: "del", usage: "<trigger>", help: "remove a snippet" },
+            CommandSpec {
+                name: "list",
+                usage: "",
+                help: "list configured snippets",
+            },
+            CommandSpec {
+                name: "add",
+                usage: "<trigger> <body>",
+                help: "add/update a snippet",
+            },
+            CommandSpec {
+                name: "del",
+                usage: "<trigger>",
+                help: "remove a snippet",
+            },
         ]
     }
 
-    fn run_command(&self, ctx: &PluginContext, command: &str, arg: &str) -> anyhow::Result<Vec<String>> {
+    fn run_command(
+        &self,
+        ctx: &PluginContext,
+        command: &str,
+        arg: &str,
+    ) -> anyhow::Result<Vec<String>> {
         let Some(dir) = ctx.state_dir("snippets") else {
             return Ok(vec!["snippets: no config dir; set PRISM_CONFIG_DIR".into()]);
         };
@@ -88,7 +109,9 @@ impl Plugin for Snippets {
         match command {
             "list" => {
                 if map.is_empty() {
-                    Ok(vec!["snippets: none (add with /snippets.add <trigger> <body>)".into()])
+                    Ok(vec![
+                        "snippets: none (add with /snippets.add <trigger> <body>)".into(),
+                    ])
                 } else {
                     Ok(map.iter().map(|(t, b)| format!("#{t}: {b}")).collect())
                 }
@@ -102,9 +125,13 @@ impl Plugin for Snippets {
                 map.push((trigger.clone(), body.to_string()));
                 let records: Vec<SnippetRecord> = map
                     .iter()
-                    .map(|(t, b)| SnippetRecord { trigger: t.clone(), body: b.clone() })
+                    .map(|(t, b)| SnippetRecord {
+                        trigger: t.clone(),
+                        body: b.clone(),
+                    })
                     .collect();
-                ctx.storage.write_atomic(&file, &serde_json::to_string_pretty(&records)?)?;
+                ctx.storage
+                    .write_atomic(&file, &serde_json::to_string_pretty(&records)?)?;
                 Ok(vec![format!("snippet #{trigger} saved")])
             }
             "del" => {
@@ -116,9 +143,13 @@ impl Plugin for Snippets {
                 } else {
                     let records: Vec<SnippetRecord> = map
                         .iter()
-                        .map(|(t, b)| SnippetRecord { trigger: t.clone(), body: b.clone() })
+                        .map(|(t, b)| SnippetRecord {
+                            trigger: t.clone(),
+                            body: b.clone(),
+                        })
                         .collect();
-                    ctx.storage.write_atomic(&file, &serde_json::to_string_pretty(&records)?)?;
+                    ctx.storage
+                        .write_atomic(&file, &serde_json::to_string_pretty(&records)?)?;
                     Ok(vec![format!("snippet #{trigger} removed")])
                 }
             }
@@ -126,7 +157,12 @@ impl Plugin for Snippets {
         }
     }
 
-    fn before_send(&self, ctx: &PluginContext, text: &str, _settings: &Settings) -> anyhow::Result<Option<String>> {
+    fn before_send(
+        &self,
+        ctx: &PluginContext,
+        text: &str,
+        _settings: &Settings,
+    ) -> anyhow::Result<Option<String>> {
         let Some(dir) = ctx.state_dir("snippets") else {
             return Ok(None);
         };
@@ -180,21 +216,34 @@ pub fn format_memory_line(ts: &str, kind: &str, scope: &str, content: &str) -> S
 
 /// Parse a logfmt memory line.
 pub fn parse_memory_line(line: &str) -> Option<(String, String, String, String)> {
-    let ts = line.split_whitespace().find(|t| t.starts_with("ts="))?.strip_prefix("ts=")?;
-    let ty = line.split_whitespace().find(|t| t.starts_with("type="))?.strip_prefix("type=")?;
-    let sc = line.split_whitespace().find(|t| t.starts_with("scope="))?.strip_prefix("scope=")?;
+    let ts = line
+        .split_whitespace()
+        .find(|t| t.starts_with("ts="))?
+        .strip_prefix("ts=")?;
+    let ty = line
+        .split_whitespace()
+        .find(|t| t.starts_with("type="))?
+        .strip_prefix("type=")?;
+    let sc = line
+        .split_whitespace()
+        .find(|t| t.starts_with("scope="))?
+        .strip_prefix("scope=")?;
     // content is the LAST field and is quoted: take everything between the
     // opening quote and the final closing quote (an escaped `\"` inside the
     // content stays, then gets unescaped below).
     let raw = line.rsplit_once("content=\"")?.1;
     let raw = raw.strip_suffix('"').unwrap_or(raw);
     // Invert `format_memory_line`'s escaping: `\\` -> `\`, `\"` -> `"`.
-    let content = raw.replace("\\\\", "\u{1}").replace("\\\"", "\"").replace('\u{1}', "\\");
+    let content = raw
+        .replace("\\\\", "\u{1}")
+        .replace("\\\"", "\"")
+        .replace('\u{1}', "\\");
     Some((ts.to_string(), ty.to_string(), sc.to_string(), content))
 }
 
 fn memory_file(ctx: &PluginContext, day: &str) -> Option<std::path::PathBuf> {
-    ctx.state_dir("memory").map(|d| d.join(format!("{day}.logfmt")))
+    ctx.state_dir("memory")
+        .map(|d| d.join(format!("{day}.logfmt")))
 }
 
 impl Plugin for Memory {
@@ -207,13 +256,30 @@ impl Plugin for Memory {
 
     fn commands(&self) -> Vec<CommandSpec> {
         vec![
-            CommandSpec { name: "save", usage: "<type> <scope> <content>", help: "append a memory note" },
-            CommandSpec { name: "read", usage: "[day]", help: "read a day's notes (default today)" },
-            CommandSpec { name: "search", usage: "<query>", help: "grep recent notes" },
+            CommandSpec {
+                name: "save",
+                usage: "<type> <scope> <content>",
+                help: "append a memory note",
+            },
+            CommandSpec {
+                name: "read",
+                usage: "[day]",
+                help: "read a day's notes (default today)",
+            },
+            CommandSpec {
+                name: "search",
+                usage: "<query>",
+                help: "grep recent notes",
+            },
         ]
     }
 
-    fn run_command(&self, ctx: &PluginContext, command: &str, arg: &str) -> anyhow::Result<Vec<String>> {
+    fn run_command(
+        &self,
+        ctx: &PluginContext,
+        command: &str,
+        arg: &str,
+    ) -> anyhow::Result<Vec<String>> {
         let today = crate::conversations::now_ms();
         let day = super::builtins::ms_to_day(today);
 
@@ -231,7 +297,12 @@ impl Plugin for Memory {
                     return Ok(vec!["usage: /memory.save <type> <scope> <content>".into()]);
                 }
                 let file = dir.join(format!("{day}.logfmt"));
-                let line = format_memory_line(&crate::conversations::now_ms().to_string(), kind, scope, content);
+                let line = format_memory_line(
+                    &crate::conversations::now_ms().to_string(),
+                    kind,
+                    scope,
+                    content,
+                );
                 let existing = ctx.storage.read_to_string(&file).unwrap_or_default();
                 let mut body = existing;
                 if !body.is_empty() && !body.ends_with('\n') {
@@ -243,12 +314,18 @@ impl Plugin for Memory {
                 Ok(vec![format!("memory: saved [{day}] {kind}/{scope}")])
             }
             "read" => {
-                let target = if arg.trim().is_empty() { day.clone() } else { arg.trim().to_string() };
+                let target = if arg.trim().is_empty() {
+                    day.clone()
+                } else {
+                    arg.trim().to_string()
+                };
                 let Some(file) = memory_file(ctx, &target) else {
                     return Ok(vec!["memory: no config dir".into()]);
                 };
                 match ctx.storage.read_to_string(&file) {
-                    Ok(text) if !text.trim().is_empty() => Ok(text.lines().map(|l| l.to_string()).collect()),
+                    Ok(text) if !text.trim().is_empty() => {
+                        Ok(text.lines().map(|l| l.to_string()).collect())
+                    }
                     _ => Ok(vec![format!("memory: no notes for {target}")]),
                 }
             }
@@ -262,7 +339,10 @@ impl Plugin for Memory {
                 }
                 let mut hits = Vec::new();
                 let files = ctx.storage.read_dir(&dir).unwrap_or_default();
-                let mut names: Vec<_> = files.iter().filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string())).collect();
+                let mut names: Vec<_> = files
+                    .iter()
+                    .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+                    .collect();
                 names.sort();
                 for name in names.into_iter().rev() {
                     if !name.ends_with(".logfmt") {
@@ -295,7 +375,10 @@ impl Plugin for Memory {
             return String::new();
         };
         let files = ctx.storage.read_dir(&dir).unwrap_or_default();
-        let count = files.iter().filter(|p| p.extension().map(|e| e == "logfmt").unwrap_or(false)).count();
+        let count = files
+            .iter()
+            .filter(|p| p.extension().map(|e| e == "logfmt").unwrap_or(false))
+            .count();
         if count > 0 {
             format!("mem:{count}d")
         } else {
@@ -371,10 +454,19 @@ impl Plugin for Ponytail {
     }
 
     fn commands(&self) -> Vec<CommandSpec> {
-        vec![CommandSpec { name: "mode", usage: "[off|lite|full|ultra]", help: "show or set tone intensity" }]
+        vec![CommandSpec {
+            name: "mode",
+            usage: "[off|lite|full|ultra]",
+            help: "show or set tone intensity",
+        }]
     }
 
-    fn run_command(&self, ctx: &PluginContext, command: &str, arg: &str) -> anyhow::Result<Vec<String>> {
+    fn run_command(
+        &self,
+        ctx: &PluginContext,
+        command: &str,
+        arg: &str,
+    ) -> anyhow::Result<Vec<String>> {
         if command != "mode" {
             anyhow::bail!("unknown ponytail command {command}");
         }
@@ -408,7 +500,10 @@ impl Plugin for Ponytail {
     }
 
     fn status(&self, ctx: &PluginContext) -> String {
-        read_mode(ctx).filter(|m| m != "off").map(|m| format!("tone:{m}")).unwrap_or_default()
+        read_mode(ctx)
+            .filter(|m| m != "off")
+            .map(|m| format!("tone:{m}"))
+            .unwrap_or_default()
     }
 }
 
@@ -451,16 +546,45 @@ impl Plugin for Planning {
 
     fn commands(&self) -> Vec<CommandSpec> {
         vec![
-            CommandSpec { name: "plan", usage: "<name> <description>", help: "create a plan (add steps later via edit)" },
-            CommandSpec { name: "plans", usage: "", help: "list plans" },
-            CommandSpec { name: "read", usage: "<name>", help: "read a plan with linked specs" },
-            CommandSpec { name: "link", usage: "<plan> <spec>", help: "link a spec into a plan" },
-            CommandSpec { name: "spec", usage: "<name> <content>", help: "create a spec" },
-            CommandSpec { name: "done", usage: "<name>", help: "mark a plan done" },
+            CommandSpec {
+                name: "plan",
+                usage: "<name> <description>",
+                help: "create a plan (add steps later via edit)",
+            },
+            CommandSpec {
+                name: "plans",
+                usage: "",
+                help: "list plans",
+            },
+            CommandSpec {
+                name: "read",
+                usage: "<name>",
+                help: "read a plan with linked specs",
+            },
+            CommandSpec {
+                name: "link",
+                usage: "<plan> <spec>",
+                help: "link a spec into a plan",
+            },
+            CommandSpec {
+                name: "spec",
+                usage: "<name> <content>",
+                help: "create a spec",
+            },
+            CommandSpec {
+                name: "done",
+                usage: "<name>",
+                help: "mark a plan done",
+            },
         ]
     }
 
-    fn run_command(&self, ctx: &PluginContext, command: &str, arg: &str) -> anyhow::Result<Vec<String>> {
+    fn run_command(
+        &self,
+        ctx: &PluginContext,
+        command: &str,
+        arg: &str,
+    ) -> anyhow::Result<Vec<String>> {
         let Some(plans) = plans_dir(ctx) else {
             return Ok(vec!["planning: no config dir".into()]);
         };
@@ -481,7 +605,10 @@ impl Plugin for Planning {
                 valid_plan_name(name.trim()).map_err(anyhow::Error::msg)?;
                 let file = plan_file(name.trim());
                 if ctx.storage.read_to_string(&file).is_ok() {
-                    return Ok(vec![format!("planning: plan '{}' already exists", name.trim())]);
+                    return Ok(vec![format!(
+                        "planning: plan '{}' already exists",
+                        name.trim()
+                    )]);
                 }
                 let body = format!(
                     "---\nplan name: {}\nplan description: {}\nplan status: active\n---\n\n## Required Specs\n{SPEC_START}\n{SPEC_END}\n",
@@ -537,7 +664,9 @@ impl Plugin for Planning {
                     .read_to_string(&plan_file(plan))
                     .map_err(|_| anyhow::anyhow!("plan '{plan}' not found"))?;
                 if ctx.storage.read_to_string(&spec_file(spec)).is_err() {
-                    return Ok(vec![format!("planning: spec '{spec}' not found (create with /planning.spec)")]);
+                    return Ok(vec![format!(
+                        "planning: spec '{spec}' not found (create with /planning.spec)"
+                    )]);
                 }
                 let updated = if let Some((before, rest)) = body.split_once(SPEC_START) {
                     let mid_end = rest.split_once(SPEC_END);
@@ -565,9 +694,16 @@ impl Plugin for Planning {
                 valid_plan_name(name.trim()).map_err(anyhow::Error::msg)?;
                 let file = spec_file(name.trim());
                 if ctx.storage.read_to_string(&file).is_ok() {
-                    return Ok(vec![format!("planning: spec '{}' already exists", name.trim())]);
+                    return Ok(vec![format!(
+                        "planning: spec '{}' already exists",
+                        name.trim()
+                    )]);
                 }
-                let body = format!("---\nspec name: {}\n---\n\n{}\n", name.trim(), content.trim());
+                let body = format!(
+                    "---\nspec name: {}\n---\n\n{}\n",
+                    name.trim(),
+                    content.trim()
+                );
                 ctx.storage.write_atomic(&file, &body)?;
                 Ok(vec![format!("planning: created spec '{}'", name.trim())])
             }
@@ -641,10 +777,19 @@ impl Plugin for Usage {
     }
 
     fn commands(&self) -> Vec<CommandSpec> {
-        vec![CommandSpec { name: "show", usage: "", help: "show usage counters" }]
+        vec![CommandSpec {
+            name: "show",
+            usage: "",
+            help: "show usage counters",
+        }]
     }
 
-    fn run_command(&self, ctx: &PluginContext, command: &str, _arg: &str) -> anyhow::Result<Vec<String>> {
+    fn run_command(
+        &self,
+        ctx: &PluginContext,
+        command: &str,
+        _arg: &str,
+    ) -> anyhow::Result<Vec<String>> {
         if command != "show" {
             anyhow::bail!("unknown usage command {command}");
         }
@@ -658,11 +803,19 @@ impl Plugin for Usage {
         )])
     }
 
-    fn before_send(&self, ctx: &PluginContext, text: &str, _settings: &Settings) -> anyhow::Result<Option<String>> {
+    fn before_send(
+        &self,
+        ctx: &PluginContext,
+        text: &str,
+        _settings: &Settings,
+    ) -> anyhow::Result<Option<String>> {
         let mut st = self.load(ctx);
         let today = ms_to_day(crate::conversations::now_ms());
         if st.day != today {
-            st = UsageState { day: today, ..Default::default() };
+            st = UsageState {
+                day: today,
+                ..Default::default()
+            };
         }
         st.requests += 1;
         st.chars_in += text.len() as u64;
@@ -684,7 +837,10 @@ impl Usage {
         let mut st = p.load(ctx);
         let today = ms_to_day(crate::conversations::now_ms());
         if st.day != today {
-            st = UsageState { day: today, ..Default::default() };
+            st = UsageState {
+                day: today,
+                ..Default::default()
+            };
         }
         st.requests += 1;
         st.chars_in += chars_in as u64;
@@ -737,10 +893,19 @@ impl Plugin for Skills {
     }
 
     fn commands(&self) -> Vec<CommandSpec> {
-        vec![CommandSpec { name: "list", usage: "", help: "list installed skills" }]
+        vec![CommandSpec {
+            name: "list",
+            usage: "",
+            help: "list installed skills",
+        }]
     }
 
-    fn run_command(&self, ctx: &PluginContext, command: &str, _arg: &str) -> anyhow::Result<Vec<String>> {
+    fn run_command(
+        &self,
+        ctx: &PluginContext,
+        command: &str,
+        _arg: &str,
+    ) -> anyhow::Result<Vec<String>> {
         if command != "list" {
             anyhow::bail!("unknown skills command {command}");
         }
@@ -749,7 +914,10 @@ impl Plugin for Skills {
         };
         let mut rows = Vec::new();
         for entry in ctx.storage.read_dir(&dir).unwrap_or_default() {
-            let name = entry.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            let name = entry
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
             if ctx.storage.read_to_string(&entry.join("SKILL.md")).is_ok() {
                 rows.push(format!("  {name}"));
             }
@@ -767,7 +935,10 @@ impl Plugin for Skills {
         };
         let mut names = Vec::new();
         for entry in ctx.storage.read_dir(&dir).unwrap_or_default() {
-            let name = entry.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            let name = entry
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
             if ctx.storage.read_to_string(&entry.join("SKILL.md")).is_ok() {
                 names.push(name);
             }
@@ -800,11 +971,17 @@ mod tests {
 
     /// Context with storage but no config dir.
     fn ctx_no_storage<'a>(storage: &'a MemStorage) -> PluginContext<'a> {
-        PluginContext { storage, config_dir: None }
+        PluginContext {
+            storage,
+            config_dir: None,
+        }
     }
 
     fn tempdir(name: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!("prism-test-{name}-{}", crate::conversations::now_ms()));
+        let p = std::env::temp_dir().join(format!(
+            "prism-test-{name}-{}",
+            crate::conversations::now_ms()
+        ));
         std::fs::create_dir_all(&p).unwrap();
         p
     }
@@ -815,11 +992,17 @@ mod tests {
         let p = Snippets;
         let storage = MemStorage::new();
         let ctx = ctx_with(&storage, &dir);
-        assert_eq!(p.run_command(&ctx, "add", "sig — A. Person").unwrap()[0], "snippet #sig saved");
-        assert!(p.run_command(&ctx, "add", "nomatch extra body", ).unwrap()[0].contains("nomatch"));
+        assert_eq!(
+            p.run_command(&ctx, "add", "sig — A. Person").unwrap()[0],
+            "snippet #sig saved"
+        );
+        assert!(p.run_command(&ctx, "add", "nomatch extra body",).unwrap()[0].contains("nomatch"));
         let list = p.run_command(&ctx, "list", "").unwrap();
         assert_eq!(list.len(), 2);
-        assert_eq!(p.run_command(&ctx, "del", "sig").unwrap()[0], "snippet #sig removed");
+        assert_eq!(
+            p.run_command(&ctx, "del", "sig").unwrap()[0],
+            "snippet #sig removed"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -831,7 +1014,11 @@ mod tests {
         let ctx = ctx_with(&storage, &dir);
         p.run_command(&ctx, "add", "btw by the way").unwrap();
         let expanded = p
-            .before_send(&ctx, "hello #btw world", &crate::settings::Settings::default())
+            .before_send(
+                &ctx,
+                "hello #btw world",
+                &crate::settings::Settings::default(),
+            )
             .unwrap()
             .unwrap();
         assert_eq!(expanded, "hello by the way world");
@@ -844,7 +1031,10 @@ mod tests {
         let p = Memory;
         let storage = MemStorage::new();
         let ctx = ctx_with(&storage, &dir);
-        assert!(p.run_command(&ctx, "save", "decision topic: alpha build green").unwrap()[0].contains("decision/topic"));
+        assert!(p
+            .run_command(&ctx, "save", "decision topic: alpha build green")
+            .unwrap()[0]
+            .contains("decision/topic"));
         let read = p.run_command(&ctx, "read", "").unwrap();
         assert!(read.iter().any(|l| l.contains("alpha")));
         let hits = p.run_command(&ctx, "search", "alpha").unwrap();
@@ -854,7 +1044,12 @@ mod tests {
 
     #[test]
     fn memory_line_parse_roundtrip() {
-        let line = format_memory_line("2026-01-01T00:00:00Z", "decision", "core", "quote \"inside\"");
+        let line = format_memory_line(
+            "2026-01-01T00:00:00Z",
+            "decision",
+            "core",
+            "quote \"inside\"",
+        );
         let (ts, ty, sc, content) = parse_memory_line(&line).unwrap();
         assert_eq!(ts, "2026-01-01T00:00:00Z");
         assert_eq!(ty, "decision");
@@ -868,7 +1063,10 @@ mod tests {
         let p = Ponytail;
         let storage = MemStorage::new();
         let ctx = ctx_with(&storage, &dir);
-        assert_eq!(p.run_command(&ctx, "mode", "full").unwrap()[0], "ponytail: full");
+        assert_eq!(
+            p.run_command(&ctx, "mode", "full").unwrap()[0],
+            "ponytail: full"
+        );
         let suffix = p.system_prompt_suffix(&ctx, &crate::settings::Settings::default());
         assert!(suffix.contains("Terse fragments"));
         assert_eq!(p.status(&ctx), "tone:full");
@@ -890,16 +1088,22 @@ mod tests {
         let p = Planning;
         let storage = MemStorage::new();
         let ctx = ctx_with(&storage, &dir);
-        assert!(p.run_command(&ctx, "plan", "my-plan first feature work").unwrap()[0].contains("created"));
-        assert!(p.run_command(&ctx, "spec", "api-musts json shapes").unwrap()[0].contains("created"));
+        assert!(p
+            .run_command(&ctx, "plan", "my-plan first feature work")
+            .unwrap()[0]
+            .contains("created"));
+        assert!(p
+            .run_command(&ctx, "spec", "api-musts json shapes")
+            .unwrap()[0]
+            .contains("created"));
         assert!(p.run_command(&ctx, "link", "my-plan api-musts").unwrap()[0].contains("linked"));
         let read = p.run_command(&ctx, "read", "my-plan").unwrap();
         assert!(read.iter().any(|l| l.contains("api-musts")));
         assert!(p.run_command(&ctx, "done", "my-plan").unwrap()[0].contains("done"));
         assert!(p.run_command(&ctx, "done", "my-plan").unwrap()[0].contains("done")); // idempotent
-        // "Bad Name!" splits at the first space: name="Bad", desc="Name! desc" →
-        // a valid name (only the first token is validated). An in-name bad
-        // character needs to be in the first token:
+                                                                                      // "Bad Name!" splits at the first space: name="Bad", desc="Name! desc" →
+                                                                                      // a valid name (only the first token is validated). An in-name bad
+                                                                                      // character needs to be in the first token:
         assert!(p.run_command(&ctx, "plan", "Bad!Name desc").is_err());
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -910,8 +1114,10 @@ mod tests {
         let p = Usage;
         let storage = MemStorage::new();
         let ctx = ctx_with(&storage, &dir);
-        p.before_send(&ctx, "hello", &crate::settings::Settings::default()).unwrap();
-        p.before_send(&ctx, "again", &crate::settings::Settings::default()).unwrap();
+        p.before_send(&ctx, "hello", &crate::settings::Settings::default())
+            .unwrap();
+        p.before_send(&ctx, "again", &crate::settings::Settings::default())
+            .unwrap();
         assert_eq!(p.status(&ctx), "req:2");
         let show = p.run_command(&ctx, "show", "").unwrap()[0].clone();
         assert!(show.contains("2 requests"));
@@ -942,7 +1148,9 @@ mod tests {
         let storage = MemStorage::new();
         let skill_dir = dir.join("plugins").join("skills").join("demo");
         storage.create_dir_all(&skill_dir).unwrap();
-        storage.write_atomic(&skill_dir.join("SKILL.md"), "x").unwrap();
+        storage
+            .write_atomic(&skill_dir.join("SKILL.md"), "x")
+            .unwrap();
         let ctx = ctx_with(&storage, &dir);
         let list = p.run_command(&ctx, "list", "").unwrap();
         assert_eq!(list, vec!["  demo"]);

@@ -186,7 +186,11 @@ mod tests {
         let result = context_budget(&items, 20);
         assert!(result[0].enabled);
         assert!(!result[1].enabled, "still disabled");
-        assert_eq!(enabled_tokens(&result), 10, "the disabled item costs nothing");
+        assert_eq!(
+            enabled_tokens(&result),
+            10,
+            "the disabled item costs nothing"
+        );
     }
     #[test]
     fn equal_priority_keeps_the_original_order() {

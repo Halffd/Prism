@@ -55,7 +55,9 @@ pub struct SubagentRegistry {
 
 impl Default for SubagentRegistry {
     fn default() -> Self {
-        Self { specs: default_specs().into_iter().collect() }
+        Self {
+            specs: default_specs().into_iter().collect(),
+        }
     }
 }
 
@@ -73,10 +75,7 @@ impl SubagentRegistry {
     /// file (`mcp.json` — the same file the MCP servers come from).
     /// Same-name entries replace the shipped spec; a malformed entry is
     /// reported and skipped, never fatal. Returns (applied, errors).
-    pub fn upsert_config_specs(
-        &mut self,
-        entries: &[serde_json::Value],
-    ) -> (usize, Vec<String>) {
+    pub fn upsert_config_specs(&mut self, entries: &[serde_json::Value]) -> (usize, Vec<String>) {
         let mut applied = 0;
         let mut errors = Vec::new();
         for (i, e) in entries.iter().enumerate() {
@@ -86,7 +85,9 @@ impl SubagentRegistry {
                 .map(|n| {
                     let mut chars = n.chars();
                     matches!(chars.next(), Some(c) if c.is_ascii_lowercase())
-                        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+                        && chars.all(|c| {
+                            c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-'
+                        })
                 })
                 .unwrap_or(false);
             if !valid_name {
@@ -159,9 +160,12 @@ impl SubagentRegistry {
         session_model: &str,
         provider_default: Option<String>,
     ) -> Result<ModelResolution, String> {
-        let spec = self
-            .get(name)
-            .ok_or_else(|| format!("unknown subagent {name:?} (known: {})", self.names().join(", ")))?;
+        let spec = self.get(name).ok_or_else(|| {
+            format!(
+                "unknown subagent {name:?} (known: {})",
+                self.names().join(", ")
+            )
+        })?;
         if let Some(forced) = spec
             .forced_model
             .as_deref()
@@ -179,12 +183,18 @@ impl SubagentRegistry {
                 tier: Tier::Session,
             });
         }
-        match provider_default.map(|d| d.trim().to_string()).filter(|d| !d.is_empty()) {
+        match provider_default
+            .map(|d| d.trim().to_string())
+            .filter(|d| !d.is_empty())
+        {
             Some(default) => Ok(ModelResolution {
                 model: default,
                 tier: Tier::ProviderDefault,
             }),
-            None => Err("no model available (no forced model, empty session model, no provider default)".into()),
+            None => Err(
+                "no model available (no forced model, empty session model, no provider default)"
+                    .into(),
+            ),
         }
     }
 
@@ -244,7 +254,12 @@ pub fn default_specs() -> Vec<SubagentSpec> {
             name: "ci-investigation".into(),
             description: "Investigate a failing CI run and propose a fix".into(),
             forced_model: None,
-            tool_allowlist: vec!["read_file".into(), "list_dir".into(), "edit_file".into(), "shell".into()],
+            tool_allowlist: vec![
+                "read_file".into(),
+                "list_dir".into(),
+                "edit_file".into(),
+                "shell".into(),
+            ],
         },
         SubagentSpec {
             name: "browser-use".into(),
@@ -314,10 +329,7 @@ mod tests {
         let reg = SubagentRegistry::default();
         assert!(reg.names().contains(&"explore".to_string()));
         assert!(reg.names().contains(&"security-review".to_string()));
-        assert_eq!(
-            SubagentRegistry::task_tool_name("explore"),
-            "task_explore"
-        );
+        assert_eq!(SubagentRegistry::task_tool_name("explore"), "task_explore");
     }
 
     #[test]
@@ -329,11 +341,15 @@ mod tests {
             forced_model: Some("cheap-fast-model".into()),
             tool_allowlist: vec![],
         });
-        let r = reg.resolve_model("explore", "premium-model", Some("default-model".into())).unwrap();
+        let r = reg
+            .resolve_model("explore", "premium-model", Some("default-model".into()))
+            .unwrap();
         assert_eq!(r.model, "cheap-fast-model");
         assert_eq!(r.tier, Tier::SubagentForced);
 
-        let r = reg.resolve_model("security-review", "premium-model", Some("d".into())).unwrap();
+        let r = reg
+            .resolve_model("security-review", "premium-model", Some("d".into()))
+            .unwrap();
         assert_eq!(r.model, "premium-model");
         assert_eq!(r.tier, Tier::Session);
     }
@@ -341,7 +357,9 @@ mod tests {
     #[test]
     fn provider_default_is_last_resort() {
         let reg = SubagentRegistry::default();
-        let r = reg.resolve_model("bugbot", "", Some("provider-default".into())).unwrap();
+        let r = reg
+            .resolve_model("bugbot", "", Some("provider-default".into()))
+            .unwrap();
         assert_eq!(r.tier, Tier::ProviderDefault);
         assert!(reg.resolve_model("bugbot", "", None).is_err());
         assert!(reg.resolve_model("ghost", "m", None).is_err());
@@ -350,10 +368,18 @@ mod tests {
     #[test]
     fn allowlist_clamps_advertised() {
         let reg = SubagentRegistry::default();
-        let adv = vec!["read_file".into(), "list_dir".into(), "edit_file".into(), "shell".into()];
+        let adv = vec![
+            "read_file".into(),
+            "list_dir".into(),
+            "edit_file".into(),
+            "shell".into(),
+        ];
         // explore: allowlist ∩ advertised, unadvertised entries dropped.
         let clamped = reg.clamp_tools("explore", &adv).unwrap();
-        assert_eq!(clamped, vec!["read_file".to_string(), "list_dir".to_string()]);
+        assert_eq!(
+            clamped,
+            vec!["read_file".to_string(), "list_dir".to_string()]
+        );
 
         // Subset allowlist that fully overlaps keeps its entries.
         assert_eq!(
@@ -361,7 +387,9 @@ mod tests {
             vec!["read_file".to_string(), "list_dir".to_string()]
         );
         // Allowlist intersecting to nothing is a configuration error.
-        assert!(reg.clamp_tools("shell-ops", &["calculator".into()]).is_err());
+        assert!(reg
+            .clamp_tools("shell-ops", &["calculator".into()])
+            .is_err());
         // Empty allowlist = full surface.
         assert_eq!(reg.clamp_tools("browser-use", &adv).unwrap(), adv);
         assert!(reg.clamp_tools("ghost", &adv).is_err());

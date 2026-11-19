@@ -66,13 +66,23 @@ pub trait Plugin: Send + Sync {
 
     /// Run a command by id. `Ok(lines)` are user-facing messages;
     /// `Err(e)` is a failure the surface formats. Default: no commands.
-    fn run_command(&self, _ctx: &PluginContext, _command: &str, _arg: &str) -> anyhow::Result<Vec<String>> {
+    fn run_command(
+        &self,
+        _ctx: &PluginContext,
+        _command: &str,
+        _arg: &str,
+    ) -> anyhow::Result<Vec<String>> {
         anyhow::bail!("plugin {} has no commands", self.id())
     }
 
     /// Rewrite outgoing user text before it reaches the request builder.
     /// Return `None` to pass the text through unchanged.
-    fn before_send(&self, _ctx: &PluginContext, _text: &str, _settings: &crate::settings::Settings) -> anyhow::Result<Option<String>> {
+    fn before_send(
+        &self,
+        _ctx: &PluginContext,
+        _text: &str,
+        _settings: &crate::settings::Settings,
+    ) -> anyhow::Result<Option<String>> {
         Ok(None) // default: pass text through unchanged
     }
 
@@ -91,7 +101,11 @@ pub trait Plugin: Send + Sync {
 
     /// Extra lines appended to the system prompt (communication rules,
     /// skills guidance). Applied before request assembly.
-    fn system_prompt_suffix(&self, ctx: &PluginContext, settings: &crate::settings::Settings) -> String {
+    fn system_prompt_suffix(
+        &self,
+        ctx: &PluginContext,
+        settings: &crate::settings::Settings,
+    ) -> String {
         let _ = (ctx, settings);
         String::new()
     }
@@ -122,7 +136,9 @@ pub struct Registry {
 
 impl Registry {
     pub fn new() -> Self {
-        Self { plugins: Vec::new() }
+        Self {
+            plugins: Vec::new(),
+        }
     }
 
     /// Default set: every builtin plugin, in pipeline order.
@@ -147,11 +163,21 @@ impl Registry {
     }
 
     pub fn get(&self, id: &str) -> Option<&dyn Plugin> {
-        self.plugins.iter().map(|p| p.as_ref()).find(|p| p.id() == id)
+        self.plugins
+            .iter()
+            .map(|p| p.as_ref())
+            .find(|p| p.id() == id)
     }
 
-    fn context<'a>(&self, storage: &'a dyn Storage, config_dir: Option<&'a std::path::Path>) -> PluginContext<'a> {
-        PluginContext { storage, config_dir }
+    fn context<'a>(
+        &self,
+        storage: &'a dyn Storage,
+        config_dir: Option<&'a std::path::Path>,
+    ) -> PluginContext<'a> {
+        PluginContext {
+            storage,
+            config_dir,
+        }
     }
 
     /// Dispatch `<plugin>.<command>`. Returns `None` when no plugin owns
@@ -280,7 +306,10 @@ mod tests {
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "missing"))
         }
         fn write_atomic(&self, path: &Path, contents: &str) -> io::Result<()> {
-            self.files.lock().unwrap().insert(path.to_path_buf(), contents.to_string());
+            self.files
+                .lock()
+                .unwrap()
+                .insert(path.to_path_buf(), contents.to_string());
             Ok(())
         }
         fn create_dir_all(&self, path: &Path) -> io::Result<()> {
@@ -325,9 +354,18 @@ mod tests {
             "test echo plugin"
         }
         fn commands(&self) -> Vec<CommandSpec> {
-            vec![CommandSpec { name: "echo", usage: "<text>", help: "echo the argument" }]
+            vec![CommandSpec {
+                name: "echo",
+                usage: "<text>",
+                help: "echo the argument",
+            }]
         }
-        fn run_command(&self, _ctx: &PluginContext, command: &str, arg: &str) -> anyhow::Result<Vec<String>> {
+        fn run_command(
+            &self,
+            _ctx: &PluginContext,
+            command: &str,
+            arg: &str,
+        ) -> anyhow::Result<Vec<String>> {
             if command == "echo" {
                 Ok(vec![format!("echo: {arg}")])
             } else {
@@ -349,7 +387,10 @@ mod tests {
         let mut reg = Registry::new();
         reg.register(Arc::new(Echo));
         let storage = MemStorage::new();
-        let res = reg.run_command(&storage, None, "test.echo", "hi").unwrap().unwrap();
+        let res = reg
+            .run_command(&storage, None, "test.echo", "hi")
+            .unwrap()
+            .unwrap();
         assert_eq!(res, vec!["echo: hi"]);
         assert!(reg.run_command(&storage, None, "test.nope", "").is_some());
         assert!(reg.run_command(&storage, None, "nosuch.cmd", "").is_none());
@@ -365,7 +406,12 @@ mod tests {
             fn describe(&self) -> &'static str {
                 ""
             }
-            fn run_command(&self, _c: &PluginContext, _cmd: &str, _arg: &str) -> anyhow::Result<Vec<String>> {
+            fn run_command(
+                &self,
+                _c: &PluginContext,
+                _cmd: &str,
+                _arg: &str,
+            ) -> anyhow::Result<Vec<String>> {
                 Ok(vec![])
             }
             fn before_send(
@@ -389,7 +435,15 @@ mod tests {
     fn defaults_include_all_builtins() {
         let reg = Registry::with_defaults();
         let ids = reg.ids();
-        for expected in ["snippets", "memory", "ponytail", "planning", "usage", "tableformat", "skills"] {
+        for expected in [
+            "snippets",
+            "memory",
+            "ponytail",
+            "planning",
+            "usage",
+            "tableformat",
+            "skills",
+        ] {
             assert!(ids.contains(&expected), "missing builtin {expected}");
         }
     }

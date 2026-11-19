@@ -16,8 +16,7 @@ fn node_available() -> bool {
 }
 
 fn server_path() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/mcp-fake-server.mjs")
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mcp-fake-server.mjs")
 }
 
 fn timeout() -> Duration {
@@ -46,7 +45,11 @@ fn handshake_tools_and_calls_against_a_real_child() {
     let surface = McpSurface::connect(&file, timeout());
     assert!(surface.errors.is_empty(), "{:?}", surface.errors);
 
-    let mut names: Vec<&str> = surface.tools.iter().map(|t| t.advertised.as_str()).collect();
+    let mut names: Vec<&str> = surface
+        .tools
+        .iter()
+        .map(|t| t.advertised.as_str())
+        .collect();
     names.sort();
     assert_eq!(
         names,
@@ -62,7 +65,10 @@ fn handshake_tools_and_calls_against_a_real_child() {
     assert_eq!(echo.execute("{\"text\":\"hi\"}"), "echo:{\"text\":\"hi\"}");
     assert_eq!(echo.execute("hello"), "echo:{\"text\":\"hello\"}");
     // isError results reach the model under the classified prefix.
-    assert_eq!(echo.execute("{\"text\":\"fail\"}"), "Error: requested failure");
+    assert_eq!(
+        echo.execute("{\"text\":\"fail\"}"),
+        "Error: requested failure"
+    );
 
     let add = surface
         .tools

@@ -60,7 +60,10 @@ pub fn shuffle<'a>(prompts: &[&'a str], seed: u64) -> Vec<&'a str> {
 /// First `n` prompts of a shuffle (a "give me options" surface). `n`
 /// is clamped to the set size.
 pub fn sample<'a>(prompts: &[&'a str], seed: u64, n: usize) -> Vec<&'a str> {
-    shuffle(prompts, seed).into_iter().take(n.min(prompts.len())).collect()
+    shuffle(prompts, seed)
+        .into_iter()
+        .take(n.min(prompts.len()))
+        .collect()
 }
 
 #[cfg(test)]
@@ -68,7 +71,12 @@ mod tests {
     use super::*;
 
     fn set() -> Vec<&'static str> {
-        vec!["tell me a joke", "explain monads", "write a haiku", "debug this"]
+        vec![
+            "tell me a joke",
+            "explain monads",
+            "write a haiku",
+            "debug this",
+        ]
     }
 
     #[test]

@@ -70,12 +70,7 @@ pub fn fork_branch(
 /// This is "overwrite this message and everything downstream is stale".
 /// The messages before the cut are kept as they are; the tail is
 /// dropped because it was an answer to the text that was replaced.
-pub fn overwrite_at(
-    conv: &mut Conversation,
-    at_index: usize,
-    replacement: &str,
-    now_ms: u64,
-) {
+pub fn overwrite_at(conv: &mut Conversation, at_index: usize, replacement: &str, now_ms: u64) {
     let Some(message) = conv.messages.get_mut(at_index) else {
         return;
     };

@@ -99,7 +99,10 @@ fn context_matches(msg: &crate::conversations::StoredMessage, filter: &str) -> b
 ///
 /// A regex that fails to compile falls back to a literal match.
 enum Matcher {
-    Literal { needle: String, case_sensitive: bool },
+    Literal {
+        needle: String,
+        case_sensitive: bool,
+    },
     Regex(regex::Regex),
 }
 
@@ -148,9 +151,7 @@ impl Matcher {
                 if *case_sensitive {
                     haystack.find(needle.as_str())
                 } else {
-                    haystack
-                        .to_lowercase()
-                        .find(&needle.to_lowercase())
+                    haystack.to_lowercase().find(&needle.to_lowercase())
                 }
             }
             Matcher::Regex(re) => re.find(haystack).map(|m| m.start()),
@@ -159,7 +160,11 @@ impl Matcher {
 }
 
 /// Does the query's scope allow this message?
-fn scope_matches(conv: &Conversation, msg: &crate::conversations::StoredMessage, query: &SearchQuery) -> bool {
+fn scope_matches(
+    conv: &Conversation,
+    msg: &crate::conversations::StoredMessage,
+    query: &SearchQuery,
+) -> bool {
     if !query.include_archived && conv.archived {
         return false;
     }
@@ -331,7 +336,10 @@ mod tests {
                 "b",
                 "Beta",
                 200,
-                vec![msg("user", "goodbye world"), msg("assistant", "Rust is fast")],
+                vec![
+                    msg("user", "goodbye world"),
+                    msg("assistant", "Rust is fast"),
+                ],
             ),
         ]
     }

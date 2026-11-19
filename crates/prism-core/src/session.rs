@@ -324,7 +324,10 @@ pub fn select_endpoint(
     now_ms: u64,
     tick: u64,
 ) -> Option<&Endpoint> {
-    let live: Vec<&Endpoint> = endpoints.iter().filter(|e| e.available_at(now_ms)).collect();
+    let live: Vec<&Endpoint> = endpoints
+        .iter()
+        .filter(|e| e.available_at(now_ms))
+        .collect();
     if live.is_empty() {
         return None;
     }
@@ -539,7 +542,11 @@ mod tests {
             description: String::new(),
         });
         let msgs = s.prompt_messages(&[]);
-        let joined = msgs.iter().map(|m| m.content.as_str()).collect::<Vec<_>>().join("\n");
+        let joined = msgs
+            .iter()
+            .map(|m| m.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(joined.contains("An engineer"), "{joined}");
         assert!(joined.contains("Sam: hi"), "{joined}");
         assert!(!joined.contains("{{user}}"), "macros expanded: {joined}");
@@ -588,26 +595,57 @@ mod tests {
 
     #[test]
     fn endpoint_selection_respects_policy_and_cooldown() {
-        let eps = vec![
-            Endpoint::new("a"),
-            Endpoint::new("b"),
-            Endpoint::new("c"),
-        ];
+        let eps = vec![Endpoint::new("a"), Endpoint::new("b"), Endpoint::new("c")];
         // PreferPrimary always picks the first live endpoint.
         for t in 0..5 {
-            assert_eq!(select_endpoint(&eps, Rotation::PreferPrimary, t, t).unwrap().url, "a");
+            assert_eq!(
+                select_endpoint(&eps, Rotation::PreferPrimary, t, t)
+                    .unwrap()
+                    .url,
+                "a"
+            );
         }
         // RoundRobin cycles.
-        assert_eq!(select_endpoint(&eps, Rotation::RoundRobin, 0, 0).unwrap().url, "a");
-        assert_eq!(select_endpoint(&eps, Rotation::RoundRobin, 0, 1).unwrap().url, "b");
-        assert_eq!(select_endpoint(&eps, Rotation::RoundRobin, 0, 2).unwrap().url, "c");
-        assert_eq!(select_endpoint(&eps, Rotation::RoundRobin, 0, 3).unwrap().url, "a");
+        assert_eq!(
+            select_endpoint(&eps, Rotation::RoundRobin, 0, 0)
+                .unwrap()
+                .url,
+            "a"
+        );
+        assert_eq!(
+            select_endpoint(&eps, Rotation::RoundRobin, 0, 1)
+                .unwrap()
+                .url,
+            "b"
+        );
+        assert_eq!(
+            select_endpoint(&eps, Rotation::RoundRobin, 0, 2)
+                .unwrap()
+                .url,
+            "c"
+        );
+        assert_eq!(
+            select_endpoint(&eps, Rotation::RoundRobin, 0, 3)
+                .unwrap()
+                .url,
+            "a"
+        );
 
         // Cooldown removes an endpoint from the pool.
         let mut eps = eps;
         cooldown(&mut eps, "a", 0, 30);
-        assert_eq!(select_endpoint(&eps, Rotation::PreferPrimary, 10, 0).unwrap().url, "b");
-        assert_eq!(select_endpoint(&eps, Rotation::PreferPrimary, 30_001, 0).unwrap().url, "a");
+        assert_eq!(
+            select_endpoint(&eps, Rotation::PreferPrimary, 10, 0)
+                .unwrap()
+                .url,
+            "b"
+        );
+        assert_eq!(
+            select_endpoint(&eps, Rotation::PreferPrimary, 30_001, 0)
+                .unwrap()
+                .url,
+            "a"
+        );
     }
 
     #[test]
@@ -717,7 +755,9 @@ mod tests {
     fn permission_edits_apply_and_clear() {
         let mut s = Session::new(Mode::Agent, &tools());
         // Advertised tool: the override sticks.
-        assert!(s.capability.set_permission("calculator", PermissionLevel::Ask));
+        assert!(s
+            .capability
+            .set_permission("calculator", PermissionLevel::Ask));
         assert_eq!(s.permission_for("calculator"), PermissionLevel::Ask);
         assert_eq!(s.capability.overridden_tools(), vec!["calculator"]);
         // Clearing returns it to the default.
@@ -730,7 +770,9 @@ mod tests {
     fn permission_edit_rejects_unadvertised_tools() {
         let mut s = Session::new(Mode::Chat, &tools());
         // Chat advertises no tools, so there is nothing to grant.
-        assert!(!s.capability.set_permission("calculator", PermissionLevel::Allow));
+        assert!(!s
+            .capability
+            .set_permission("calculator", PermissionLevel::Allow));
         assert_eq!(s.permission_for("calculator"), PermissionLevel::Deny);
     }
 
@@ -741,7 +783,8 @@ mod tests {
         assert_eq!(s.permission_for("calculator"), PermissionLevel::Ask);
         assert_eq!(s.permission_for("web_search"), PermissionLevel::Ask);
         // An explicit override still wins over the default.
-        s.capability.set_permission("calculator", PermissionLevel::Allow);
+        s.capability
+            .set_permission("calculator", PermissionLevel::Allow);
         assert_eq!(s.permission_for("calculator"), PermissionLevel::Allow);
         assert_eq!(s.permission_for("web_search"), PermissionLevel::Ask);
     }
@@ -749,7 +792,8 @@ mod tests {
     #[test]
     fn permission_rows_cover_every_advertised_tool() {
         let mut s = Session::new(Mode::Agent, &tools());
-        s.capability.set_permission("web_search", PermissionLevel::Deny);
+        s.capability
+            .set_permission("web_search", PermissionLevel::Deny);
         let rows = s.capability.permission_rows();
         assert_eq!(rows.len(), 2);
         let by_name: std::collections::HashMap<_, _> =
@@ -763,7 +807,10 @@ mod tests {
         assert_eq!(PermissionLevel::Allow.cycled(), PermissionLevel::Ask);
         assert_eq!(PermissionLevel::Ask.cycled(), PermissionLevel::Deny);
         assert_eq!(PermissionLevel::Deny.cycled(), PermissionLevel::Allow);
-        assert_eq!(PermissionLevel::from_label("ask"), Some(PermissionLevel::Ask));
+        assert_eq!(
+            PermissionLevel::from_label("ask"),
+            Some(PermissionLevel::Ask)
+        );
         assert_eq!(PermissionLevel::from_label("nonsense"), None);
     }
 

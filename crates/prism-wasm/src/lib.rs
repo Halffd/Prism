@@ -216,17 +216,10 @@ pub fn session_fork_branch(req_json: &str) -> String {
         now_ms: Option<u64>,
     }
 
-    result_json(
-        &parse_req::<Req>(req_json).map(|req| {
-            let now = req.now_ms.unwrap_or_else(conversations::now_ms);
-            prism_core::session_ops::fork_branch(
-                &req.conversation,
-                req.at_index,
-                req.new_id,
-                now,
-            )
-        }),
-    )
+    result_json(&parse_req::<Req>(req_json).map(|req| {
+        let now = req.now_ms.unwrap_or_else(conversations::now_ms);
+        prism_core::session_ops::fork_branch(&req.conversation, req.at_index, req.new_id, now)
+    }))
 }
 
 /// Overwrite one message and drop the stale tail after it.
@@ -245,18 +238,16 @@ pub fn session_overwrite_at(req_json: &str) -> String {
         now_ms: Option<u64>,
     }
 
-    result_json(
-        &parse_req::<Req>(req_json).map(|mut req| {
-            let now = req.now_ms.unwrap_or_else(conversations::now_ms);
-            prism_core::session_ops::overwrite_at(
-                &mut req.conversation,
-                req.at_index,
-                &req.content,
-                now,
-            );
-            req.conversation
-        }),
-    )
+    result_json(&parse_req::<Req>(req_json).map(|mut req| {
+        let now = req.now_ms.unwrap_or_else(conversations::now_ms);
+        prism_core::session_ops::overwrite_at(
+            &mut req.conversation,
+            req.at_index,
+            &req.content,
+            now,
+        );
+        req.conversation
+    }))
 }
 
 /// Replace one message's content, keeping the rest of the transcript.
@@ -271,18 +262,16 @@ pub fn session_edit_message(req_json: &str) -> String {
         now_ms: Option<u64>,
     }
 
-    result_json(
-        &parse_req::<Req>(req_json).map(|mut req| {
-            let now = req.now_ms.unwrap_or_else(conversations::now_ms);
-            prism_core::session_ops::edit_message(
-                &mut req.conversation,
-                req.at_index,
-                &req.content,
-                now,
-            );
-            req.conversation
-        }),
-    )
+    result_json(&parse_req::<Req>(req_json).map(|mut req| {
+        let now = req.now_ms.unwrap_or_else(conversations::now_ms);
+        prism_core::session_ops::edit_message(
+            &mut req.conversation,
+            req.at_index,
+            &req.content,
+            now,
+        );
+        req.conversation
+    }))
 }
 
 /// Set a message's read flag. Returns the conversation.
@@ -295,16 +284,10 @@ pub fn session_set_message_read(req_json: &str) -> String {
         read: bool,
     }
 
-    result_json(
-        &parse_req::<Req>(req_json).map(|mut req| {
-            prism_core::session_ops::set_message_read(
-                &mut req.conversation,
-                req.at_index,
-                req.read,
-            );
-            req.conversation
-        }),
-    )
+    result_json(&parse_req::<Req>(req_json).map(|mut req| {
+        prism_core::session_ops::set_message_read(&mut req.conversation, req.at_index, req.read);
+        req.conversation
+    }))
 }
 
 /// Add or remove a tag on one message. Returns the conversation.
@@ -321,24 +304,18 @@ pub fn session_set_message_tag(req_json: &str) -> String {
         remove: bool,
     }
 
-    result_json(
-        &parse_req::<Req>(req_json).map(|mut req| {
-            if req.remove {
-                prism_core::session_ops::remove_message_tag(
-                    &mut req.conversation,
-                    req.at_index,
-                    &req.tag,
-                );
-            } else {
-                prism_core::session_ops::add_message_tag(
-                    &mut req.conversation,
-                    req.at_index,
-                    &req.tag,
-                );
-            }
-            req.conversation
-        }),
-    )
+    result_json(&parse_req::<Req>(req_json).map(|mut req| {
+        if req.remove {
+            prism_core::session_ops::remove_message_tag(
+                &mut req.conversation,
+                req.at_index,
+                &req.tag,
+            );
+        } else {
+            prism_core::session_ops::add_message_tag(&mut req.conversation, req.at_index, &req.tag);
+        }
+        req.conversation
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -408,14 +385,12 @@ pub fn backup_export(req_json: &str) -> String {
         now_ms: Option<u64>,
     }
 
-    result_json(
-        &parse_req::<Req>(req_json).map(|req| {
-            prism_core::backup::export_backup(
-                &req.conversations,
-                req.now_ms.unwrap_or_else(conversations::now_ms),
-            )
-        }),
-    )
+    result_json(&parse_req::<Req>(req_json).map(|req| {
+        prism_core::backup::export_backup(
+            &req.conversations,
+            req.now_ms.unwrap_or_else(conversations::now_ms),
+        )
+    }))
 }
 
 /// Parse a backup file.
@@ -458,11 +433,7 @@ pub fn backup_import(req_json: &str) -> String {
     );
 
     let outcome: Result<ImportResult, String> = parse_req::<Req>(req_json).map(|mut req| {
-        let imported = prism_core::backup::import_backup(
-            &req.raw,
-            &mut req.existing,
-            req.mode,
-        );
+        let imported = prism_core::backup::import_backup(&req.raw, &mut req.existing, req.mode);
         (imported, req.existing)
     });
 
@@ -517,7 +488,9 @@ pub fn build_api_chat_body(req_json: &str) -> String {
 
 // ---- agent loop (extension system) ------------------------------------
 
-use prism_core::agent::{run_with_strategy, AgentResult, AgentStrategy, Permission, StepMessage, ToolRegistry};
+use prism_core::agent::{
+    run_with_strategy, AgentResult, AgentStrategy, Permission, StepMessage, ToolRegistry,
+};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -536,7 +509,11 @@ impl JsTool {
     /// `execute` must be a JS function `(input: string) => string`.
     #[wasm_bindgen(constructor)]
     pub fn new(name: String, description: String, execute: js_sys::Function) -> JsTool {
-        JsTool { name, description, execute }
+        JsTool {
+            name,
+            description,
+            execute,
+        }
     }
 }
 
@@ -551,8 +528,14 @@ impl prism_core::agent::Tool for JsTool {
         let this = wasm_bindgen::JsValue::NULL;
         let arg = wasm_bindgen::JsValue::from_str(input);
         match self.execute.call1(&this, &arg) {
-            Ok(v) => v.as_string().unwrap_or_else(|| String::from("[tool] non-string result")),
-            Err(e) => format!("[{}] Error: {}", self.name, e.as_string().unwrap_or_default()),
+            Ok(v) => v
+                .as_string()
+                .unwrap_or_else(|| String::from("[tool] non-string result")),
+            Err(e) => format!(
+                "[{}] Error: {}",
+                self.name,
+                e.as_string().unwrap_or_default()
+            ),
         }
     }
 }
@@ -573,7 +556,9 @@ impl AgentRegistry {
         // same name (register overwrites).
         reg.register(std::sync::Arc::new(prism_core::agent::CalculatorTool));
         reg.register(std::sync::Arc::new(prism_core::agent::WebSearchStubTool));
-        AgentRegistry { inner: Rc::new(RefCell::new(reg)) }
+        AgentRegistry {
+            inner: Rc::new(RefCell::new(reg)),
+        }
     }
 
     /// Register (or replace) a tool. Extension point.
@@ -637,7 +622,9 @@ pub fn agent_run(
                 Ok(v) => v
                     .as_string()
                     .ok_or_else(|| String::from("llm_step returned non-string")),
-                Err(e) => Err(e.as_string().unwrap_or_else(|| String::from("llm_step threw"))),
+                Err(e) => Err(e
+                    .as_string()
+                    .unwrap_or_else(|| String::from("llm_step threw"))),
             }
         };
         let mut step_fn = step_fn;
@@ -718,8 +705,8 @@ pub fn agent_tool_classify(observation: &str) -> String {
 #[wasm_bindgen]
 pub fn agent_tool_clamp(req_json: &str) -> String {
     let clamped = (|| -> std::result::Result<serde_json::Value, String> {
-        let req: serde_json::Value = serde_json::from_str(req_json)
-            .map_err(|e| format!("invalid request JSON: {e}"))?;
+        let req: serde_json::Value =
+            serde_json::from_str(req_json).map_err(|e| format!("invalid request JSON: {e}"))?;
         let advertised = req
             .get("advertised")
             .and_then(|v| v.as_array())
@@ -781,7 +768,11 @@ pub fn agent_subagents_list() -> String {
 /// the provider default. Returns `{model, tier: subagent_forced|session|
 /// provider_default}` or JSON error when nothing resolves.
 #[wasm_bindgen]
-pub fn agent_subagent_resolve_model(name: &str, session_model: &str, provider_default: Option<String>) -> String {
+pub fn agent_subagent_resolve_model(
+    name: &str,
+    session_model: &str,
+    provider_default: Option<String>,
+) -> String {
     let reg = prism_core::subagents::SubagentRegistry::default();
     match reg.resolve_model(name, session_model, provider_default) {
         Ok(r) => serde_json::to_string(&r).unwrap_or_else(|e| format!("{{\"error\":\"{e}\"}}")),

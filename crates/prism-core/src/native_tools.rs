@@ -95,7 +95,11 @@ impl Tool for WriteFileTool {
                     }
                 }
                 match std::fs::write(&p, content) {
-                    Ok(()) => format!("[write_file] wrote {} ({} bytes)", p.display(), content.len()),
+                    Ok(()) => format!(
+                        "[write_file] wrote {} ({} bytes)",
+                        p.display(),
+                        content.len()
+                    ),
                     Err(e) => format!("[write_file] Error: {e}"),
                 }
             }
@@ -119,7 +123,10 @@ impl Tool for EditFileTool {
     }
     fn execute(&self, input: &str) -> String {
         let parts: Vec<&str> = input.splitn(3, "\n---").collect();
-        if parts.len() != 3 || !parts[1].starts_with("OLD---\n") || !parts[2].starts_with("NEW---\n") {
+        if parts.len() != 3
+            || !parts[1].starts_with("OLD---\n")
+            || !parts[2].starts_with("NEW---\n")
+        {
             return "[edit_file] Error: input must be \"<path>\\n---OLD---\n<old>\\n---NEW---\n<new>\"".into();
         }
         let path = parts[0];
@@ -137,7 +144,10 @@ impl Tool for EditFileTool {
                     }
                     let updated = text.replacen(old, new, 1);
                     match std::fs::write(&p, &updated) {
-                        Ok(()) => format!("[edit_file] edited {} (replaced 1 of {count} occurrences)", p.display()),
+                        Ok(()) => format!(
+                            "[edit_file] edited {} (replaced 1 of {count} occurrences)",
+                            p.display()
+                        ),
                         Err(e) => format!("[edit_file] Error: {e}"),
                     }
                 }
@@ -169,7 +179,11 @@ impl Tool for ListDirTool {
                         .map(|e| {
                             let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
                             let name = e.file_name().to_string_lossy().to_string();
-                            if is_dir { format!("{name}/") } else { name }
+                            if is_dir {
+                                format!("{name}/")
+                            } else {
+                                name
+                            }
                         })
                         .collect();
                     names.sort();
@@ -189,10 +203,18 @@ impl Tool for ListDirTool {
 /// Register all native tools against a registry for a workspace root.
 pub fn register_all(registry: &crate::agent::ToolRegistry, root: &Path) {
     use std::sync::Arc;
-    registry.register(Arc::new(ReadFileTool { root: root.to_path_buf() }));
-    registry.register(Arc::new(WriteFileTool { root: root.to_path_buf() }));
-    registry.register(Arc::new(EditFileTool { root: root.to_path_buf() }));
-    registry.register(Arc::new(ListDirTool { root: root.to_path_buf() }));
+    registry.register(Arc::new(ReadFileTool {
+        root: root.to_path_buf(),
+    }));
+    registry.register(Arc::new(WriteFileTool {
+        root: root.to_path_buf(),
+    }));
+    registry.register(Arc::new(EditFileTool {
+        root: root.to_path_buf(),
+    }));
+    registry.register(Arc::new(ListDirTool {
+        root: root.to_path_buf(),
+    }));
     // Mutating tools default to Ask — the surface's interactive gate
     // approves them; headless runs deny unless the surface flips this.
     registry.set_permission("write_file", crate::agent::Permission::Ask);
@@ -262,7 +284,10 @@ mod tests {
         let out = e.execute("a.txt\n---OLD---\nnope\n---NEW---\nx");
         assert!(out.contains("pattern not found"), "{out}");
         // Content unchanged.
-        assert_eq!(ReadFileTool { root: root.clone() }.execute("a.txt"), "hello world");
+        assert_eq!(
+            ReadFileTool { root: root.clone() }.execute("a.txt"),
+            "hello world"
+        );
         std::fs::remove_dir_all(&root).ok();
     }
 

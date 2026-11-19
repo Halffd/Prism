@@ -157,11 +157,8 @@ fn subagent_model_resolution_is_exported() {
 
     // Nothing to resolve: the binding reports why.
     let unresolved: Value = serde_json::from_str(&prism_wasm::agent_subagent_resolve_model(
-        "bugbot",
-        "",
-        None,
+        "bugbot", "", None,
     ))
     .unwrap();
     assert!(unresolved["error"].as_str().is_some(), "{unresolved}");
 }
-

@@ -271,7 +271,11 @@ mod tests {
 
     #[test]
     fn top_edges_sorted_and_limited() {
-        let names = vec!["calculator".to_string(), "web_search".to_string(), "zzz".to_string()];
+        let names = vec![
+            "calculator".to_string(),
+            "web_search".to_string(),
+            "zzz".to_string(),
+        ];
         let e = top_edges("use the calculator and web_search", &names, 2);
         assert_eq!(e.len(), 2);
         assert!(e.contains(&"calculator".to_string()));
@@ -281,14 +285,22 @@ mod tests {
     #[test]
     fn build_graph_counts_nodes_and_edges() {
         let cards = vec![
-            card("memory", "calc note", "I like the calculator for arithmetic"),
+            card(
+                "memory",
+                "calc note",
+                "I like the calculator for arithmetic",
+            ),
             card("profile", "me", "I debug things and use web_search often"),
         ];
         let names = vec!["calculator".to_string(), "web_search".to_string()];
         let g = build_graph(&cards, &names, 4);
         assert_eq!(g.memory_nodes, 2);
         assert_eq!(g.nodes.len(), 2);
-        assert!(g.memory_edges >= 2, "each card should link: {}", g.memory_edges);
+        assert!(
+            g.memory_edges >= 2,
+            "each card should link: {}",
+            g.memory_edges
+        );
         assert!(g.clusters.iter().all(|(_, c)| *c >= 1));
     }
 

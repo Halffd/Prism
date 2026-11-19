@@ -16,7 +16,10 @@ fn is_table_row(line: &str) -> bool {
 fn has_separator(rows: &[&str]) -> bool {
     rows.len() >= 2 && {
         let sep = rows[1].trim();
-        sep.contains('-') && sep.chars().all(|c| c == '|' || c == '-' || c == ':' || c.is_whitespace())
+        sep.contains('-')
+            && sep
+                .chars()
+                .all(|c| c == '|' || c == '-' || c == ':' || c.is_whitespace())
     }
 }
 

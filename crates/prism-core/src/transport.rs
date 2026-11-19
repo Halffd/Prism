@@ -116,10 +116,7 @@ mod native {
                 .await
                 .map_err(|e| format!("request failed: {e}"))?;
             let status = resp.status();
-            let text = resp
-                .text()
-                .await
-                .unwrap_or_default();
+            let text = resp.text().await.unwrap_or_default();
             if !status.is_success() {
                 return Err(format!(
                     "server returned {status}: {}",
@@ -139,10 +136,7 @@ mod native {
                 .await
                 .map_err(|e| format!("request failed: {e}"))?;
             let status = resp.status();
-            let text = resp
-                .text()
-                .await
-                .unwrap_or_default();
+            let text = resp.text().await.unwrap_or_default();
             if !status.is_success() {
                 return Err(format!(
                     "server returned {status}: {}",

@@ -255,10 +255,7 @@ pub fn default_base_url(provider: &str) -> &'static str {
 /// Whether the provider works asynchronously (it answers with a task id
 /// that has to be polled).
 pub fn is_async_provider(provider: &str) -> bool {
-    matches!(
-        provider,
-        "runway" | "kling" | "luma" | "meshy" | "tripo"
-    )
+    matches!(provider, "runway" | "kling" | "luma" | "meshy" | "tripo")
 }
 
 /// Sends a media request and reads the provider's answer.
@@ -317,7 +314,10 @@ pub async fn run_media<T: Transport + ?Sized>(
 
     let mut headers = vec![("Content-Type".to_string(), "application/json".to_string())];
     if !req.api_key.is_empty() {
-        headers.push(("Authorization".to_string(), format!("Bearer {}", req.api_key)));
+        headers.push((
+            "Authorization".to_string(),
+            format!("Bearer {}", req.api_key),
+        ));
     }
     headers.extend(extra_headers);
 

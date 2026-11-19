@@ -13,10 +13,10 @@ use crate::conversations::{self, Conversation, ConversationMeta};
 use crate::settings::{self, Settings};
 use crate::storage::{FsStorage, Storage};
 use crate::transport::{ReqwestTransport, Transport};
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::sync::OnceLock;
-use std::future::Future;
 use tokio::runtime::Runtime;
 
 /// Shared tokio runtime for background HTTP work. Built lazily on
@@ -106,10 +106,7 @@ pub fn prompt_pool() -> Vec<String> {
             }
         }
     }
-    load_prompt_history()
-        .into_iter()
-        .map(|e| e.text)
-        .collect()
+    load_prompt_history().into_iter().map(|e| e.text).collect()
 }
 
 /// One random prompt from the pool, avoiding `avoid` (the last pick).
@@ -184,7 +181,9 @@ pub fn export_data(path: Option<&std::path::Path>) -> Result<(), String> {
     };
     let env = export_envelope();
     if let Some(parent) = path.parent() {
-        storage().create_dir_all(parent).map_err(|e| e.to_string())?;
+        storage()
+            .create_dir_all(parent)
+            .map_err(|e| e.to_string())?;
     }
     storage()
         .write_atomic(&path, &env.to_json())
@@ -260,7 +259,9 @@ pub fn probe_local(id: &str, base_url: Option<&str>) -> crate::local::Health {
         .build()
         .map_err(|e| e.to_string());
     let Ok(rt) = rt else {
-        return crate::local::Health::Down { reason: rt.err().unwrap() };
+        return crate::local::Health::Down {
+            reason: rt.err().unwrap(),
+        };
     };
     rt.block_on(async {
         let req = crate::transport::HttpRequest {
@@ -292,7 +293,15 @@ pub fn spawn_stream(req: StreamRequest, tx: Sender<StreamEvent>) {
     runtime().spawn(async move {
         let policy = RetryPolicy::from_env();
         let res: Result<(), anyhow::Error> = policy
-            .run(&tx, || async { run_stream(transport(), &req, &tx).await.map_err(anyhow::Error::msg) }, is_transient_error)
+            .run(
+                &tx,
+                || async {
+                    run_stream(transport(), &req, &tx)
+                        .await
+                        .map_err(anyhow::Error::msg)
+                },
+                is_transient_error,
+            )
             .await;
         if let Err(e) = res {
             let _ = tx.send(StreamEvent::Error(e.to_string()));
@@ -304,7 +313,15 @@ pub fn spawn_ollama_chat(req: OllamaChatRequest, tx: Sender<StreamEvent>) {
     runtime().spawn(async move {
         let policy = RetryPolicy::from_env();
         let res: Result<(), anyhow::Error> = policy
-            .run(&tx, || async { run_ollama_chat(transport(), &req, &tx).await.map_err(anyhow::Error::msg) }, is_transient_error)
+            .run(
+                &tx,
+                || async {
+                    run_ollama_chat(transport(), &req, &tx)
+                        .await
+                        .map_err(anyhow::Error::msg)
+                },
+                is_transient_error,
+            )
             .await;
         if let Err(e) = res {
             let _ = tx.send(StreamEvent::Error(e.to_string()));
@@ -316,7 +333,15 @@ pub fn spawn_api_chat(req: ApiChatRequest, tx: Sender<StreamEvent>) {
     runtime().spawn(async move {
         let policy = RetryPolicy::from_env();
         let res: Result<(), anyhow::Error> = policy
-            .run(&tx, || async { run_api_chat(transport(), &req, &tx).await.map_err(anyhow::Error::msg) }, is_transient_error)
+            .run(
+                &tx,
+                || async {
+                    run_api_chat(transport(), &req, &tx)
+                        .await
+                        .map_err(anyhow::Error::msg)
+                },
+                is_transient_error,
+            )
             .await;
         if let Err(e) = res {
             let _ = tx.send(StreamEvent::Error(e.to_string()));
@@ -367,7 +392,9 @@ impl RetryPolicy {
 
     /// Backoff for a 1-based attempt (attempt 1 = base, doubling, capped).
     fn delay_ms(&self, attempt: u32) -> u64 {
-        let mut d = self.base_ms.saturating_mul(2u64.saturating_pow(attempt - 1));
+        let mut d = self
+            .base_ms
+            .saturating_mul(2u64.saturating_pow(attempt - 1));
         if d > self.max_ms {
             d = self.max_ms;
         }

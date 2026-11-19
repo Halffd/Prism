@@ -218,7 +218,12 @@ impl SyncEnvelope {
                     .collect(),
             })
             .collect();
-        make_envelope(convs, Vec::new(), settings.to_sync(), crate::conversations::now_ms())
+        make_envelope(
+            convs,
+            Vec::new(),
+            settings.to_sync(),
+            crate::conversations::now_ms(),
+        )
     }
 
     /// Sync conversations -> core conversations.
@@ -339,10 +344,7 @@ mod tests {
         assert_eq!(core[0].id, "c1");
         assert_eq!(core[0].messages[0].role, "assistant");
         assert_eq!(core[0].messages[0].content, "hello");
-        assert_eq!(
-            core[0].messages[0].thinking.as_deref(),
-            Some("reasoning"),
-        );
+        assert_eq!(core[0].messages[0].thinking.as_deref(), Some("reasoning"),);
     }
 
     #[test]

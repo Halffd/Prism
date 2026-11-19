@@ -236,26 +236,29 @@ impl Settings {
     /// base URL/headers), or bare custom endpoint. `None` = unknown id.
     pub fn resolve_provider(&self, id: &str) -> Option<ResolvedProvider> {
         if let Some(custom) = self.custom_providers.get(id) {
-            let (label, default_model, needs_key, env_key) = match
-                crate::providers::find(&custom.canonical)
-            {
-                Some(def) => (
-                    if custom.label.is_empty() {
-                        format!("{} (custom)", def.label)
-                    } else {
-                        custom.label.clone()
-                    },
-                    def.default_model.to_string(),
-                    def.needs_key,
-                    def.env.to_vec(),
-                ),
-                None => (
-                    if custom.label.is_empty() { id.to_string() } else { custom.label.clone() },
-                    String::new(),
-                    true,
-                    Vec::new(),
-                ),
-            };
+            let (label, default_model, needs_key, env_key) =
+                match crate::providers::find(&custom.canonical) {
+                    Some(def) => (
+                        if custom.label.is_empty() {
+                            format!("{} (custom)", def.label)
+                        } else {
+                            custom.label.clone()
+                        },
+                        def.default_model.to_string(),
+                        def.needs_key,
+                        def.env.to_vec(),
+                    ),
+                    None => (
+                        if custom.label.is_empty() {
+                            id.to_string()
+                        } else {
+                            custom.label.clone()
+                        },
+                        String::new(),
+                        true,
+                        Vec::new(),
+                    ),
+                };
             return Some(ResolvedProvider {
                 id: id.to_string(),
                 label,
@@ -576,7 +579,10 @@ mod tests {
         );
         let json = serde_json::to_string(&s).unwrap();
         let back: Settings = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.custom_providers["vllm"].base_url, "http://10.0.0.5:8000/v1");
+        assert_eq!(
+            back.custom_providers["vllm"].base_url,
+            "http://10.0.0.5:8000/v1"
+        );
         assert_eq!(back.custom_providers["vllm"].headers["X-Tenant"], "a");
     }
 
@@ -585,12 +591,14 @@ mod tests {
         let mut s = Settings::default();
         s.custom_providers.insert(
             "gw2".into(),
-            ConfigProvider { base_url: "https://x/v1".into(), ..Default::default() },
+            ConfigProvider {
+                base_url: "https://x/v1".into(),
+                ..Default::default()
+            },
         );
         let ids = s.all_provider_ids();
         assert!(ids.contains(&"openai".to_string()));
         assert!(ids.contains(&"gw2".to_string()));
         assert_eq!(ids.last().unwrap(), "gw2");
     }
-
 }

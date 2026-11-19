@@ -635,11 +635,9 @@ mod tests {
 
     #[test]
     fn parses_prism_api_success() {
-        let body = r#"{"success":true,"data":{"id":"m1","role":"assistant","content":"hello there"}}"#;
-        assert_eq!(
-            parse_api_response(body).unwrap(),
-            "hello there".to_string()
-        );
+        let body =
+            r#"{"success":true,"data":{"id":"m1","role":"assistant","content":"hello there"}}"#;
+        assert_eq!(parse_api_response(body).unwrap(), "hello there".to_string());
     }
 
     #[test]
@@ -657,7 +655,8 @@ mod tests {
 
     #[test]
     fn parses_ollama_content_chunks() {
-        let line = r#"{"model":"llama3.2","message":{"role":"assistant","content":"Hi"},"done":false}"#;
+        let line =
+            r#"{"model":"llama3.2","message":{"role":"assistant","content":"Hi"},"done":false}"#;
         assert_eq!(
             parse_ollama_line(line).unwrap(),
             OllamaLine::Content("Hi".to_string())
@@ -666,7 +665,8 @@ mod tests {
 
     #[test]
     fn ollama_done_and_blank_lines() {
-        let line = r#"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true}"#;
+        let line =
+            r#"{"model":"llama3.2","message":{"role":"assistant","content":""},"done":true}"#;
         assert_eq!(parse_ollama_line(line).unwrap(), OllamaLine::Done);
         assert_eq!(parse_ollama_line("").unwrap(), OllamaLine::Ignore);
         assert_eq!(parse_ollama_line("   \n").unwrap(), OllamaLine::Ignore);
@@ -675,10 +675,7 @@ mod tests {
     #[test]
     fn ollama_error_line_is_error() {
         let line = r#"{"error":"model 'x' not found"}"#;
-        assert_eq!(
-            parse_ollama_line(line).unwrap_err(),
-            "model 'x' not found"
-        );
+        assert_eq!(parse_ollama_line(line).unwrap_err(), "model 'x' not found");
         assert!(parse_ollama_line("not json").is_err());
     }
 
@@ -686,7 +683,10 @@ mod tests {
     fn parses_openai_models_list() {
         let body = r#"{"object":"list","data":[{"id":"gpt-4o"},{"id":"gpt-4o-mini"},{"id":""}]}"#;
         let models = parse_models_response(body).unwrap();
-        assert_eq!(models, vec!["gpt-4o".to_string(), "gpt-4o-mini".to_string()]);
+        assert_eq!(
+            models,
+            vec!["gpt-4o".to_string(), "gpt-4o-mini".to_string()]
+        );
     }
 
     #[test]
@@ -695,7 +695,10 @@ mod tests {
         assert!(parse_models_response(r#"{"data":42}"#).is_err());
         assert!(parse_models_response("garbage").is_err());
         // Empty list is valid.
-        assert_eq!(parse_models_response(r#"{"data":[]}"#).unwrap(), Vec::<String>::new());
+        assert_eq!(
+            parse_models_response(r#"{"data":[]}"#).unwrap(),
+            Vec::<String>::new()
+        );
     }
 
     // --- decoders ---
@@ -712,8 +715,13 @@ mod tests {
             vec![StreamEvent::Chunk("Hi".into()), StreamEvent::Done]
         );
         assert!(d.is_done());
-        assert!(d.feed(b"data: {\"choices\":[{\"delta\":{\"content\":\"late\"}}]}\n").is_empty());
-        assert!(d.finish().is_empty(), "finish after Done must not duplicate");
+        assert!(d
+            .feed(b"data: {\"choices\":[{\"delta\":{\"content\":\"late\"}}]}\n")
+            .is_empty());
+        assert!(
+            d.finish().is_empty(),
+            "finish after Done must not duplicate"
+        );
     }
 
     #[test]
@@ -721,7 +729,10 @@ mod tests {
         let mut d = SseDecoder::new();
         let mut events = d.feed(b"data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n");
         events.extend(d.finish());
-        assert_eq!(events, vec![StreamEvent::Chunk("a".into()), StreamEvent::Done]);
+        assert_eq!(
+            events,
+            vec![StreamEvent::Chunk("a".into()), StreamEvent::Done]
+        );
     }
 
     #[test]
@@ -734,7 +745,10 @@ mod tests {
         let mut events = d.feed(&bytes[..split]);
         events.extend(d.feed(&bytes[split..]));
         events.extend(d.finish());
-        assert_eq!(events, vec![StreamEvent::Chunk("héllo".into()), StreamEvent::Done]);
+        assert_eq!(
+            events,
+            vec![StreamEvent::Chunk("héllo".into()), StreamEvent::Done]
+        );
     }
 
     #[test]
@@ -763,7 +777,10 @@ mod tests {
         events.extend(d.finish());
         assert_eq!(
             events,
-            vec![StreamEvent::Chunk("a".into()), StreamEvent::Error("boom".into())]
+            vec![
+                StreamEvent::Chunk("a".into()),
+                StreamEvent::Error("boom".into())
+            ]
         );
     }
 
@@ -834,7 +851,10 @@ mod tests {
         req.messages = vec![ChatMessage::with_images(
             "user",
             "compare these",
-            vec!["data:image/png;base64,AAA".into(), "https://cdn.test/b.png".into()],
+            vec![
+                "data:image/png;base64,AAA".into(),
+                "https://cdn.test/b.png".into(),
+            ],
         )];
         let body = stream_request_body(&req);
         let parts = body["messages"][0]["content"]
