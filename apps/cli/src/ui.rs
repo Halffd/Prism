@@ -334,7 +334,10 @@ fn draw_details(f: &mut Frame, app: &App, area: Rect) {
     };
     rows.push(kv("perms", &perm_text));
     rows.push(RtLine::from(""));
-    rows.push(kv("plugins", &format!("{} active", app.plugins.ids().len())));
+    rows.push(kv(
+        "plugins",
+        &format!("{} active", app.plugins.ids().len()),
+    ));
     let pstatus = app.plugins.status(
         &*prism_core::host::storage(),
         prism_core::host::config_dir().as_deref(),

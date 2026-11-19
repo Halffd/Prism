@@ -48,11 +48,7 @@ pub fn start_job(
                 settings,
             );
             if !suffix.trim().is_empty() {
-                let combined = format!(
-                    "{}\n\n{}",
-                    settings.system_prompt.trim(),
-                    suffix.trim()
-                );
+                let combined = format!("{}\n\n{}", settings.system_prompt.trim(), suffix.trim());
                 history.insert(0, ChatMessage::text("system", &combined));
             }
             if settings.thinking_enabled {
@@ -126,7 +122,6 @@ pub fn effective_model(settings: &Settings) -> String {
     }
 }
 
-
 /// Run the core agent loop in a background thread and forward steps as
 /// events. Uses `prism_core::agent::run_agent` with a blocking LLM step
 /// over the shared reqwest transport; native file tools are registered
@@ -134,9 +129,7 @@ pub fn effective_model(settings: &Settings) -> String {
 /// via their own StepFn — loop semantics live in the core only.
 pub mod agent_job {
     use super::*;
-    use prism_core::agent::{
-        run_agent, AgentResult, CalculatorTool, StepMessage, ToolRegistry,
-    };
+    use prism_core::agent::{run_agent, AgentResult, CalculatorTool, StepMessage, ToolRegistry};
     use prism_core::native_tools::{self};
     use prism_core::sandbox::{resolve_policy, ResolvedSandbox, SandboxPolicy};
     use prism_core::transport::{HttpRequest, ReqwestTransport, Transport};
@@ -167,7 +160,10 @@ pub mod agent_job {
             });
             let mut headers = vec![("Content-Type".to_string(), "application/json".to_string())];
             if !self.api_key.is_empty() {
-                headers.push(("Authorization".to_string(), format!("Bearer {}", self.api_key)));
+                headers.push((
+                    "Authorization".to_string(),
+                    format!("Bearer {}", self.api_key),
+                ));
             }
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -223,7 +219,10 @@ pub mod agent_job {
             .ok_or_else(|| format!("unknown provider {}", settings.provider))?;
         let api_key = settings.key_for(&settings.provider);
         if resolved.needs_key && api_key.trim().is_empty() {
-            return Err(format!("API key required for {} — /key <key>", resolved.label));
+            return Err(format!(
+                "API key required for {} — /key <key>",
+                resolved.label
+            ));
         }
         let step_impl = FilelessLlmStep {
             transport: Box::leak(Box::new(ReqwestTransport::new())),
@@ -268,9 +267,8 @@ pub mod agent_job {
             let registry = build_registry(&workspace_root, &sandbox);
 
             let result: AgentResult = {
-                let mut step_fn = |system: &str, hist: &[StepMessage]| {
-                    step_impl.complete(system, hist)
-                };
+                let mut step_fn =
+                    |system: &str, hist: &[StepMessage]| step_impl.complete(system, hist);
                 run_agent(&task, &mut step_fn, &registry, 12, &|_, _| false)
             };
 
@@ -295,9 +293,9 @@ pub mod agent_job {
         // call runs guard → denylist → enforced subprocess.
         #[cfg(all(target_os = "linux", feature = "native-transport"))]
         if let Some((res, _used)) = sandbox {
-            registry.register(std::sync::Arc::new(
-                prism_core::sandbox::GuardedShellTool { res: res.clone() },
-            ));
+            registry.register(std::sync::Arc::new(prism_core::sandbox::GuardedShellTool {
+                res: res.clone(),
+            }));
         }
         #[cfg(not(all(target_os = "linux", feature = "native-transport")))]
         {

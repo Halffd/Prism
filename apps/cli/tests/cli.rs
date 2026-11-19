@@ -266,7 +266,10 @@ fn agent_command_runs_in_agent_mode() {
     // dropped tempdir after the test returns.
     type_line(&mut app, &tx, "/agent do something");
     assert!(
-        app.conv.messages.iter().all(|m| !m.content.contains("no tools")),
+        app.conv
+            .messages
+            .iter()
+            .all(|m| !m.content.contains("no tools")),
         "agent mode must not refuse: {:?}",
         app.conv.messages.last()
     );
@@ -364,7 +367,11 @@ fn cap_rejects_unknown_capabilities() {
     type_line(&mut app, &tx, "/cap nonsense on");
     let last = &app.conv.messages[app.conv.messages.len() - 1];
     assert_eq!(last.role, "system");
-    assert!(last.content.contains("unknown capability"), "{}", last.content);
+    assert!(
+        last.content.contains("unknown capability"),
+        "{}",
+        last.content
+    );
 }
 
 #[test]
@@ -464,7 +471,10 @@ fn search_finds_a_message_across_chats() {
     store_conversation(
         "bbbb2222",
         "Second",
-        &[("user", "nothing to see"), ("assistant", "the needle is in here")],
+        &[
+            ("user", "nothing to see"),
+            ("assistant", "the needle is in here"),
+        ],
     );
 
     let hits = prism_core::search::search(
@@ -521,12 +531,13 @@ fn fork_creates_a_branch_that_links_back_to_the_source() {
 #[test]
 fn export_then_import_roundtrips_the_chats() {
     let (_g, _dir, _app, _tx) = fresh_app("cli-backup");
-    store_conversation("eeee5555", "Fifth", &[("user", "hello"), ("assistant", "hi")]);
+    store_conversation(
+        "eeee5555",
+        "Fifth",
+        &[("user", "hello"), ("assistant", "hi")],
+    );
 
-    let path = std::env::temp_dir().join(format!(
-        "prism-cli-backup-{}.json",
-        std::process::id()
-    ));
+    let path = std::env::temp_dir().join(format!("prism-cli-backup-{}.json", std::process::id()));
     let path_str = path.to_string_lossy().to_string();
 
     prism_cli::features::export_cli(&args(&[&path_str])).unwrap();

@@ -158,7 +158,10 @@ fn sandbox_cli(mut args: impl Iterator<Item = String>) -> anyhow::Result<()> {
     while let Some(a) = args.next() {
         match a.as_str() {
             "--policy" => {
-                policy_file = Some(args.next().context("--policy needs a policy JSON file path")?)
+                policy_file = Some(
+                    args.next()
+                        .context("--policy needs a policy JSON file path")?,
+                )
             }
             "--json" => as_json = true,
             other => anyhow::bail!("unknown flag: {other}"),
@@ -187,16 +190,18 @@ fn sandbox_cli(mut args: impl Iterator<Item = String>) -> anyhow::Result<()> {
     }
 
     if let Some(path) = policy_file {
-        let text = std::fs::read_to_string(&path)
-            .with_context(|| format!("read policy {path}"))?;
-        let policy = prism_core::sandbox::parse_policy(&text)
-            .map_err(anyhow::Error::msg)?;
+        let text = std::fs::read_to_string(&path).with_context(|| format!("read policy {path}"))?;
+        let policy = prism_core::sandbox::parse_policy(&text).map_err(anyhow::Error::msg)?;
         let res = prism_core::sandbox::resolve_policy(&policy);
         let plan = prism_core::sandbox::plan_spawn(&res);
         if as_json {
             let plan_json = match &plan {
-                Ok(used) => serde_json::json!({ "sandbox_used": used, "error": serde_json::Value::Null }),
-                Err(outcome) => serde_json::json!({ "sandbox_used": serde_json::Value::Null, "error": outcome }),
+                Ok(used) => {
+                    serde_json::json!({ "sandbox_used": used, "error": serde_json::Value::Null })
+                }
+                Err(outcome) => {
+                    serde_json::json!({ "sandbox_used": serde_json::Value::Null, "error": outcome })
+                }
             };
             println!(
                 "{}",
@@ -213,7 +218,10 @@ fn sandbox_cli(mut args: impl Iterator<Item = String>) -> anyhow::Result<()> {
         }
         // Mirror the helper: strict policy on an unsupported host is the
         // only failing plan (exit 2), so automation can trust the code.
-        if matches!(plan, Err(prism_core::sandbox::SpawnOutcome::SandboxUnsupported { .. })) {
+        if matches!(
+            plan,
+            Err(prism_core::sandbox::SpawnOutcome::SandboxUnsupported { .. })
+        ) {
             std::process::exit(2);
         }
     }

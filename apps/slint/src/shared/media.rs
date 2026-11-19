@@ -5,9 +5,7 @@
 //! the outcome back on the UI thread.
 
 use crate::shared::{AppWindow, State};
-use prism_core::media::{
-    default_base_url, MediaKind, MediaOutcome, MediaRequest,
-};
+use prism_core::media::{default_base_url, MediaKind, MediaOutcome, MediaRequest};
 use slint::{SharedString, VecModel};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -77,15 +75,15 @@ impl MediaState {
             .get(self.kind_idx)
             .map(|(_, p)| *p)
             .unwrap_or(&[]);
-        providers
-            .get(self.provider_idx)
-            .copied()
-            .unwrap_or("")
+        providers.get(self.provider_idx).copied().unwrap_or("")
     }
 
     /// Whether the selected capability takes a source image.
     pub fn needs_image(&self) -> bool {
-        matches!(self.kind(), MediaKind::Inpaint | MediaKind::Video | MediaKind::Model)
+        matches!(
+            self.kind(),
+            MediaKind::Inpaint | MediaKind::Video | MediaKind::Model
+        )
     }
 
     /// Whether the selected capability takes a mask image.
@@ -127,10 +125,7 @@ pub fn parse_opt_u64(text: &str) -> Option<u64> {
 /// provider-specific `<PROVIDER>_API_KEY` variable. An empty key is
 /// passed through: local providers do not need one.
 pub fn media_api_key(provider: &str) -> String {
-    let specific = format!(
-        "{}_API_KEY",
-        provider.to_uppercase().replace('-', "_")
-    );
+    let specific = format!("{}_API_KEY", provider.to_uppercase().replace('-', "_"));
     if let Ok(v) = std::env::var(&specific) {
         if !v.trim().is_empty() {
             return v.trim().to_string();
@@ -194,9 +189,7 @@ pub fn select_kind(ui: &AppWindow, state: &Rc<RefCell<State>>, kind_idx: i32) {
     let needs_mask = st.media.needs_mask();
     drop(st);
     ui.set_media_kind_idx(idx as i32);
-    ui.set_media_provider_labels(slint::ModelRc::from(Rc::new(VecModel::from(
-        labels,
-    ))));
+    ui.set_media_provider_labels(slint::ModelRc::from(Rc::new(VecModel::from(labels))));
     ui.set_media_provider_idx(0);
     ui.set_media_provider(provider.into());
     ui.set_media_needs_image(needs_image);
@@ -373,18 +366,7 @@ mod tests {
     #[test]
     fn empty_fields_are_left_unset() {
         let media = MediaState::default();
-        let req = build_request(
-            &media,
-            "  a cat  ",
-            "   ",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-        );
+        let req = build_request(&media, "  a cat  ", "   ", "", "", "", "", "", "", "");
         assert_eq!(req.prompt, "a cat");
         assert_eq!(req.negative_prompt, None);
         assert_eq!(req.model, None);

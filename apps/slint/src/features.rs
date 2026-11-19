@@ -7,8 +7,8 @@
 //! made in the UI survives a restart like any other conversation edit.
 
 use crate::shared::{
-    conversations, host, persist_current, push_system, refresh_chats, refresh_transcript, AppWindow,
-    ChatLine, Line, State,
+    conversations, host, persist_current, push_system, refresh_chats, refresh_transcript,
+    AppWindow, ChatLine, Line, State,
 };
 use prism_core::backup::{self, ImportMode};
 use prism_core::context::{self, ContextItem};
@@ -61,12 +61,10 @@ pub fn run_search(ui: &AppWindow) {
         regex: ui.get_search_regex(),
         case_sensitive: ui.get_search_case_sensitive(),
         role: role_for_index(ui.get_search_role_idx()),
-        tag: Some(ui.get_search_tag().to_string())
-            .filter(|t| !t.trim().is_empty()),
+        tag: Some(ui.get_search_tag().to_string()).filter(|t| !t.trim().is_empty()),
         unread_only: ui.get_search_unread_only(),
         include_archived: ui.get_search_include_archived(),
-        file_filter: Some(ui.get_search_file().to_string())
-            .filter(|f| !f.trim().is_empty()),
+        file_filter: Some(ui.get_search_file().to_string()).filter(|f| !f.trim().is_empty()),
         limit: 500,
         sort: sort_for_index(ui.get_search_sort_idx()),
     };
@@ -212,12 +210,7 @@ pub fn fork_at(
 
     let fork = session_ops::fork_branch(&source, index, conversations::new_id(), now);
     if let Err(e) = host::save_conversation(&fork) {
-        push_system(
-            ui,
-            state,
-            lines_model,
-            format!("Fork failed: {e}"),
-        );
+        push_system(ui, state, lines_model, format!("Fork failed: {e}"));
         return;
     }
 
@@ -489,9 +482,7 @@ pub fn refresh_context(ui: &AppWindow, state: &Rc<RefCell<State>>) {
 
     let enabled: usize = items.iter().filter(|i| i.enabled).map(|i| i.tokens).sum();
     let total = items.len();
-    ui.set_context_status(
-        format!("{enabled} tokens enabled · {total} items").into(),
-    );
+    ui.set_context_status(format!("{enabled} tokens enabled · {total} items").into());
 }
 
 /// Apply the token budget to the attached context.
@@ -516,12 +507,7 @@ pub fn set_context_budget(ui: &AppWindow, state: &Rc<RefCell<State>>, budget: &s
 }
 
 /// Enable or disable one context item.
-pub fn toggle_context_item(
-    ui: &AppWindow,
-    state: &Rc<RefCell<State>>,
-    id: &str,
-    enabled: bool,
-) {
+pub fn toggle_context_item(ui: &AppWindow, state: &Rc<RefCell<State>>, id: &str, enabled: bool) {
     {
         let mut st = state.borrow_mut();
         if let Some(item) = st.context_items.iter_mut().find(|i| i.id == id) {

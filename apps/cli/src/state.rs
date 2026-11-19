@@ -145,7 +145,7 @@ impl App {
         app
     }
 
-/// Dropdown labels: built-ins then custom ("Label (custom)").
+    /// Dropdown labels: built-ins then custom ("Label (custom)").
     pub fn provider_labels(&self) -> Vec<String> {
         let mut v: Vec<String> = providers::PROVIDERS
             .iter()
@@ -331,10 +331,7 @@ impl App {
             self.save();
             self.status = "agent finished".into();
         } else {
-            self.push_message(
-                "system",
-                result.error.as_deref().unwrap_or("agent stopped"),
-            );
+            self.push_message("system", result.error.as_deref().unwrap_or("agent stopped"));
             self.status = "agent failed".into();
         }
     }
@@ -604,7 +601,14 @@ impl App {
                         .iter()
                         .map(|m| m.id())
                         .collect();
-                    self.push_message("system", &format!("mode: {} (options: {}, Alt+M cycles)", self.imode.id(), ids.join(", ")));
+                    self.push_message(
+                        "system",
+                        &format!(
+                            "mode: {} (options: {}, Alt+M cycles)",
+                            self.imode.id(),
+                            ids.join(", ")
+                        ),
+                    );
                 } else {
                     let m = prism_core::modes::Mode::from_id(&arg);
                     if m.id() != arg.trim().to_lowercase() {
@@ -612,7 +616,10 @@ impl App {
                             .iter()
                             .map(|m| m.id())
                             .collect();
-                        self.push_message("system", &format!("unknown mode; options: {}", ids.join(", ")));
+                        self.push_message(
+                            "system",
+                            &format!("unknown mode; options: {}", ids.join(", ")),
+                        );
                     } else {
                         self.set_imode(m);
                     }
@@ -626,13 +633,29 @@ impl App {
                         .iter()
                         .map(|m| m.id())
                         .collect();
-                    self.push_message("system", &format!("mix: {} (options: {})", self.mix_summary(), ids.join(", ")));
+                    self.push_message(
+                        "system",
+                        &format!("mix: {} (options: {})", self.mix_summary(), ids.join(", ")),
+                    );
                 } else {
                     let m = prism_core::modes::Mode::from_id(&arg);
                     if m.id() != arg.trim().to_lowercase() {
-                        self.push_message("system", &format!("unknown mode; options: {}", prism_core::modes::Mode::all().iter().map(|m| m.id()).collect::<Vec<_>>().join(", ")));
+                        self.push_message(
+                            "system",
+                            &format!(
+                                "unknown mode; options: {}",
+                                prism_core::modes::Mode::all()
+                                    .iter()
+                                    .map(|m| m.id())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                        );
                     } else if m == self.imode {
-                        self.push_message("system", &format!("{} is already the primary mode", m.label()));
+                        self.push_message(
+                            "system",
+                            &format!("{} is already the primary mode", m.label()),
+                        );
                     } else {
                         self.session.add_mode(m);
                         // Blending in a tool-bearing mode grants the
@@ -650,11 +673,24 @@ impl App {
             }
             "unmix" => {
                 if arg.is_empty() {
-                    self.push_message("system", &format!("mix: {} (usage: /unmix <mode>)", self.mix_summary()));
+                    self.push_message(
+                        "system",
+                        &format!("mix: {} (usage: /unmix <mode>)", self.mix_summary()),
+                    );
                 } else {
                     let m = prism_core::modes::Mode::from_id(&arg);
                     if m.id() != arg.trim().to_lowercase() {
-                        self.push_message("system", &format!("unknown mode; options: {}", prism_core::modes::Mode::all().iter().map(|m| m.id()).collect::<Vec<_>>().join(", ")));
+                        self.push_message(
+                            "system",
+                            &format!(
+                                "unknown mode; options: {}",
+                                prism_core::modes::Mode::all()
+                                    .iter()
+                                    .map(|m| m.id())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                        );
                     } else if !self.session.remove_mode(m) {
                         self.push_message("system", &format!("{} is not mixed in", m.label()));
                     } else {
@@ -668,15 +704,38 @@ impl App {
                 if arg.is_empty() {
                     let rows: Vec<String> = prism_core::modes::Feature::all()
                         .iter()
-                        .map(|f| format!("{} {}", if self.session.feature(*f) { "+" } else { "-" }, f.id()))
+                        .map(|f| {
+                            format!(
+                                "{} {}",
+                                if self.session.feature(*f) { "+" } else { "-" },
+                                f.id()
+                            )
+                        })
                         .collect();
-                    self.push_message("system", &format!("capabilities: {} (usage: /cap <feature> [on|off])", rows.join("  ")));
+                    self.push_message(
+                        "system",
+                        &format!(
+                            "capabilities: {} (usage: /cap <feature> [on|off])",
+                            rows.join("  ")
+                        ),
+                    );
                 } else {
                     let mut parts = arg.splitn(2, char::is_whitespace);
                     let id = parts.next().unwrap_or("");
                     let value = parts.next().unwrap_or("").trim();
                     let Some(feature) = prism_core::modes::Feature::from_id(id) else {
-                        self.push_message("system", &format!("unknown capability '{}'; options: {}", id, prism_core::modes::Feature::all().iter().map(|f| f.id()).collect::<Vec<_>>().join(", ")));
+                        self.push_message(
+                            "system",
+                            &format!(
+                                "unknown capability '{}'; options: {}",
+                                id,
+                                prism_core::modes::Feature::all()
+                                    .iter()
+                                    .map(|f| f.id())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                        );
                         return;
                     };
                     let enabled = match value.to_lowercase().as_str() {
@@ -689,22 +748,40 @@ impl App {
                     };
                     self.session.set_feature(feature, enabled);
                     self.apply_session();
-                    self.status = format!("{} {}", if enabled { "enabled" } else { "disabled" }, feature.id());
+                    self.status = format!(
+                        "{} {}",
+                        if enabled { "enabled" } else { "disabled" },
+                        feature.id()
+                    );
                 }
             }
             "perm" => {
                 // Edit the permission policy for one tool.
                 if arg.is_empty() {
-                    let rows: Vec<String> = self.session.capability.permission_rows()
+                    let rows: Vec<String> = self
+                        .session
+                        .capability
+                        .permission_rows()
                         .iter()
                         .map(|(t, p)| format!("{}={}", t, p.label()))
                         .collect();
-                    self.push_message("system", &format!("permissions: {} (usage: /perm <tool> allow|ask|deny)", if rows.is_empty() { "no tools".into() } else { rows.join("  ") }));
+                    self.push_message(
+                        "system",
+                        &format!(
+                            "permissions: {} (usage: /perm <tool> allow|ask|deny)",
+                            if rows.is_empty() {
+                                "no tools".into()
+                            } else {
+                                rows.join("  ")
+                            }
+                        ),
+                    );
                 } else {
                     let mut parts = arg.splitn(2, char::is_whitespace);
                     let tool = parts.next().unwrap_or("").trim();
                     let level = parts.next().unwrap_or("").trim();
-                    let Some(permission) = prism_core::session::PermissionLevel::from_label(level) else {
+                    let Some(permission) = prism_core::session::PermissionLevel::from_label(level)
+                    else {
                         self.push_message("system", "usage: /perm <tool> allow|ask|deny");
                         return;
                     };
@@ -784,9 +861,7 @@ impl App {
                     self.last_agent_task = arg.clone();
                     self.agent_running = true;
                     self.status = "agent running…".into();
-                    if let Err(e) =
-                        crate::chat::agent_job::spawn(&self.settings, &arg, root, tx)
-                    {
+                    if let Err(e) = crate::chat::agent_job::spawn(&self.settings, &arg, root, tx) {
                         self.agent_running = false;
                         self.push_message("system", &e);
                     }
@@ -809,7 +884,9 @@ impl App {
                                 self.push_message("system", &line);
                             }
                         }
-                        Some(Err(e)) => self.push_message("system", &format!("{plugin_id}.{sub} failed: {e}")),
+                        Some(Err(e)) => {
+                            self.push_message("system", &format!("{plugin_id}.{sub} failed: {e}"))
+                        }
                         None => self.push_message(
                             "system",
                             &format!("unknown command /{other} — try /help"),
@@ -1054,10 +1131,8 @@ impl App {
         // clears the blend and the feature overrides, matching the core.
         // The full available tool list is passed so a mode that grants
         // tools advertises all of them.
-        self.session.set_mode(
-            mode,
-            &crate::chat::agent_job::available_tool_names(),
-        );
+        self.session
+            .set_mode(mode, &crate::chat::agent_job::available_tool_names());
         let t = mode.traits();
         // The mode preset becomes the system prompt unless the user set
         // one explicitly (then Mode::Code would be a no-op switch).

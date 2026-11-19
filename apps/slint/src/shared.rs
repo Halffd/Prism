@@ -5,28 +5,28 @@ slint::include_modules!();
 pub mod media;
 
 // Re-export all public types and functions from dependencies
-pub use prism_core::catalog;
-pub use prism_core::cards::{self, CharacterCard, Persona};
-pub use prism_core::modes::{DaemonTask, Feature, GenCapability, Mode, ModeTraits, TaskTrigger};
-pub use prism_core::session::{PermissionLevel, Session};
 #[cfg(feature = "agent")]
 pub use prism_core::agent::AgentResult;
+pub use prism_core::cards::{self, CharacterCard, Persona};
+pub use prism_core::catalog;
 pub use prism_core::client::{
     ApiChatRequest, ChatMessage, ModelsEvent, ModelsRequest, OllamaChatRequest, StreamEvent,
     StreamRequest,
 };
+pub use prism_core::conversations::{self, Conversation, ConversationMeta, StoredMessage};
+pub use prism_core::modes::{DaemonTask, Feature, GenCapability, Mode, ModeTraits, TaskTrigger};
 #[cfg(feature = "agent")]
 pub use prism_core::native_tools;
-pub use prism_core::conversations::{self, Conversation, ConversationMeta, StoredMessage};
 pub use prism_core::providers::{self, ollama_root_url, PROVIDERS};
+pub use prism_core::session::{PermissionLevel, Session};
 pub use prism_core::settings::{Connection, Settings};
 pub use prism_core::workspace::Workspace;
 pub use prism_core::{host, thinking};
 pub use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 pub use std::cell::RefCell;
 pub use std::rc::Rc;
-pub use std::sync::Arc;
 pub use std::sync::mpsc::{self, Receiver, TryRecvError};
+pub use std::sync::Arc;
 
 /// Matches COMPUTE_LEVELS in the TUI settings screen / shared types.
 pub const COMPUTE_LEVELS: &[&str] = &[
@@ -375,8 +375,6 @@ pub fn cached_models(settings: &Settings) -> Vec<SharedString> {
         .collect()
 }
 
-
-
 /// Load the sandbox policy: a path to a policy JSON file, or inline
 /// JSON (`PRISM_AGENT_SANDBOX_POLICY` accepts both) — the same env
 /// contract the CLI uses.
@@ -391,8 +389,7 @@ pub fn load_sandbox_policy(source: &str) -> Result<prism_core::sandbox::Resolved
             })
         }
     };
-    let policy =
-        prism_core::sandbox::parse_policy(&text).map_err(|e| format!("policy: {e}"))?;
+    let policy = prism_core::sandbox::parse_policy(&text).map_err(|e| format!("policy: {e}"))?;
     Ok(prism_core::sandbox::resolve_policy(&policy))
 }
 
@@ -428,7 +425,10 @@ mod agent_integration {
             });
             let mut headers = vec![("Content-Type".to_string(), "application/json".to_string())];
             if !self.api_key.is_empty() {
-                headers.push(("Authorization".to_string(), format!("Bearer {}", self.api_key)));
+                headers.push((
+                    "Authorization".to_string(),
+                    format!("Bearer {}", self.api_key),
+                ));
             }
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -461,7 +461,12 @@ mod agent_integration {
         task: &str,
     ) {
         if state.borrow().streaming {
-            push_system(ui, state, lines_model, "wait for the chat stream to finish".into());
+            push_system(
+                ui,
+                state,
+                lines_model,
+                "wait for the chat stream to finish".into(),
+            );
             return;
         }
         let task = task.to_string();
@@ -484,7 +489,12 @@ mod agent_integration {
             Ok(source) => match load_sandbox_policy(&source) {
                 Ok(res) => match prism_core::sandbox::plan_spawn(&res) {
                     Ok(used) => {
-                        push_system(ui, state, lines_model, format!("agent sandbox: plan {used:?}"));
+                        push_system(
+                            ui,
+                            state,
+                            lines_model,
+                            format!("agent sandbox: plan {used:?}"),
+                        );
                         Some(res)
                     }
                     Err(outcome) => {
@@ -501,7 +511,12 @@ mod agent_integration {
                     }
                 },
                 Err(e) => {
-                    push_system(ui, state, lines_model, format!("agent runs unsandboxed — {e}"));
+                    push_system(
+                        ui,
+                        state,
+                        lines_model,
+                        format!("agent runs unsandboxed — {e}"),
+                    );
                     None
                 }
             },
@@ -524,7 +539,9 @@ mod agent_integration {
             // guarded `shell` tool; guard → denylist → enforced subprocess.
             #[cfg(all(target_os = "linux", feature = "native-transport"))]
             if let Some(res) = &sandbox {
-                reg.register(Arc::new(prism_core::sandbox::GuardedShellTool { res: res.clone() }));
+                reg.register(Arc::new(prism_core::sandbox::GuardedShellTool {
+                    res: res.clone(),
+                }));
             }
             #[cfg(not(all(target_os = "linux", feature = "native-transport")))]
             {
@@ -561,14 +578,13 @@ mod agent_integration {
 
             let task = task;
             let result: AgentResult = {
-                let mut step_fn = |system: &str, hist: &[StepMessage]| {
-                    step_impl.complete(system, hist)
-                };
+                let mut step_fn =
+                    |system: &str, hist: &[StepMessage]| step_impl.complete(system, hist);
                 run_agent(&task, &mut step_fn, &reg, 12, &|_, _| false)
             };
 
-            let result_json = serde_json::to_string(&result)
-                .unwrap_or_else(|e| format!("{{\"error\":\"{e}\"}}"));
+            let result_json =
+                serde_json::to_string(&result).unwrap_or_else(|e| format!("{{\"error\":\"{e}\"}}"));
             let _ = atx.send(AgentEvent::Done(result_json));
         });
     }
@@ -706,7 +722,9 @@ pub fn save_editor(ui: &AppWindow, state: &Rc<RefCell<State>>) {
         });
         return;
     };
-    let Some(ws) = &state.borrow().workspace else { return };
+    let Some(ws) = &state.borrow().workspace else {
+        return;
+    };
     match ws.write_file(&rel, &text) {
         Ok(()) => {
             ui.set_editor_dirty(false);
@@ -822,8 +840,14 @@ fn card_clear(ui: &AppWindow, state: &Rc<RefCell<State>>) {
 /// Labels + blurbs for the mode rail (same order as `Mode::all()`).
 fn mode_lists() -> (Vec<SharedString>, Vec<SharedString>, Vec<SharedString>) {
     let modes = Mode::all();
-    let labels = modes.iter().map(|m| SharedString::from(m.label())).collect();
-    let blurbs = modes.iter().map(|m| SharedString::from(m.blurb())).collect();
+    let labels = modes
+        .iter()
+        .map(|m| SharedString::from(m.label()))
+        .collect();
+    let blurbs = modes
+        .iter()
+        .map(|m| SharedString::from(m.blurb()))
+        .collect();
     // The traits line: only the constraints that bind, in a fixed order.
     // Chat (nothing enabled) keeps an empty line so the tile stays compact.
     let traits = modes
@@ -940,7 +964,8 @@ fn daemon_add(
     };
     {
         let mut st = state.borrow_mut();
-        st.daemon_tasks.push(DaemonTask::new(name, instruction, trigger));
+        st.daemon_tasks
+            .push(DaemonTask::new(name, instruction, trigger));
     }
     daemon_sync(ui, state);
     ui.set_daemon_name("".into());
@@ -1036,12 +1061,7 @@ fn refresh_session_panels(ui: &AppWindow, state: &Rc<RefCell<State>>) {
                 group: level.label().into(),
             })
             .collect();
-        let perm_default = st
-            .session
-            .capability
-            .default_permission
-            .label()
-            .to_string();
+        let perm_default = st.session.capability.default_permission.label().to_string();
         (mixed, summary, cap_rows, perm_rows, perm_default)
     };
     ui.set_pmode_mixed(ModelRc::from(Rc::new(VecModel::from(mixed))));
@@ -1112,7 +1132,12 @@ fn cap_toggle(ui: &AppWindow, state: &Rc<RefCell<State>>, feature_id: &str) {
     apply_mode_traits(ui, traits.clone());
     refresh_session_panels(ui, state);
     ui.set_settings_status(
-        format!("{} {}", if traits.has(feature) { "on" } else { "off" }, feature.id()).into(),
+        format!(
+            "{} {}",
+            if traits.has(feature) { "on" } else { "off" },
+            feature.id()
+        )
+        .into(),
     );
 }
 
@@ -1121,9 +1146,7 @@ fn perm_cycle(ui: &AppWindow, state: &Rc<RefCell<State>>, tool: &str) {
     let result = {
         let mut st = state.borrow_mut();
         let current = st.session.capability.permission_for(tool);
-        st.session
-            .capability
-            .set_permission(tool, current.cycled())
+        st.session.capability.set_permission(tool, current.cycled())
     };
     if !result {
         ui.set_settings_status(format!("no such tool: {tool}").into());
@@ -1137,7 +1160,9 @@ fn perm_default_cycle(ui: &AppWindow, state: &Rc<RefCell<State>>) {
     {
         let mut st = state.borrow_mut();
         let current = st.session.capability.default_permission;
-        st.session.capability.set_default_permission(current.cycled());
+        st.session
+            .capability
+            .set_default_permission(current.cycled());
     }
     refresh_session_panels(ui, state);
 }
@@ -1217,7 +1242,10 @@ fn refresh_custom_provider_rows(ui: &AppWindow, settings: &Settings) {
             } else {
                 cp.label.clone()
             };
-            ProviderRow { id: id.into(), label: label.into() }
+            ProviderRow {
+                id: id.into(),
+                label: label.into(),
+            }
         })
         .collect();
     ui.set_custom_provider_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
@@ -1225,7 +1253,11 @@ fn refresh_custom_provider_rows(ui: &AppWindow, settings: &Settings) {
 
 fn add_custom_provider(ui: &AppWindow, state: &Rc<RefCell<State>>) {
     let id = ui.get_new_provider_id().trim().to_string();
-    let url = ui.get_new_provider_url().trim().trim_end_matches('/').to_string();
+    let url = ui
+        .get_new_provider_url()
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
     if id.is_empty() || url.is_empty() {
         ui.set_settings_status("provider id and base URL required".into());
         return;
@@ -1443,7 +1475,11 @@ pub fn palette_execute(
             let report = prism_core::sandbox::preflight();
             let mut detail = format!(
                 "sandbox preflight: landlock {}{}",
-                if report.landlock_supported { "supported" } else { "UNSUPPORTED" },
+                if report.landlock_supported {
+                    "supported"
+                } else {
+                    "UNSUPPORTED"
+                },
                 report
                     .landlock_abi
                     .map(|abi| format!(" (abi v{abi})"))
@@ -1454,12 +1490,17 @@ pub fn palette_execute(
                     detail.push_str(&match load_sandbox_policy(&source) {
                         Ok(res) => match prism_core::sandbox::plan_spawn(&res) {
                             Ok(used) => format!(" · plan {used:?}"),
-                            Err(outcome) => format!(" · plan rejected: {}", prism_core::sandbox::outcome_str(&outcome)),
+                            Err(outcome) => format!(
+                                " · plan rejected: {}",
+                                prism_core::sandbox::outcome_str(&outcome)
+                            ),
                         },
                         Err(e) => format!(" · {e}"),
                     });
                 }
-                Err(_) => detail.push_str( " · no PRISM_AGENT_SANDBOX_POLICY set (agent runs without a shell tool)"),
+                Err(_) => detail.push_str(
+                    " · no PRISM_AGENT_SANDBOX_POLICY set (agent runs without a shell tool)",
+                ),
             }
             push_system(ui, state, lines_model, detail);
         }
@@ -1523,11 +1564,7 @@ pub fn parse_opt_f32(buf: &str) -> Option<Option<f32>> {
     }
 }
 
-pub fn refresh_transcript(
-    ui: &AppWindow,
-    lines_model: &Rc<VecModel<ChatLine>>,
-    lines: &[Line],
-) {
+pub fn refresh_transcript(ui: &AppWindow, lines_model: &Rc<VecModel<ChatLine>>, lines: &[Line]) {
     lines_model.set_vec(lines.iter().map(|l| l.to_widget()).collect::<Vec<_>>());
     let _ = ui;
 }
@@ -1739,11 +1776,7 @@ pub fn drain_models(ui: &AppWindow, state: &Rc<RefCell<State>>) {
         Ok(ModelsEvent::Loaded { models }) => {
             let n = models.len();
             let provider = st.settings.provider.clone();
-            let cache = st
-                .settings
-                .model_cache
-                .entry(provider)
-                .or_default();
+            let cache = st.settings.model_cache.entry(provider).or_default();
             for m in models {
                 if !cache.contains(&m) {
                     cache.push(m);
@@ -1770,7 +1803,11 @@ pub fn drain_models(ui: &AppWindow, state: &Rc<RefCell<State>>) {
 /// answer); `Failed` becomes a system line. Disconnected = the thread
 /// exited without a result (aborted path) — stop polling.
 #[cfg(feature = "agent")]
-pub fn drain_agent(ui: &AppWindow, state: &Rc<RefCell<State>>, lines_model: &Rc<VecModel<ChatLine>>) {
+pub fn drain_agent(
+    ui: &AppWindow,
+    state: &Rc<RefCell<State>>,
+    lines_model: &Rc<VecModel<ChatLine>>,
+) {
     let Some(rx) = state.borrow_mut().rx_agent.take() else {
         return;
     };
@@ -1782,7 +1819,12 @@ pub fn drain_agent(ui: &AppWindow, state: &Rc<RefCell<State>>, lines_model: &Rc<
             state.borrow_mut().rx_agent = Some(rx);
         }
         Err(mpsc::TryRecvError::Disconnected) => {
-            push_system(ui, state, lines_model, "agent job ended without a result".into());
+            push_system(
+                ui,
+                state,
+                lines_model,
+                "agent job ended without a result".into(),
+            );
         }
     }
 }
@@ -1945,11 +1987,7 @@ pub fn send(
 /// is a no-op so the user cannot fall off the end. Forward past the
 /// newest entry restores the draft that was being edited when cycling
 /// started. Does nothing while streaming (input is disabled anyway).
-pub fn history_recall(
-    ui: &AppWindow,
-    state: &Rc<RefCell<State>>,
-    back: bool,
-) {
+pub fn history_recall(ui: &AppWindow, state: &Rc<RefCell<State>>, back: bool) {
     if state.borrow().streaming {
         return;
     }
@@ -2003,11 +2041,12 @@ pub fn run_ui() {
     // ---- initial property sync ----
     {
         let st = state.borrow();
-        ui.set_provider_labels(ModelRc::from(Rc::new(VecModel::from(
-            st.provider_labels(),
-        ))));
+        ui.set_provider_labels(ModelRc::from(Rc::new(VecModel::from(st.provider_labels()))));
         ui.set_compute_labels(ModelRc::from(Rc::new(VecModel::from(
-            COMPUTE_LEVELS.iter().map(|c| SharedString::from(*c)).collect::<Vec<_>>(),
+            COMPUTE_LEVELS
+                .iter()
+                .map(|c| SharedString::from(*c))
+                .collect::<Vec<_>>(),
         ))));
         ui.set_canonical_labels(ModelRc::from(Rc::new(VecModel::from(
             std::iter::once(SharedString::from("(bare endpoint)"))
@@ -2094,9 +2133,7 @@ pub fn run_ui() {
             ui.set_pmode_traits(ModelRc::from(Rc::new(VecModel::from(traits))));
             apply_mode_traits(&ui, Mode::default().traits());
             refresh_session_panels(&ui, &state);
-            ui.set_gen_cap_labels(ModelRc::from(Rc::new(VecModel::from(
-                gen_cap_labels(),
-            ))));
+            ui.set_gen_cap_labels(ModelRc::from(Rc::new(VecModel::from(gen_cap_labels()))));
         }
         ui.set_media_kind_labels(ModelRc::from(Rc::new(VecModel::from(
             media::MEDIA_KINDS
@@ -2294,7 +2331,9 @@ pub fn run_ui() {
                     .map(|t| t.instruction.clone())
             };
             match instruction {
-                Some(instr) => ui.set_settings_status(format!("daemon: running '{}'", instr).into()),
+                Some(instr) => {
+                    ui.set_settings_status(format!("daemon: running '{}'", instr).into())
+                }
                 None => ui.set_settings_status("daemon task not found".into()),
             }
         });
@@ -2351,9 +2390,7 @@ pub fn run_ui() {
                 // reported before the run starts, not discovered mid-run.
                 let denied: Vec<String> = tools
                     .iter()
-                    .filter(|t| {
-                        st.session.permission_for(t) == PermissionLevel::Deny
-                    })
+                    .filter(|t| st.session.permission_for(t) == PermissionLevel::Deny)
                     .cloned()
                     .collect();
                 (mode, tools, denied)
@@ -2504,13 +2541,11 @@ pub fn run_ui() {
         ui.on_prompt_engine_toggle(move || {
             let Some(ui) = ui_w.upgrade() else { return };
             let on = ui.get_prompt_engine_on();
-            ui.set_settings_status(
-                if on {
-                    "core prompt engine on".into()
-                } else {
-                    "core prompt engine off".into()
-                },
-            );
+            ui.set_settings_status(if on {
+                "core prompt engine on".into()
+            } else {
+                "core prompt engine off".into()
+            });
         });
     }
     {
@@ -2610,7 +2645,10 @@ pub fn run_ui() {
                 ui.set_palette_open(false);
                 push_system(&ui, &state_c, &lines_c, "agent finished".into());
                 // Append final answer to transcript
-                let provider = { let st = state_c.borrow(); st.settings.provider.clone() };
+                let provider = {
+                    let st = state_c.borrow();
+                    st.settings.provider.clone()
+                };
                 let mut st = state_c.borrow_mut();
                 st.lines.push(Line::new("user", provider));
                 st.lines.push(Line::new("assistant", result.answer.clone()));
@@ -2618,7 +2656,12 @@ pub fn run_ui() {
                 st.chats = host::list_conversations();
                 // TODO: persist conversation
             } else {
-                push_system(&ui, &state_c, &lines_c, result.error.unwrap_or("agent stopped".into()));
+                push_system(
+                    &ui,
+                    &state_c,
+                    &lines_c,
+                    result.error.unwrap_or("agent stopped".into()),
+                );
             }
         });
     }
@@ -3184,4 +3227,3 @@ pub fn run_ui() {
 
     ui.run().expect("slint event loop failed");
 }
-
