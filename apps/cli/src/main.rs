@@ -91,6 +91,7 @@ fn main() -> anyhow::Result<()> {
             "stop-all" => return serve::stop_all_cli(rest),
             "serve" => return serve::serve_cli(rest),
             "acp" => return acp::acp_cli(rest),
+            "tui" | "ui" => {}
             "sandbox" => return sandbox_cli(std::env::args().skip(2)),
             other => anyhow::bail!("unknown argument: {other} (see prism --help)"),
         }
@@ -120,7 +121,7 @@ fn print_help() {
     println!("prism — native terminal harness and local agent daemon");
     println!("usage: prism [command] [flags]");
     println!();
-    println!("  (no command)                  open the terminal UI");
+    println!("  (no command) | tui | ui       open the terminal UI");
     println!("  resume [id] [--json]          open the most recent (or named) chat");
     println!("  sessions [--limit N] [--json] list stored sessions");
     println!("  chats                         list stored chats");

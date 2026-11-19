@@ -1181,3 +1181,16 @@ fn help_lists_the_new_parity_commands() {
         assert!(text.contains(needle), "missing {needle}");
     }
 }
+
+#[test]
+fn local_base_url_command_persists() {
+    let (_g, _dir, mut app, tx) = fresh_app("local-url");
+    type_line(&mut app, &tx, "/local http://localhost:8080/v1");
+    assert_eq!(app.settings.local_base_url, "http://localhost:8080/v1");
+    assert_eq!(
+        host::load_settings().local_base_url,
+        "http://localhost:8080/v1"
+    );
+    type_line(&mut app, &tx, "/local off");
+    assert!(app.settings.local_base_url.is_empty());
+}

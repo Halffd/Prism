@@ -12,7 +12,7 @@ use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
 pub const HELP_LINES: &[&str] = &[
-    "Prism CLI — commands: /help /new /load N /del N /model X /provider X /key X /mode [id] /mix [id] /unmix [id] /cap [feature [on|off]] /perm <tool> allow|ask|deny /system X /think /temp X /conn direct|api /search X /agent <task> /mcp [panel] /agents [list|spawn <name> <task>] /quit",
+    "Prism CLI — commands: /help /new /load N /del N /model X /provider X /key X /mode [id] /mix [id] /unmix [id] /cap [feature [on|off]] /perm <tool> allow|ask|deny /system X /think /temp X /conn direct|api /local <url> /search X /agent <task> /mcp [panel] /agents [list|spawn <name> <task>] /quit",
     "rag: /rag <path> indexes a local file (paragraph chunks, TF-IDF retrieval) · /rag list · /rag clear — relevant chunks ride into every request",
     "creative: /card <path.json>|off loads a V1/V2 character card (description, lore book, examples) · /persona <name[|description]> sets {{user}} · card prompts go through prism_core::cards",
     "storage: /vault list · /vault save · /vault open <id> · /vault delete <id> — the shared conversation store (same files as prism sessions)",
@@ -374,6 +374,14 @@ fn draw_details(f: &mut Frame, app: &App, area: Rect) {
         kv("provider", &s.provider),
         kv("model", &app.effective_model()),
         kv("connection", conn),
+        kv(
+            "local url",
+            if s.local_base_url.is_empty() {
+                "provider default"
+            } else {
+                &s.local_base_url
+            },
+        ),
         kv(
             "key",
             if needs_key && !key_set {

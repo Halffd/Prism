@@ -1073,6 +1073,29 @@ impl App {
                 }
                 _ => self.push_message("system", "usage: /conn direct|api"),
             },
+            "local" => {
+                if arg.is_empty() {
+                    self.push_message(
+                        "system",
+                        &format!(
+                            "local base url: {} (usage: /local <url>|off)",
+                            if self.settings.local_base_url.is_empty() {
+                                "provider default"
+                            } else {
+                                &self.settings.local_base_url
+                            }
+                        ),
+                    );
+                } else if matches!(arg.as_str(), "off" | "default") {
+                    self.settings.local_base_url.clear();
+                    self.persist_settings();
+                    self.status = "local base url: provider default".into();
+                } else {
+                    self.settings.local_base_url = arg.clone();
+                    self.persist_settings();
+                    self.status = format!("local base url: {arg}");
+                }
+            }
             "search" => {
                 self.mode = Mode::Search;
                 self.input = arg.chars().collect();

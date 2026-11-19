@@ -97,7 +97,16 @@ hardware modes, agent memories. See TUI.
 | Ratatui terminal harness               | done    | Event-driven input + chat jobs over prism-core; conversations persisted to disk via core storage |
 | Chat + streaming + queue               | done    | Inline streaming, abort, queue drains on done, error pauses queue                              |
 | Settings persistence                   | done    | Commands update + persist settings; restores most recent conversation on restart               |
-| Behavior tests                         | done    | 9 tests covering stream/drain/abort/error/queue/commands/credentials/search/persistence         |
+| Non-interactive command surface        | done    | `resume`, `sessions`, `models [--fetch]`, `send`, `run`, `status`, `agents`, `permissions`, `mcp list/tools/test/call`, `ping`, `auth`, `pair browser/slint/remote`, `debug`, `reload`, `serve`, `stop`, `stop-all`, `acp`, `api`, `update`, `uninstall`, `tui`; JSON flags on the query commands |
+| Local daemon + client                  | done    | `prism serve` = nonblocking TcpListener, thread per request, bearer auth, `<config>/server.json`; routes health/status/jobs/sessions/agents/models/agents-spawn/send/stop/stop-all/reload/pair/shutdown; settings re-read per request |
+| ACP over stdio                         | done    | JSON-RPC `initialize` / `authenticate` / `session/new` / `session/prompt` / `session/cancel` / `shutdown`; prompts run the core agent loop |
+| Persisted tool permissions             | done    | `Settings::tool_permissions` + `default_tool_permission`; `prism permissions set/default/reset`; applied in CLI agent runs and the Slint registry |
+| Vault commands (Ink parity)            | done    | `/vault list|save|open <id>|delete <id>` over the shared conversation store                    |
+| Character cards + persona (Ink parity) | done    | `/card <path.json>|off` parses V1/V2 cards (lore book included), `/persona <name[|desc]>`; card prompts/lore go through `prism_core::cards::build_messages` |
+| Hardware settings (Ink parity)         | done    | `/hardware compute|gpu|ctx|reset`, persisted in `Settings::hardware`; `/local <url>` sets the local base URL |
+| RAG (Ink parity)                       | done    | Core `prism_core::rag` (paragraph chunks, TF-IDF, IDF weighting); `/rag <path>|list|clear`; top chunks injected as a system block on every send |
+| In-app MCP panel                       | done    | `/mcp panel` — background discovery of every configured server, per-tool schema/description, JSON args editor, direct `tools/call` with output pane; `r` reconnects, `Esc` closes |
+| Behavior tests                         | done    | 44 CLI tests: stream/drain/abort/error/queue/commands/credentials/search/persistence, modes/mixing/permissions, vault/cards/hardware/RAG, MCP panel discovery+call, daemon routes, ACP handshake, command persistence |
 | **Plugin system (core `plugins::Registry`)** | done | Sync trait hooks (commands / before_send / format_output / status / system_prompt_suffix) over the `Storage` trait; both-target safe; native ports of the OpenCode plugins |
 | Plugin ports — snippets                | done    | `/snippets.list|add|del`; `#tag` expansion in the send pipeline; status `snip:N`               |
 | Plugin ports — memory                  | done    | `/memory.save|read|search` over `<config>/plugins/memory/<day>.logfmt`; status `mem:Nd`        |
