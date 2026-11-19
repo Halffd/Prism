@@ -962,10 +962,10 @@ mod tests {
     use std::path::PathBuf;
 
     /// Each test owns its storage; the ctx borrows it for the call.
-    fn ctx_with<'a>(storage: &'a MemStorage, dir: &'a PathBuf) -> PluginContext<'a> {
+    fn ctx_with<'a>(storage: &'a MemStorage, dir: &'a std::path::Path) -> PluginContext<'a> {
         PluginContext {
             storage,
-            config_dir: Some(dir.as_path()),
+            config_dir: Some(dir),
         }
     }
 

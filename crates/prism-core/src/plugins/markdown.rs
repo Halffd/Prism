@@ -46,14 +46,14 @@ fn format_block(rows: &[&str]) -> Vec<String> {
     let mut out = Vec::with_capacity(rows.len());
     for (i, row) in parsed.iter().enumerate() {
         let mut cells = Vec::with_capacity(cols);
-        for c in 0..cols {
+        for (c, width) in widths.iter().enumerate().take(cols) {
             let cell = row.get(c).map(String::as_str).unwrap_or("");
-            let pad = widths[c].saturating_sub(cell.chars().count());
+            let pad = width.saturating_sub(cell.chars().count());
             if i == 1 {
                 // separator row: preserve alignment colons
                 let left = cell.starts_with(':');
                 let right = cell.ends_with(':');
-                let inner = widths[c].saturating_sub(usize::from(left) + usize::from(right));
+                let inner = width.saturating_sub(usize::from(left) + usize::from(right));
                 let dashes = "-".repeat(inner.max(1));
                 cells.push(format!(
                     " {}{}{} ",
