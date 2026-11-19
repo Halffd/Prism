@@ -219,6 +219,27 @@ pub const COMMANDS: &[CommandDef] = &[
         takes_arg: false,
         while_streaming: false,
     },
+    CommandDef {
+        id: "agent.mcp",
+        title: "MCP: probe configured servers",
+        group: CommandGroup::Agent,
+        takes_arg: false,
+        while_streaming: false,
+    },
+    CommandDef {
+        id: "agent.subagents",
+        title: "Subagents: list profiles (shipped + config)",
+        group: CommandGroup::Agent,
+        takes_arg: false,
+        while_streaming: false,
+    },
+    CommandDef {
+        id: "agent.subagent",
+        title: "Run a background subagent…",
+        group: CommandGroup::Agent,
+        takes_arg: true,
+        while_streaming: false,
+    },
     // IDE — three session types: normal chat, agent chat,
     // and the agent working from inside an editor surface.
     CommandDef {

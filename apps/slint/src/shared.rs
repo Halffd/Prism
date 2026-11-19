@@ -67,6 +67,17 @@ pub const CONTEXT_TOKEN_CYCLE: &[Option<u32>] = &[
 pub enum AgentEvent {
     Done(String),
     Failed(String),
+    /// Out-of-band system line from a background job (MCP connect
+    /// results, subagent bookkeeping). Never carries a final answer.
+    Notice(String),
+    /// A background subagent finished; `result` is the JSON
+    /// `AgentResult` (the same shape `Done` carries for a foreground
+    /// run). `task` is echoed so the transcript names the work.
+    SubagentDone {
+        spec: String,
+        task: String,
+        result: String,
+    },
 }
 
 /// One line in the chat transcript.
@@ -132,12 +143,13 @@ pub struct State {
     pub rx: Option<Receiver<StreamEvent>>,
     pub rx_models: Option<Receiver<ModelsEvent>>,
 
-    /// Receiver for agent-jobs results, drained by the timer pump
-    /// (`drain_agent`); Slint handles are not `Send`, so the agent
-    /// thread reports back through the channel instead of upgrading a
-    /// weak handle off the main thread.
+    /// Receivers for agent/subagent jobs, drained by the timer pump
+    /// (`drain_agent`); Slint handles are not `Send`, so worker threads
+    /// report back through channels instead of upgrading a weak handle
+    /// off the main thread. More than one may be live (a foreground
+    /// run plus background subagents).
     #[cfg(feature = "agent")]
-    pub rx_agent: Option<Receiver<AgentEvent>>,
+    pub rx_agent: Vec<Receiver<AgentEvent>>,
     pub gpu_idx: usize,
     pub ctx_idx: usize,
     /// Position in the sent-prompt history while cycling with Up/Down:
@@ -216,7 +228,7 @@ impl State {
             rx: None,
             rx_models: None,
             #[cfg(feature = "agent")]
-            rx_agent: None,
+            rx_agent: Vec::new(),
             gpu_idx,
             ctx_idx,
             history_idx: None,
@@ -397,8 +409,10 @@ pub fn load_sandbox_policy(source: &str) -> Result<prism_core::sandbox::Resolved
 mod agent_integration {
     use super::*;
     use prism_core::agent::{run_agent, AgentResult, CalculatorTool, StepMessage, ToolRegistry};
+    use prism_core::subagents::SubagentRegistry;
     use prism_core::transport::{ReqwestTransport, Transport as _};
     use std::sync::Arc;
+    use std::time::Duration;
 
     struct SlintLlmStep {
         transport: Arc<ReqwestTransport>,
@@ -451,6 +465,82 @@ mod agent_integration {
                     .ok_or_else(|| String::from("missing choices[0].message.content in response"))
             })
         }
+    }
+
+    /// The tool surface every run starts from: calculator, the
+    /// workspace-scoped native tools, and the guarded shell when a
+    /// sandbox policy resolved.
+    fn build_registry(
+        workspace_root: &std::path::Path,
+        sandbox: &Option<prism_core::sandbox::ResolvedSandbox>,
+    ) -> ToolRegistry {
+        let reg = ToolRegistry::new();
+        reg.register(Arc::new(CalculatorTool));
+        native_tools::register_all(&reg, workspace_root);
+        // The sandbox policy is the permission boundary for the guarded
+        // `shell` tool; guard → denylist → enforced subprocess.
+        #[cfg(all(target_os = "linux", feature = "native-transport"))]
+        if let Some(res) = sandbox {
+            reg.register(Arc::new(prism_core::sandbox::GuardedShellTool {
+                res: res.clone(),
+            }));
+        }
+        #[cfg(not(all(target_os = "linux", feature = "native-transport")))]
+        {
+            // Enforcing tool unavailable on this host; the posture already
+            // recorded what (if anything) is active.
+            let _ = sandbox;
+        }
+        reg
+    }
+
+    /// Connect the configured MCP servers into this run's registry.
+    /// Failures stream back as `Notice` lines; a dead server never
+    /// stops the run.
+    fn register_mcp_tools(reg: &ToolRegistry, tx: &mpsc::Sender<AgentEvent>) {
+        let Some(file) = prism_core::mcp::load_file() else {
+            return;
+        };
+        if file.mcp_servers.is_empty() {
+            return;
+        }
+        let surface = prism_core::mcp::McpSurface::connect(&file, Duration::from_secs(10));
+        for tool in &surface.tools {
+            reg.register(tool.clone());
+        }
+        if !surface.tools.is_empty() {
+            let _ = tx.send(AgentEvent::Notice(format!(
+                "mcp: {} tool(s) registered from {} server config(s)",
+                surface.tools.len(),
+                file.mcp_servers.len()
+            )));
+        }
+        for e in &surface.errors {
+            let _ = tx.send(AgentEvent::Notice(format!("mcp: {e}")));
+        }
+    }
+
+    /// Shipped subagent profiles plus the `subagents` entries in the
+    /// shared MCP config file (same file every surface reads).
+    fn subagent_registry() -> (SubagentRegistry, Vec<String>) {
+        let mut reg = SubagentRegistry::default();
+        let warnings = match prism_core::mcp::load_file() {
+            Some(file) => reg.upsert_config_specs(&file.subagents).1,
+            None => Vec::new(),
+        };
+        (reg, warnings)
+    }
+
+    /// A registry restricted to the given names (the subagent allowlist
+    /// clamp, intersected with what this host advertises).
+    fn clamp_registry(reg: &ToolRegistry, names: &[String]) -> ToolRegistry {
+        let out = ToolRegistry::new();
+        for name in names {
+            if let Some(tool) = reg.get(name) {
+                out.register(tool);
+            }
+        }
+        out
     }
 
     #[cfg(feature = "agent")]
@@ -528,27 +618,11 @@ mod agent_integration {
         // handles are not Send, so no handle upgrade off the main
         // thread).
         let (atx, arx) = std::sync::mpsc::channel::<AgentEvent>();
-        state.borrow_mut().rx_agent = Some(arx);
+        state.borrow_mut().rx_agent.push(arx);
 
         std::thread::spawn(move || {
-            let reg = ToolRegistry::new();
-            reg.register(Arc::new(CalculatorTool));
-            native_tools::register_all(&reg, &workspace_root);
-
-            // The sandbox policy is the permission boundary for the
-            // guarded `shell` tool; guard → denylist → enforced subprocess.
-            #[cfg(all(target_os = "linux", feature = "native-transport"))]
-            if let Some(res) = &sandbox {
-                reg.register(Arc::new(prism_core::sandbox::GuardedShellTool {
-                    res: res.clone(),
-                }));
-            }
-            #[cfg(not(all(target_os = "linux", feature = "native-transport")))]
-            {
-                // Enforcing tool unavailable on this host; the posture
-                // above already recorded what (if anything) is active.
-                let _ = &sandbox;
-            }
+            let reg = build_registry(&workspace_root, &sandbox);
+            register_mcp_tools(&reg, &atx);
 
             let Some(resolved) = settings.resolve_provider(&provider) else {
                 let _ = atx.send(AgentEvent::Failed(format!("unknown provider {provider}")));
@@ -586,6 +660,281 @@ mod agent_integration {
             let result_json =
                 serde_json::to_string(&result).unwrap_or_else(|e| format!("{{\"error\":\"{e}\"}}"));
             let _ = atx.send(AgentEvent::Done(result_json));
+        });
+    }
+
+    /// Palette `agent.mcp`: probe the configured servers off the UI
+    /// thread and stream the report into the transcript.
+    pub fn probe_mcp_from_palette(
+        ui: &AppWindow,
+        state: &Rc<RefCell<State>>,
+        lines_model: &Rc<VecModel<ChatLine>>,
+    ) {
+        let (tx, rx) = mpsc::channel::<AgentEvent>();
+        state.borrow_mut().rx_agent.push(rx);
+        push_system(
+            ui,
+            state,
+            lines_model,
+            "mcp: probing configured servers…".into(),
+        );
+        std::thread::spawn(move || {
+            let path = prism_core::mcp::config_path()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "<no config root>".into());
+            let Some(file) = prism_core::mcp::load_file() else {
+                let _ = tx.send(AgentEvent::Notice(format!(
+                    "mcp: no configuration at {path} — add an \"mcpServers\" object"
+                )));
+                return;
+            };
+            if file.mcp_servers.is_empty() {
+                let _ = tx.send(AgentEvent::Notice(format!(
+                    "mcp: {path} has no usable servers (command required)"
+                )));
+                return;
+            }
+            let surface = prism_core::mcp::McpSurface::connect(&file, Duration::from_secs(10));
+            let _ = tx.send(AgentEvent::Notice(format!(
+                "mcp: {} tool(s) from {} configured server(s) — {path}",
+                surface.tools.len(),
+                file.mcp_servers.len()
+            )));
+            for server in file.mcp_servers.keys() {
+                let tools: Vec<&str> = surface
+                    .tools
+                    .iter()
+                    .filter(|t| t.server_name() == server)
+                    .map(|t| t.advertised.as_str())
+                    .collect();
+                let _ = tx.send(AgentEvent::Notice(if tools.is_empty() {
+                    format!("  {server}: connected, no tools")
+                } else {
+                    format!("  {server}: {}", tools.join(", "))
+                }));
+            }
+            for e in &surface.errors {
+                let _ = tx.send(AgentEvent::Notice(format!("  failed: {e}")));
+            }
+        });
+    }
+
+    /// Palette `agent.subagents`: list every profile this host exposes.
+    pub fn list_subagents_from_palette(
+        ui: &AppWindow,
+        state: &Rc<RefCell<State>>,
+        lines_model: &Rc<VecModel<ChatLine>>,
+    ) {
+        let (registry, warnings) = subagent_registry();
+        push_system(
+            ui,
+            state,
+            lines_model,
+            "subagents — background profiles (core registry):".into(),
+        );
+        for name in registry.names() {
+            let Some(spec) = registry.get(&name) else {
+                continue;
+            };
+            let tools = if spec.tool_allowlist.is_empty() {
+                "full surface".to_string()
+            } else {
+                spec.tool_allowlist.join(", ")
+            };
+            let model = spec
+                .forced_model
+                .as_ref()
+                .map(|m| format!(" · model {m}"))
+                .unwrap_or_default();
+            push_system(
+                ui,
+                state,
+                lines_model,
+                format!("  {name}: {}", spec.description),
+            );
+            push_system(ui, state, lines_model, format!("    tools: {tools}{model}"));
+        }
+        for w in &warnings {
+            push_system(ui, state, lines_model, format!("  config warning: {w}"));
+        }
+        push_system(
+            ui,
+            state,
+            lines_model,
+            "run one: palette \"Run a background subagent\" with query \"<name> <task>\"".into(),
+        );
+    }
+
+    /// Palette `agent.subagent`: run one profile on a background thread
+    /// with its forced model and clamped tools. The answer lands in the
+    /// transcript through `SubagentDone`.
+    pub fn run_subagent_from_palette(
+        ui: &AppWindow,
+        state: &Rc<RefCell<State>>,
+        lines_model: &Rc<VecModel<ChatLine>>,
+        query: &str,
+    ) {
+        let query = query.trim();
+        let name = query.split_whitespace().next().unwrap_or("").to_string();
+        let task = query[name.len()..].trim().to_string();
+        if name.is_empty() || task.is_empty() {
+            push_system(
+                ui,
+                state,
+                lines_model,
+                "usage: <name> <task> (palette: Run a background subagent)".into(),
+            );
+            return;
+        }
+        let (registry, warnings) = subagent_registry();
+        if registry.get(&name).is_none() {
+            push_system(
+                ui,
+                state,
+                lines_model,
+                format!(
+                    "unknown subagent {name:?} — known: {}",
+                    registry.names().join(", ")
+                ),
+            );
+            return;
+        }
+        for w in &warnings {
+            push_system(
+                ui,
+                state,
+                lines_model,
+                format!("agents config warning: {w}"),
+            );
+        }
+        let provider = state.borrow().settings.provider.clone();
+        let settings = state.borrow().settings.clone();
+        let workspace_root = state
+            .borrow()
+            .workspace
+            .as_ref()
+            .map(|w| w.root.clone())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let Some(resolved) = settings.resolve_provider(&provider) else {
+            push_system(
+                ui,
+                state,
+                lines_model,
+                format!("unknown provider {provider}"),
+            );
+            return;
+        };
+        let api_key = settings.key_for(&provider);
+        if resolved.needs_key && api_key.trim().is_empty() {
+            push_system(
+                ui,
+                state,
+                lines_model,
+                format!(
+                    "API key required for {} — set it in settings",
+                    resolved.label
+                ),
+            );
+            return;
+        }
+        let session_model = if settings.model.trim().is_empty() {
+            resolved.default_model.clone()
+        } else {
+            settings.model.trim().to_string()
+        };
+        let model = match registry.resolve_model(
+            &name,
+            &session_model,
+            Some(resolved.default_model.clone()),
+        ) {
+            Ok(resolution) => resolution.model,
+            Err(e) => {
+                push_system(ui, state, lines_model, format!("subagent model: {e}"));
+                return;
+            }
+        };
+
+        let sandbox = match std::env::var("PRISM_AGENT_SANDBOX_POLICY") {
+            Ok(source) => match load_sandbox_policy(&source) {
+                Ok(res) => match prism_core::sandbox::plan_spawn(&res) {
+                    Ok(used) => {
+                        push_system(
+                            ui,
+                            state,
+                            lines_model,
+                            format!("subagent sandbox: plan {used:?}"),
+                        );
+                        Some(res)
+                    }
+                    Err(outcome) => {
+                        push_system(
+                            ui,
+                            state,
+                            lines_model,
+                            format!(
+                                "subagent aborted — sandbox preflight: {}",
+                                prism_core::sandbox::outcome_str(&outcome)
+                            ),
+                        );
+                        return;
+                    }
+                },
+                Err(e) => {
+                    push_system(
+                        ui,
+                        state,
+                        lines_model,
+                        format!("subagent runs unsandboxed — {e}"),
+                    );
+                    None
+                }
+            },
+            Err(_) => None,
+        };
+
+        let (tx, rx) = mpsc::channel::<AgentEvent>();
+        state.borrow_mut().rx_agent.push(rx);
+        push_system(
+            ui,
+            state,
+            lines_model,
+            format!("subagent {name} running in background — {task}"),
+        );
+        let spec_name = name.clone();
+        std::thread::spawn(move || {
+            let reg = build_registry(&workspace_root, &sandbox);
+            register_mcp_tools(&reg, &tx);
+            let advertised = reg.tool_names();
+            let effective = match registry.clamp_tools(&spec_name, &advertised) {
+                Ok(names) => names,
+                Err(e) => {
+                    let _ = tx.send(AgentEvent::Failed(format!("subagent {spec_name}: {e}")));
+                    return;
+                }
+            };
+            let reg = clamp_registry(&reg, &effective);
+
+            let step_impl = SlintLlmStep {
+                transport: Arc::new(ReqwestTransport::new()),
+                base_url: resolved.base_url.clone(),
+                api_key: api_key.trim().to_string(),
+                model,
+                temperature: settings.temperature,
+                max_tokens: settings.max_tokens,
+            };
+            let task_for_run = task.clone();
+            let result: AgentResult = {
+                let mut step_fn =
+                    |system: &str, hist: &[StepMessage]| step_impl.complete(system, hist);
+                run_agent(&task_for_run, &mut step_fn, &reg, 12, &|_, _| false)
+            };
+            let result_json =
+                serde_json::to_string(&result).unwrap_or_else(|e| format!("{{\"error\":\"{e}\"}}"));
+            let _ = tx.send(AgentEvent::SubagentDone {
+                spec: spec_name,
+                task,
+                result: result_json,
+            });
         });
     }
 }
@@ -1504,6 +1853,29 @@ pub fn palette_execute(
             }
             push_system(ui, state, lines_model, detail);
         }
+        "agent.mcp" => {
+            #[cfg(feature = "agent")]
+            crate::shared::agent_integration::probe_mcp_from_palette(ui, state, lines_model);
+            #[cfg(not(feature = "agent"))]
+            push_system(ui, state, lines_model, "agent feature not enabled".into());
+        }
+        "agent.subagents" => {
+            #[cfg(feature = "agent")]
+            crate::shared::agent_integration::list_subagents_from_palette(ui, state, lines_model);
+            #[cfg(not(feature = "agent"))]
+            push_system(ui, state, lines_model, "agent feature not enabled".into());
+        }
+        "agent.subagent" => {
+            #[cfg(feature = "agent")]
+            crate::shared::agent_integration::run_subagent_from_palette(
+                ui,
+                state,
+                lines_model,
+                query.trim(),
+            );
+            #[cfg(not(feature = "agent"))]
+            push_system(ui, state, lines_model, "agent feature not enabled".into());
+        }
         // Surface modes — plain chat, agent-first composer, and the
         // editor + agent sidebar pair.
         "ide.mode.chat" => set_mode(ui, state, 0),
@@ -1592,9 +1964,20 @@ pub fn push_system(
     lines_model: &Rc<VecModel<ChatLine>>,
     text: String,
 ) {
+    push_line(ui, state, lines_model, "system", text);
+}
+
+/// Append one line in any role and refresh the transcript.
+pub fn push_line(
+    ui: &AppWindow,
+    state: &Rc<RefCell<State>>,
+    lines_model: &Rc<VecModel<ChatLine>>,
+    role: &str,
+    text: String,
+) {
     {
         let mut st = state.borrow_mut();
-        st.lines.push(Line::new("system", text));
+        st.lines.push(Line::new(role, text));
     }
     let lines = state.borrow().lines.clone();
     refresh_transcript(ui, lines_model, &lines);
@@ -1798,35 +2181,60 @@ pub fn drain_models(ui: &AppWindow, state: &Rc<RefCell<State>>) {
     }
 }
 
-/// Drain the agent-jobs channel once per timer tick. `Done` is handed to
-/// the `agent-done` callback (which renders the steps and appends the
-/// answer); `Failed` becomes a system line. Disconnected = the thread
-/// exited without a result (aborted path) — stop polling.
+/// Drain every live agent/subagent channel once per timer tick. `Done`
+/// is handed to the `agent-done` callback (which renders the steps and
+/// appends the answer); `Notice` becomes a system line; a background
+/// `SubagentDone` renders its own answer tagged with the profile. An
+/// empty channel keeps its receiver; a disconnected one is dropped.
 #[cfg(feature = "agent")]
 pub fn drain_agent(
     ui: &AppWindow,
     state: &Rc<RefCell<State>>,
     lines_model: &Rc<VecModel<ChatLine>>,
 ) {
-    let Some(rx) = state.borrow_mut().rx_agent.take() else {
-        return;
-    };
-    match rx.try_recv() {
-        Ok(AgentEvent::Done(json)) => ui.invoke_agent_done(json.into()),
-        Ok(AgentEvent::Failed(e)) => push_system(ui, state, lines_model, e),
-        Err(mpsc::TryRecvError::Empty) => {
-            // Job still running: keep polling.
-            state.borrow_mut().rx_agent = Some(rx);
-        }
-        Err(mpsc::TryRecvError::Disconnected) => {
-            push_system(
-                ui,
-                state,
-                lines_model,
-                "agent job ended without a result".into(),
-            );
+    let rxs = std::mem::take(&mut state.borrow_mut().rx_agent);
+    let mut keep = Vec::new();
+    for rx in rxs {
+        loop {
+            match rx.try_recv() {
+                Ok(AgentEvent::Done(json)) => ui.invoke_agent_done(json.into()),
+                Ok(AgentEvent::Failed(e)) => push_system(ui, state, lines_model, e),
+                Ok(AgentEvent::Notice(text)) => push_system(ui, state, lines_model, text),
+                Ok(AgentEvent::SubagentDone { spec, task, result }) => {
+                    match serde_json::from_str::<AgentResult>(&result) {
+                        Ok(result) if result.completed => {
+                            push_system(ui, state, lines_model, format!("[bg {spec}] {task}"));
+                            push_line(ui, state, lines_model, "assistant", result.answer);
+                        }
+                        Ok(result) => push_system(
+                            ui,
+                            state,
+                            lines_model,
+                            format!(
+                                "[bg {spec}] failed: {}",
+                                result
+                                    .error
+                                    .as_deref()
+                                    .unwrap_or("stopped without a final answer")
+                            ),
+                        ),
+                        Err(e) => push_system(
+                            ui,
+                            state,
+                            lines_model,
+                            format!("[bg {spec}] unreadable result: {e}"),
+                        ),
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    keep.push(rx);
+                    break;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => break,
+            }
         }
     }
+    state.borrow_mut().rx_agent = keep;
 }
 
 pub fn send(
