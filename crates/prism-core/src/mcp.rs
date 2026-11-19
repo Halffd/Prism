@@ -451,6 +451,11 @@ pub struct McpTool {
 }
 
 impl McpTool {
+    /// The configured server key this tool came from.
+    pub fn server_name(&self) -> &str {
+        &self.server.name
+    }
+
     pub fn new(
         server: Arc<StdioMcpServer>,
         raw: &str,

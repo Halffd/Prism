@@ -8,11 +8,13 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use prism_cli::chat;
 use prism_cli::events::Event;
-use prism_cli::state::{App, Mode};
+use prism_cli::state::{App, IMode, Mode};
+use prism_core::agent::{AgentResult, AgentStep};
 use prism_core::client::StreamEvent;
 use prism_core::host;
 use prism_core::settings::{Connection, Settings};
 use std::sync::mpsc;
+use std::time::Duration;
 
 fn env_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
@@ -571,4 +573,191 @@ fn import_refuses_a_file_that_is_not_a_prism_backup() {
     );
 
     let _ = std::fs::remove_file(&path);
+}
+
+// -- MCP + subagents -------------------------------------------------------
+
+/// Write the shared config file (`mcp.json`) inside the app's isolated
+/// config root (`$PRISM_CONFIG_DIR/../mcp.json` is *not* used here: the
+/// core path is `<config root>/mcp.json`, and `fresh_app` points
+/// `PRISM_CONFIG_DIR` at `<tempdir>/<name>`).
+fn write_mcp_config(dir: &tempfile::TempDir, name: &str, json: &str) {
+    let root = dir.path().join(name);
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("mcp.json"), json).unwrap();
+}
+
+#[test]
+fn agents_list_shows_shipped_and_config_specs() {
+    let (_g, dir, mut app, tx) = fresh_app("agents-list");
+    write_mcp_config(
+        &dir,
+        "agents-list",
+        r#"{
+            "subagents": [
+                {"name":"tui-scout","description":"Quick scout","tool_allowlist":["read_file"]},
+                {"name":"Bad Name!","description":"never applies"}
+            ]
+        }"#,
+    );
+
+    type_line(&mut app, &tx, "/agents list");
+    let text = app
+        .conv
+        .messages
+        .iter()
+        .map(|m| m.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    // Shipped profiles…
+    assert!(text.contains("explore:"), "{text}");
+    assert!(text.contains("security-review:"), "{text}");
+    // …plus the config entry and its allowlist.
+    assert!(text.contains("tui-scout: Quick scout"), "{text}");
+    assert!(text.contains("tools: read_file"), "{text}");
+    // …and the invalid entry is reported, not fatal.
+    assert!(text.contains("config warning"), "{text}");
+    assert!(text.contains("subagents[1]"), "{text}");
+    assert!(text.contains("/agents spawn <name> <task>"), "{text}");
+}
+
+#[test]
+fn agents_spawn_gates_tool_less_modes_and_unknown_names() {
+    let (_g, _dir, mut app, tx) = fresh_app("agents-gates");
+
+    // Chat mode advertises no tools — refuse before creating a job.
+    type_line(&mut app, &tx, "/agents spawn explore find it");
+    let last = app.conv.messages.last().unwrap();
+    assert_eq!(last.role, "system");
+    assert!(last.content.contains("no tools"), "{}", last.content);
+    assert!(app.jobs.is_empty());
+
+    app.set_imode(IMode::Agent);
+    type_line(&mut app, &tx, "/agents spawn nobody find it");
+    let last = app.conv.messages.last().unwrap();
+    assert!(
+        last.content.contains("unknown subagent"),
+        "{}",
+        last.content
+    );
+    assert!(app.jobs.is_empty());
+
+    // Bad usage is explained, not silently ignored.
+    type_line(&mut app, &tx, "/agents spawn explore");
+    assert!(app.conv.messages.last().unwrap().content.contains("usage"));
+}
+
+#[test]
+fn agents_spawn_creates_a_running_background_job() {
+    let (_g, _dir, mut app, tx) = fresh_app("agents-spawn");
+    app.set_imode(IMode::Agent);
+
+    type_line(&mut app, &tx, "/agents spawn explore find the answer");
+    assert_eq!(app.jobs.len(), 1);
+    let job = &app.jobs[0];
+    assert_eq!(job.spec, "explore");
+    assert_eq!(job.task, "find the answer");
+    assert_eq!(job.status, "running");
+    assert!(job.id.starts_with("bg_"), "{}", job.id);
+
+    // The list reflects the live job.
+    type_line(&mut app, &tx, "/agents");
+    let text = app
+        .conv
+        .messages
+        .iter()
+        .map(|m| m.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("running: explore"), "{text}");
+}
+
+#[test]
+fn subagent_done_updates_the_job_and_the_transcript() {
+    let (_g, _dir, mut app, tx) = fresh_app("agents-done");
+    app.set_imode(IMode::Agent);
+    type_line(&mut app, &tx, "/agents spawn explore find it");
+    let id = app.jobs[0].id.clone();
+
+    app.handle(
+        Event::SubagentDone {
+            id: id.clone(),
+            spec: "explore".into(),
+            result: AgentResult {
+                answer: "found it".into(),
+                steps: vec![AgentStep {
+                    thought: "look".into(),
+                    action: "read_file".into(),
+                    action_input: "README.md".into(),
+                    observation: "ok".into(),
+                    phase: "react".into(),
+                }],
+                completed: true,
+                error: None,
+            },
+        },
+        &tx,
+    );
+    let job = app.jobs.iter().find(|j| j.id == id).unwrap();
+    assert_eq!(job.status, "done");
+    assert_eq!(job.answer.as_deref(), Some("found it"));
+    assert_eq!(app.conv.messages.last().unwrap().content, "found it");
+    assert!(app
+        .conv
+        .messages
+        .iter()
+        .any(|m| m.content.contains("[bg explore 1/1] read_file")));
+
+    // A failed run records the error and does not claim an answer.
+    type_line(&mut app, &tx, "/agents spawn shell-ops check the build");
+    let failed_id = app.jobs[1].id.clone();
+    app.handle(
+        Event::SubagentDone {
+            id: failed_id.clone(),
+            spec: "shell-ops".into(),
+            result: AgentResult {
+                answer: String::new(),
+                steps: Vec::new(),
+                completed: false,
+                error: Some("boom".into()),
+            },
+        },
+        &tx,
+    );
+    let job = app.jobs.iter().find(|j| j.id == failed_id).unwrap();
+    assert_eq!(job.status, "failed");
+    assert_eq!(job.error.as_deref(), Some("boom"));
+    assert!(app
+        .conv
+        .messages
+        .iter()
+        .any(|m| m.content.contains("bg shell-ops failed") && m.content.contains("boom")));
+}
+
+#[test]
+fn mcp_probe_reports_the_missing_config_path() {
+    let guard = env_lock();
+    let dir = tempfile::tempdir().unwrap();
+    // `fresh_app` isn't used here because the notice arrives on the
+    // channel; we drain it instead of dropping the receiver.
+    std::env::set_var("PRISM_CONFIG_DIR", dir.path().join("mcp-none"));
+    std::env::remove_var("PRISM_MCP_CONFIG");
+    let mut app = App::new(Settings {
+        provider: "ollama".into(),
+        ..Settings::default()
+    });
+    let (tx, rx) = mpsc::channel::<Event>();
+    type_line(&mut app, &tx, "/mcp");
+
+    let mut notice = None;
+    while let Ok(ev) = rx.recv_timeout(Duration::from_secs(5)) {
+        if let Event::Notice(text) = ev {
+            notice = Some(text);
+            break;
+        }
+    }
+    let text = notice.expect("the probe reports back");
+    assert!(text.contains("no configuration"), "{text}");
+    assert!(text.contains("mcp.json"), "{text}");
+    drop(guard);
 }

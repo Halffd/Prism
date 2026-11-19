@@ -15,6 +15,15 @@ pub enum Event {
     Mouse(MouseEvent),
     Stream(StreamEvent),
     AgentDone(prism_core::agent::AgentResult),
+    /// Out-of-band system line from a background job (/mcp probe, MCP
+    /// connect failures, subagent bookkeeping).
+    Notice(String),
+    /// One background subagent run finished.
+    SubagentDone {
+        id: String,
+        spec: String,
+        result: prism_core::agent::AgentResult,
+    },
     Resize(u16, u16),
     Tick(u64),
 }

@@ -14,7 +14,7 @@ use prism_core::providers;
 use prism_core::settings::Connection;
 use prism_core::thinking;
 use std::collections::VecDeque;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// One visible line-group in the timeline. `thinking` is the extracted
 /// reasoning for assistant messages (from `<thinking>` scratchpads).
@@ -42,6 +42,20 @@ pub enum Mode {
 /// one is what you're doing, the other is which keymap is active.
 pub use prism_core::modes::Mode as IMode;
 
+/// One background subagent run, tracked on the session so `/agents`
+/// can report status without a second event loop.
+#[derive(Debug, Clone)]
+pub struct BackgroundJob {
+    pub id: String,
+    pub spec: String,
+    pub task: String,
+    /// "running" | "done" | "failed"
+    pub status: String,
+    pub answer: Option<String>,
+    pub error: Option<String>,
+    pub started_at: u64,
+}
+
 pub struct App {
     pub settings: prism_core::settings::Settings,
     pub plugins: prism_core::plugins::Registry,
@@ -66,6 +80,8 @@ pub struct App {
     pub queue_paused: bool,
     pub agent_running: bool,
     pub last_agent_task: String,
+    /// Background subagent runs (see `BackgroundJob`).
+    pub jobs: Vec<BackgroundJob>,
     pub spinner: usize,
 
     /// Lines counted from the bottom that are hidden (0 = follow).
@@ -116,6 +132,7 @@ impl App {
             queue_paused: false,
             agent_running: false,
             last_agent_task: String::new(),
+            jobs: Vec::new(),
             spinner: 0,
             scroll: 0,
             line_index: Vec::new(),
@@ -267,6 +284,10 @@ impl App {
             Event::Mouse(mouse) => self.handle_mouse(mouse),
             Event::Stream(ev) => self.handle_stream(ev, tx),
             Event::AgentDone(result) => self.handle_agent_done(result),
+            Event::Notice(text) => self.push_message("system", &text),
+            Event::SubagentDone { id, spec, result } => {
+                self.handle_subagent_done(&id, &spec, result)
+            }
             Event::Resize(_, _) => {}
             Event::Tick(t) => self.handle_tick(t),
         }
@@ -334,6 +355,77 @@ impl App {
             self.push_message("system", result.error.as_deref().unwrap_or("agent stopped"));
             self.status = "agent failed".into();
         }
+    }
+
+    fn handle_subagent_done(
+        &mut self,
+        id: &str,
+        spec: &str,
+        result: prism_core::agent::AgentResult,
+    ) {
+        if let Some(job) = self.jobs.iter_mut().find(|j| j.id == id) {
+            if result.completed {
+                job.status = "done".into();
+                job.answer = Some(result.answer.clone());
+            } else {
+                job.status = "failed".into();
+                job.error = result
+                    .error
+                    .clone()
+                    .or_else(|| Some("stopped without a final answer".into()));
+            }
+        }
+        for (i, step) in result.steps.iter().enumerate() {
+            self.push_message(
+                "system",
+                &format!(
+                    "[bg {spec} {}/{}] {}: {} -> {}",
+                    i + 1,
+                    result.steps.len(),
+                    step.action,
+                    step.action_input,
+                    if step.observation.len() > 120 {
+                        format!("{}…", &step.observation[..120])
+                    } else {
+                        step.observation.clone()
+                    }
+                ),
+            );
+        }
+        if result.completed {
+            self.push_message("assistant", &result.answer);
+            self.conv.messages.push(StoredMessage {
+                role: "user".into(),
+                content: format!("[{spec}] {}", self.job_task(id).unwrap_or_default()),
+                thinking: None,
+                id: None,
+                tags: vec!["subagent".into()],
+                read: true,
+                edited_at: None,
+            });
+            self.conv.messages.push(StoredMessage {
+                role: "assistant".into(),
+                content: result.answer.clone(),
+                thinking: None,
+                id: None,
+                tags: vec!["subagent".into()],
+                read: true,
+                edited_at: None,
+            });
+            self.save();
+            self.status = format!("subagent {spec} finished");
+        } else {
+            let reason = result.error.as_deref().unwrap_or("agent stopped");
+            self.push_message("system", &format!("bg {spec} failed ({id}): {reason}"));
+            self.status = format!("subagent {spec} failed");
+        }
+    }
+
+    fn job_task(&self, id: &str) -> Option<String> {
+        self.jobs
+            .iter()
+            .find(|j| j.id == id)
+            .map(|j| j.task.clone())
     }
 
     pub fn handle_stream(&mut self, ev: StreamEvent, tx: &std::sync::mpsc::Sender<Event>) {
@@ -868,6 +960,173 @@ impl App {
                 }
             }
             "quit" | "q" => self.quit = true,
+            "mcp" => {
+                // Probe the configured MCP servers: connect, list, stop.
+                // Agent runs connect their own sessions, so this is a
+                // diagnostic — it never touches a live run.
+                let tx = tx.clone();
+                self.push_message("system", "mcp: probing configured servers…");
+                std::thread::spawn(move || {
+                    let path = prism_core::mcp::config_path()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| "<no config root>".into());
+                    let Some(file) = prism_core::mcp::load_file() else {
+                        let _ = tx.send(Event::Notice(format!(
+                            "mcp: no configuration at {path} — add an \"mcpServers\" object"
+                        )));
+                        return;
+                    };
+                    if file.mcp_servers.is_empty() {
+                        let _ = tx.send(Event::Notice(format!(
+                            "mcp: {path} has no usable servers (command required)"
+                        )));
+                        return;
+                    }
+                    let surface =
+                        prism_core::mcp::McpSurface::connect(&file, Duration::from_secs(10));
+                    let mut lines = vec![format!(
+                        "mcp: {} tool(s) from {} configured server(s) — {path}",
+                        surface.tools.len(),
+                        file.mcp_servers.len()
+                    )];
+                    for server in file.mcp_servers.keys() {
+                        let tools: Vec<&str> = surface
+                            .tools
+                            .iter()
+                            .filter(|t| t.server_name() == server)
+                            .map(|t| t.advertised.as_str())
+                            .collect();
+                        lines.push(if tools.is_empty() {
+                            format!("  {server}: connected, no tools")
+                        } else {
+                            format!("  {server}: {}", tools.join(", "))
+                        });
+                    }
+                    for e in &surface.errors {
+                        lines.push(format!("  failed: {e}"));
+                    }
+                    for line in lines {
+                        let _ = tx.send(Event::Notice(line));
+                    }
+                });
+            }
+            "agents" => {
+                // Background subagents on the core's registry (shipped
+                // profiles + `subagents` entries in the MCP config file).
+                let (registry, warnings) = crate::chat::agent_job::config_registry();
+                if arg.is_empty() || arg == "list" || arg == "help" {
+                    let mut lines =
+                        vec!["agents — background subagents (core registry):".to_string()];
+                    for name in registry.names() {
+                        let Some(spec) = registry.get(&name) else {
+                            continue;
+                        };
+                        let model = spec
+                            .forced_model
+                            .as_ref()
+                            .map(|m| format!(" · model {m}"))
+                            .unwrap_or_default();
+                        let tools = if spec.tool_allowlist.is_empty() {
+                            "full surface".to_string()
+                        } else {
+                            spec.tool_allowlist.join(", ")
+                        };
+                        lines.push(format!("  {name}: {}", spec.description));
+                        lines.push(format!("    tools: {tools}{model}"));
+                    }
+                    for w in &warnings {
+                        lines.push(format!("  config warning: {w}"));
+                    }
+                    let running: Vec<&BackgroundJob> = self
+                        .jobs
+                        .iter()
+                        .filter(|j| j.status == "running" || j.status == "queued")
+                        .collect();
+                    for job in running {
+                        lines.push(format!(
+                            "  running: {} ({}) — {}",
+                            job.spec, job.id, job.task
+                        ));
+                    }
+                    lines.push("spawn one: /agents spawn <name> <task>".into());
+                    for l in lines {
+                        self.push_message("system", &l);
+                    }
+                } else if let Some(rest) = arg.strip_prefix("spawn ") {
+                    if !self.session.feature(prism_core::modes::Feature::Tools) {
+                        self.push_message(
+                            "system",
+                            &format!(
+                                "{} mode has no tools — /agents needs agent, daemon, or /mode agent",
+                                self.imode.label()
+                            ),
+                        );
+                        return;
+                    }
+                    let rest = rest.trim();
+                    let name = rest.split_whitespace().next().unwrap_or("").to_string();
+                    let task = rest[name.len()..].trim().to_string();
+                    if name.is_empty() || task.is_empty() {
+                        self.push_message("system", "usage: /agents spawn <name> <task>");
+                        return;
+                    }
+                    if registry.get(&name).is_none() {
+                        self.push_message(
+                            "system",
+                            &format!(
+                                "unknown subagent {name:?} — known: {}",
+                                registry.names().join(", ")
+                            ),
+                        );
+                        return;
+                    }
+                    let id = format!("bg_{}", prism_core::conversations::now_ms());
+                    self.jobs.push(BackgroundJob {
+                        id: id.clone(),
+                        spec: name.clone(),
+                        task: task.clone(),
+                        status: "queued".into(),
+                        answer: None,
+                        error: None,
+                        started_at: prism_core::conversations::now_ms(),
+                    });
+                    self.push_message("system", &format!("bg {name} queued ({id}) — {task}"));
+                    for w in &warnings {
+                        self.push_message("system", &format!("agents config warning: {w}"));
+                    }
+                    let root = host::config_dir()
+                        .and_then(|d| d.parent().map(|p| p.to_path_buf()))
+                        .unwrap_or_else(|| std::path::PathBuf::from("."));
+                    match crate::chat::agent_job::spawn_subagent(
+                        &self.settings,
+                        &id,
+                        &name,
+                        &task,
+                        root,
+                        tx,
+                    ) {
+                        Ok(()) => {
+                            if let Some(job) = self.jobs.iter_mut().find(|j| j.id == id) {
+                                job.status = "running".into();
+                            }
+                            self.push_message("system", &format!("bg {name} running ({id})"));
+                            self.status = format!("subagent {name} running…");
+                        }
+                        Err(e) => {
+                            if let Some(job) = self.jobs.iter_mut().find(|j| j.id == id) {
+                                job.status = "failed".into();
+                                job.error = Some(e.clone());
+                            }
+                            self.push_message("system", &format!("bg {name} failed ({id}): {e}"));
+                        }
+                    }
+                } else {
+                    self.push_message(
+                        "system",
+                        "usage: /agents [list] | /agents spawn <name> <task>",
+                    );
+                }
+            }
             other => {
                 // Plugin commands are namespaced: /memory.save, /snippets.add...
                 // Rewrite `/memory.save foo` -> `plugins.run_command("memory.save", "foo")`.

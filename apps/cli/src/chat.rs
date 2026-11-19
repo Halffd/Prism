@@ -132,7 +132,9 @@ pub mod agent_job {
     use prism_core::agent::{run_agent, AgentResult, CalculatorTool, StepMessage, ToolRegistry};
     use prism_core::native_tools::{self};
     use prism_core::sandbox::{resolve_policy, ResolvedSandbox, SandboxPolicy};
+    use prism_core::subagents::SubagentRegistry;
     use prism_core::transport::{HttpRequest, ReqwestTransport, Transport};
+    use std::time::Duration;
 
     struct FilelessLlmStep<'a> {
         transport: &'a ReqwestTransport,
@@ -214,16 +216,7 @@ pub mod agent_job {
         workspace_root: std::path::PathBuf,
         tx: &Sender<Event>,
     ) -> Result<(), String> {
-        let resolved = settings
-            .resolve_provider(&settings.provider)
-            .ok_or_else(|| format!("unknown provider {}", settings.provider))?;
-        let api_key = settings.key_for(&settings.provider);
-        if resolved.needs_key && api_key.trim().is_empty() {
-            return Err(format!(
-                "API key required for {} — /key <key>",
-                resolved.label
-            ));
-        }
+        let (resolved, api_key) = credentials(settings)?;
         let step_impl = FilelessLlmStep {
             transport: Box::leak(Box::new(ReqwestTransport::new())),
             base_url: resolved.base_url.clone(),
@@ -236,35 +229,16 @@ pub mod agent_job {
             temperature: settings.temperature,
             max_tokens: settings.max_tokens,
         };
+        let sandbox = sandbox_posture()?;
         let task = task.to_string();
         let tx = tx.clone();
-        // Sandbox posture before anything spawns: `PRISM_AGENT_SANDBOX_POLICY`
-        // carries either inline policy JSON or a path to it (`--policy`
-        // shape). A strict policy that this host cannot
-        // enforce fails the job instead of silently weakening; `auto` keeps
-        // running with the record kept in each shell observation.
-        let sandbox = match std::env::var("PRISM_AGENT_SANDBOX_POLICY") {
-            Ok(source) => {
-                let resolved = load_sandbox_policy(&source)?;
-                match prism_core::sandbox::plan_spawn(&resolved) {
-                    Ok(used) => Some((resolved, used)),
-                    // strict on an unsupported host: fail the job with the
-                    // reason instead of silently weakening (`Err` surfaces
-                    // on the /agent line).
-                    Err(outcome) => {
-                        let reason = prism_core::sandbox::outcome_str(&outcome);
-                        return Err(format!("sandbox preflight: {reason}"));
-                    }
-                }
-            }
-            Err(_) => None,
-        };
 
         // Agent loop runs on its own thread (blocking LLM steps), tools
         // scoped to the workspace root. Mutating tools stay on Ask =>
         // headless deny unless the user flips them with /agent-perms.
         std::thread::spawn(move || {
             let registry = build_registry(&workspace_root, &sandbox);
+            register_mcp(&registry, &tx);
 
             let result: AgentResult = {
                 let mut step_fn =
@@ -275,6 +249,174 @@ pub mod agent_job {
             let _ = tx.send(Event::AgentDone(result));
         });
         Ok(())
+    }
+
+    /// Spawn one background subagent run. The model comes from the
+    /// core's forced order (spec → session → provider default) and the
+    /// tool surface is the core's allowlist clamp over this host's
+    /// registry (with MCP tools when the config provides them).
+    pub fn spawn_subagent(
+        settings: &Settings,
+        id: &str,
+        spec_name: &str,
+        task: &str,
+        workspace_root: std::path::PathBuf,
+        tx: &Sender<Event>,
+    ) -> Result<(), String> {
+        let (resolved, api_key) = credentials(settings)?;
+        let (registry_specs, _warnings) = config_registry();
+        // Unknown name fails here, before any thread spawns.
+        registry_specs
+            .get(spec_name)
+            .ok_or_else(|| format!("unknown subagent {spec_name:?}"))?;
+        let session_model = if settings.model.trim().is_empty() {
+            resolved.default_model.clone()
+        } else {
+            settings.model.trim().to_string()
+        };
+        let model = registry_specs
+            .resolve_model(
+                spec_name,
+                &session_model,
+                Some(resolved.default_model.clone()),
+            )
+            .map_err(|e| format!("subagent model: {e}"))?
+            .model;
+        let step_impl = FilelessLlmStep {
+            transport: Box::leak(Box::new(ReqwestTransport::new())),
+            base_url: resolved.base_url.clone(),
+            api_key: api_key.trim().to_string(),
+            model,
+            temperature: settings.temperature,
+            max_tokens: settings.max_tokens,
+        };
+        let sandbox = sandbox_posture()?;
+        let id = id.to_string();
+        let spec_name = spec_name.to_string();
+        let task = task.to_string();
+        let tx = tx.clone();
+
+        std::thread::spawn(move || {
+            let registry = build_registry(&workspace_root, &sandbox);
+            register_mcp(&registry, &tx);
+            // Clamp: the allowlist intersected with what this host
+            // actually advertises (empty allowlist = full surface).
+            let effective = registry_specs.clamp_tools(&spec_name, &registry.tool_names());
+            let registry = match effective {
+                Ok(names) => filter_registry(&registry, &names),
+                Err(e) => {
+                    let _ = tx.send(Event::SubagentDone {
+                        id,
+                        spec: spec_name,
+                        result: AgentResult {
+                            answer: String::new(),
+                            steps: Vec::new(),
+                            completed: false,
+                            error: Some(e),
+                        },
+                    });
+                    return;
+                }
+            };
+
+            let result: AgentResult = {
+                let mut step_fn =
+                    |system: &str, hist: &[StepMessage]| step_impl.complete(system, hist);
+                run_agent(&task, &mut step_fn, &registry, 12, &|_, _| false)
+            };
+            let _ = tx.send(Event::SubagentDone {
+                id,
+                spec: spec_name,
+                result,
+            });
+        });
+        Ok(())
+    }
+
+    /// Provider resolution + key check shared by the mainline and
+    /// subagent spawn paths.
+    fn credentials(
+        settings: &Settings,
+    ) -> Result<(prism_core::settings::ResolvedProvider, String), String> {
+        let resolved = settings
+            .resolve_provider(&settings.provider)
+            .ok_or_else(|| format!("unknown provider {}", settings.provider))?;
+        let api_key = settings.key_for(&settings.provider);
+        if resolved.needs_key && api_key.trim().is_empty() {
+            return Err(format!(
+                "API key required for {} — /key <key>",
+                resolved.label
+            ));
+        }
+        Ok((resolved, api_key))
+    }
+
+    /// The sandbox posture before anything spawns
+    /// (`PRISM_AGENT_SANDBOX_POLICY` = inline policy JSON or a path).
+    /// A strict policy this host cannot enforce fails the job instead
+    /// of silently weakening; `auto` keeps running with the record kept
+    /// in each shell observation.
+    fn sandbox_posture(
+    ) -> Result<Option<(ResolvedSandbox, prism_core::sandbox::SandboxUsed)>, String> {
+        let Ok(source) = std::env::var("PRISM_AGENT_SANDBOX_POLICY") else {
+            return Ok(None);
+        };
+        let resolved = load_sandbox_policy(&source)?;
+        match prism_core::sandbox::plan_spawn(&resolved) {
+            Ok(used) => Ok(Some((resolved, used))),
+            Err(outcome) => {
+                let reason = prism_core::sandbox::outcome_str(&outcome);
+                Err(format!("sandbox preflight: {reason}"))
+            }
+        }
+    }
+
+    /// Connect every configured MCP server and register its tools in
+    /// this run's registry. Failures are reported as system lines; a
+    /// dead server never stops the run (Cursor behaves the same).
+    fn register_mcp(registry: &ToolRegistry, tx: &Sender<Event>) {
+        let Some(file) = prism_core::mcp::load_file() else {
+            return;
+        };
+        if file.mcp_servers.is_empty() {
+            return;
+        }
+        let surface = prism_core::mcp::McpSurface::connect(&file, Duration::from_secs(10));
+        for tool in &surface.tools {
+            registry.register(tool.clone());
+        }
+        if !surface.tools.is_empty() {
+            let _ = tx.send(Event::Notice(format!(
+                "mcp: {} tool(s) registered from {} server config(s)",
+                surface.tools.len(),
+                file.mcp_servers.len()
+            )));
+        }
+        for e in &surface.errors {
+            let _ = tx.send(Event::Notice(format!("mcp: {e}")));
+        }
+    }
+
+    /// The subagent registry this host runs with: the shipped profiles
+    /// plus the `subagents` entries in the shared MCP config file.
+    pub fn config_registry() -> (SubagentRegistry, Vec<String>) {
+        let mut reg = SubagentRegistry::default();
+        let warnings = match prism_core::mcp::load_file() {
+            Some(file) => reg.upsert_config_specs(&file.subagents).1,
+            None => Vec::new(),
+        };
+        (reg, warnings)
+    }
+
+    /// A registry with only the named tools (the subagent clamp).
+    fn filter_registry(registry: &ToolRegistry, names: &[String]) -> ToolRegistry {
+        let filtered = ToolRegistry::new();
+        for name in names {
+            if let Some(tool) = registry.get(name) {
+                filtered.register(tool);
+            }
+        }
+        filtered
     }
 
     /// Build the tool registry the agent loop runs with. Shared by the
