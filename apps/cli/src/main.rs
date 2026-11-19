@@ -6,7 +6,10 @@
 //! resumes the most recent chat.
 
 use anyhow::Context;
+use prism_cli::acp;
+use prism_cli::cmd;
 use prism_cli::events::{self, Event};
+use prism_cli::serve;
 use prism_cli::state::App;
 use prism_cli::ui;
 use std::io::stdout;
@@ -40,61 +43,63 @@ impl Drop for TerminalGuard {
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if let Some(arg) = args.get(1) {
+        let rest = &args[2..];
         match arg.as_str() {
             "--version" | "-V" => {
                 println!("prism {}", env!("CARGO_PKG_VERSION"));
                 return Ok(());
             }
             "--help" | "-h" => {
-                println!("prism — native terminal harness over prism-core");
-                println!("usage: prism [--version] [--help] [sandbox preflight]");
-                println!();
-                println!("commands:");
-                println!("  chats                         list the stored chats");
-                println!("  search [QUERY] [flags]        search every chat");
-                println!("    --regex                    treat QUERY as a regular expression");
-                println!("    --case-sensitive            match case exactly");
-                println!("    --role <role>               only user | assistant | system");
-                println!("    --tag <tag>                 only messages carrying the tag");
-                println!("    --unread                    only unread messages");
-                println!("    --include-archived          include archived chats");
-                println!("    --sort <newest|oldest|title>  result order");
-                println!("    --limit <n>                 maximum hits (default 50)");
-                println!("  tag <chat> <tag>              add a tag to a chat");
-                println!("  untag <chat> <tag>            remove a tag from a chat");
-                println!("  archive <chat>                archive a chat");
-                println!("  unarchive <chat>              unarchive a chat");
-                println!("  read <chat>                   mark a chat read");
-                println!("  unread <chat>                 mark a chat unread");
-                println!("  fork <chat> <message-index>   branch a chat at a message");
-                println!("  export <path.json>            write every chat to a backup file");
-                println!("  import <path.json> [--replace]  read a backup file back");
-                println!("  sandbox preflight             probe the host sandbox");
-                println!();
-                println!(
-                    "env: PRISM_CONFIG_DIR (config root), PRISM_CONVERSATIONS_DIR (chat storage)"
-                );
-                println!(
-                    "agent: PRISM_AGENT_SANDBOX_POLICY (policy JSON or a path to it — adds the guarded /agent shell tool)"
-                );
+                print_help();
                 return Ok(());
             }
+            "resume" => {
+                if let Some(id) = cmd::resume_cli(rest)? {
+                    std::env::set_var("PRISM_RESUME_ID", id);
+                } else {
+                    return Ok(());
+                }
+            }
+            "chats" => return prism_cli::features::chats_cli(rest),
+            "sessions" => return cmd::sessions_cli(rest),
+            "search" => return prism_cli::features::search_cli(rest),
+            "tag" => return prism_cli::features::tag_cli(rest),
+            "untag" => return prism_cli::features::untag_cli(rest),
+            "archive" => return prism_cli::features::archive_cli(rest, true),
+            "unarchive" => return prism_cli::features::archive_cli(rest, false),
+            "read" => return prism_cli::features::read_cli(rest, true),
+            "unread" => return prism_cli::features::read_cli(rest, false),
+            "fork" => return prism_cli::features::fork_cli(rest),
+            "export" => return prism_cli::features::export_cli(rest),
+            "import" => return prism_cli::features::import_cli(rest),
+            "models" => return cmd::models_cli(rest),
+            "send" => return cmd::send_cli(rest),
+            "run" => return cmd::run_cli(rest),
+            "status" => return cmd::status_cli(rest),
+            "agents" => return cmd::agents_cli(rest),
+            "permissions" => return cmd::permissions_cli(rest),
+            "mcp" => return cmd::mcp_cli(rest),
+            "debug" => return cmd::debug_cli(rest),
+            "reload" => return cmd::reload_cli(rest),
+            "auth" => return cmd::auth_cli(rest),
+            "pair" => return cmd::pair_cli(rest),
+            "api" => return cmd::api_cli(rest),
+            "ping" => return cmd::ping_cli(rest),
+            "update" => return cmd::update_cli(rest),
+            "uninstall" => return cmd::uninstall_cli(rest),
+            "stop" => return serve::stop_cli(rest),
+            "stop-all" => return serve::stop_all_cli(rest),
+            "serve" => return serve::serve_cli(rest),
+            "acp" => return acp::acp_cli(rest),
             "sandbox" => return sandbox_cli(std::env::args().skip(2)),
-            "chats" => return prism_cli::features::chats_cli(&args_after(&args, 2)),
-            "search" => return prism_cli::features::search_cli(&args_after(&args, 2)),
-            "tag" => return prism_cli::features::tag_cli(&args_after(&args, 2)),
-            "untag" => return prism_cli::features::untag_cli(&args_after(&args, 2)),
-            "archive" => return prism_cli::features::archive_cli(&args_after(&args, 2), true),
-            "unarchive" => return prism_cli::features::archive_cli(&args_after(&args, 2), false),
-            "read" => return prism_cli::features::read_cli(&args_after(&args, 2), true),
-            "unread" => return prism_cli::features::read_cli(&args_after(&args, 2), false),
-            "fork" => return prism_cli::features::fork_cli(&args_after(&args, 2)),
-            "export" => return prism_cli::features::export_cli(&args_after(&args, 2)),
-            "import" => return prism_cli::features::import_cli(&args_after(&args, 2)),
             other => anyhow::bail!("unknown argument: {other} (see prism --help)"),
         }
     }
 
+    run_tui()
+}
+
+fn run_tui() -> anyhow::Result<()> {
     let settings = prism_core::host::load_settings();
     let mut app = App::new(settings);
     let (tx, rx) = std::sync::mpsc::channel::<Event>();
@@ -111,9 +116,38 @@ fn main() -> anyhow::Result<()> {
     res
 }
 
-/// The arguments after the subcommand name.
-fn args_after(args: &[String], skip: usize) -> Vec<String> {
-    args.iter().skip(skip).cloned().collect()
+fn print_help() {
+    println!("prism — native terminal harness and local agent daemon");
+    println!("usage: prism [command] [flags]");
+    println!();
+    println!("  (no command)                  open the terminal UI");
+    println!("  resume [id] [--json]          open the most recent (or named) chat");
+    println!("  sessions [--limit N] [--json] list stored sessions");
+    println!("  chats                         list stored chats");
+    println!("  search [QUERY] [flags]        search every chat (--regex --role --tag --limit …)");
+    println!("  tag/untag/archive/read …      conversation management");
+    println!("  fork/export/import …          branch and back up chats");
+    println!("  models [--provider id] [--fetch] [--json]");
+    println!("  send <prompt> [--provider id] [--model id] [--system text] [--json]");
+    println!("  run <task> [--json]           one agent run (tools + MCP)");
+    println!("  agents [list|show <name>|run <name> <task>] [--json]");
+    println!("  permissions [list|tools|set <tool> <level>|default <level>|reset [tool]]");
+    println!("  mcp [list|tools|test|call <server> <tool> [json]]");
+    println!("  auth [list|set <provider> <key>|clear <provider>|env]");
+    println!("  api [status|url <url>|token <token>]");
+    println!("  status [--json]               local state + daemon status");
+    println!("  ping [--json]                 daemon, else provider reachability");
+    println!("  serve [--port N] [--host H] [--token T|--token-file F]");
+    println!("  stop <job-id> | stop-all      daemon jobs");
+    println!("  reload                        re-read settings/MCP config");
+    println!("  pair <browser|slint|remote> [--ttl seconds] [--json]");
+    println!("  debug [--json]                redacted diagnostics");
+    println!("  update [--check] [--yes]      reinstall from this checkout");
+    println!("  uninstall [--yes] [--purge]   remove the cargo install (and config)");
+    println!("  sandbox preflight [--policy FILE] [--json]");
+    println!();
+    println!("env: PRISM_CONFIG_DIR, PRISM_CONVERSATIONS_DIR, PRISM_MCP_CONFIG,");
+    println!("     PRISM_AGENT_SANDBOX_POLICY (policy JSON or path)");
 }
 
 fn run_loop(

@@ -231,6 +231,7 @@ pub mod agent_job {
         };
         let sandbox = sandbox_posture()?;
         let task = task.to_string();
+        let settings = settings.clone();
         let tx = tx.clone();
 
         // Agent loop runs on its own thread (blocking LLM steps), tools
@@ -239,6 +240,7 @@ pub mod agent_job {
         std::thread::spawn(move || {
             let registry = build_registry(&workspace_root, &sandbox);
             register_mcp(&registry, &tx);
+            apply_permissions(&registry, &settings);
 
             let result: AgentResult = {
                 let mut step_fn =
@@ -294,11 +296,13 @@ pub mod agent_job {
         let id = id.to_string();
         let spec_name = spec_name.to_string();
         let task = task.to_string();
+        let settings = settings.clone();
         let tx = tx.clone();
 
         std::thread::spawn(move || {
             let registry = build_registry(&workspace_root, &sandbox);
             register_mcp(&registry, &tx);
+            apply_permissions(&registry, &settings);
             // Clamp: the allowlist intersected with what this host
             // actually advertises (empty allowlist = full surface).
             let effective = registry_specs.clamp_tools(&spec_name, &registry.tool_names());
@@ -447,6 +451,17 @@ pub mod agent_job {
             let _ = sandbox;
         }
         registry
+    }
+
+    /// Persisted permission overrides from settings (`/permissions`,
+    /// `prism permissions set`). Explicit entries only; the registry's
+    /// own defaults stand for everything else.
+    fn apply_permissions(registry: &ToolRegistry, settings: &Settings) {
+        for tool in settings.tool_permissions.keys() {
+            if let Some(level) = settings.tool_permission(tool) {
+                registry.set_permission(tool, level);
+            }
+        }
     }
 
     /// The tool names the agent loop would run with on this host. The

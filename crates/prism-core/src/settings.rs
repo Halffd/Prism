@@ -142,6 +142,13 @@ pub struct Settings {
     /// ("off" | "lite" | "full" | "ultra"). The plugin's persisted mode
     /// file wins when present; this field is the default.
     pub communication_mode: String,
+    /// Persisted per-tool permission overrides ("allow" | "ask" |
+    /// "deny"), keyed by advertised tool name. Applied to every agent
+    /// run on every surface; absent tools keep the registry default.
+    pub tool_permissions: HashMap<String, String>,
+    /// Permission for tools with no explicit override. Empty = keep the
+    /// registry default (native file tools ship read=allow, write=ask).
+    pub default_tool_permission: String,
 }
 
 impl Default for Settings {
@@ -166,6 +173,8 @@ impl Default for Settings {
             prism_api_token: String::new(),
             custom_providers: HashMap::new(),
             communication_mode: "off".into(),
+            tool_permissions: HashMap::new(),
+            default_tool_permission: String::new(),
         }
     }
 }
@@ -207,6 +216,24 @@ impl Settings {
         match crate::providers::find(provider) {
             Some(def) => crate::providers::resolve_key(&stored, def),
             None => stored,
+        }
+    }
+
+    /// Effective permission for one tool: the explicit override when
+    /// present, else `default_tool_permission`, else `None` (the
+    /// registry's own default stands).
+    pub fn tool_permission(&self, tool: &str) -> Option<crate::agent::Permission> {
+        let level = self
+            .tool_permissions
+            .get(tool)
+            .map(String::as_str)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&self.default_tool_permission);
+        match level.trim().to_ascii_lowercase().as_str() {
+            "allow" => Some(crate::agent::Permission::Allow),
+            "ask" => Some(crate::agent::Permission::Ask),
+            "deny" => Some(crate::agent::Permission::Deny),
+            _ => None,
         }
     }
 
