@@ -761,3 +761,423 @@ fn mcp_probe_reports_the_missing_config_path() {
     assert!(text.contains("mcp.json"), "{text}");
     drop(guard);
 }
+
+// -- vault, character cards, hardware, in-app MCP panel --------------------
+
+#[test]
+fn vault_saves_lists_opens_and_deletes_conversations() {
+    let (_g, _dir, mut app, tx) = fresh_app("vault");
+    app.push_message("user", "vaulted words");
+    type_line(&mut app, &tx, "/vault save");
+    let id = app.conv.id.clone();
+    assert!(host::load_conversation(&id).is_some());
+
+    // list names the current chat
+    type_line(&mut app, &tx, "/vault list");
+    let text = app
+        .conv
+        .messages
+        .iter()
+        .map(|m| m.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains(&id[..8]), "{text}");
+
+    // open the stored chat after starting a fresh one
+    type_line(&mut app, &tx, "/new");
+    assert_ne!(app.conv.id, id);
+    type_line(&mut app, &tx, &format!("/vault open {id}"));
+    assert_eq!(app.conv.id, id);
+    assert_eq!(app.conv.messages[0].content, "vaulted words");
+
+    // delete removes the file and the list entry
+    type_line(&mut app, &tx, "/new");
+    type_line(&mut app, &tx, &format!("/vault delete {id}"));
+    assert!(host::load_conversation(&id).is_none());
+    assert!(app.metas.iter().all(|m| m.id != id));
+}
+
+#[test]
+fn card_loads_and_persona_sets_the_user_macros() {
+    let (_g, dir, mut app, tx) = fresh_app("card");
+    let path = dir.path().join("alice.json");
+    std::fs::write(
+        &path,
+        r#"{
+            "spec": "chara_card_v2",
+            "data": {
+                "name": "Alice",
+                "description": "A {{char}} who studies {{persona}}.",
+                "first_mes": "Hello there.",
+                "character_book": {
+                    "entries": [
+                        {"keys": ["tea"], "content": "Alice loves tea."}
+                    ]
+                }
+            }
+        }"#,
+    )
+    .unwrap();
+
+    type_line(&mut app, &tx, &format!("/card {}", path.display()));
+    let card = app.card.clone().expect("card loaded");
+    assert_eq!(card.name, "Alice");
+    assert!(app
+        .conv
+        .messages
+        .iter()
+        .any(|m| m.content == "Hello there."));
+
+    type_line(&mut app, &tx, "/persona Bob|a tester");
+    assert_eq!(app.persona.name, "Bob");
+    assert_eq!(app.persona.description, "a tester");
+    assert_eq!(app.persona.expanded(), "Bob: a tester");
+
+    let ctx = prism_core::cards::MacroContext::from_card(&card, &app.persona);
+    assert_eq!(
+        prism_core::cards::expand_macros("{{char}} meets {{user}}", &ctx),
+        "Alice meets Bob"
+    );
+
+    type_line(&mut app, &tx, "/card off");
+    assert!(app.card.is_none());
+}
+
+#[test]
+fn hardware_command_updates_and_persists_overrides() {
+    let (_g, _dir, mut app, tx) = fresh_app("hardware");
+    type_line(&mut app, &tx, "/hardware compute cpu-only");
+    type_line(&mut app, &tx, "/hardware gpu 12");
+    type_line(&mut app, &tx, "/hardware ctx 8192");
+    assert_eq!(app.settings.hardware.preferred_compute, "cpu-only");
+    assert_eq!(app.settings.hardware.gpu_layers_override, Some(12));
+    assert_eq!(app.settings.hardware.context_tokens, Some(8192));
+
+    let reloaded = host::load_settings();
+    assert_eq!(reloaded.hardware.gpu_layers_override, Some(12));
+
+    type_line(&mut app, &tx, "/hardware reset");
+    assert_eq!(app.settings.hardware.preferred_compute, "auto");
+    assert_eq!(app.settings.hardware.gpu_layers_override, None);
+}
+
+#[test]
+fn resume_env_selects_the_requested_conversation() {
+    let guard = env_lock();
+    let dir = tempfile::tempdir().unwrap();
+    std::env::set_var("PRISM_CONFIG_DIR", dir.path().join("resume"));
+    store_conversation("aaaa7777", "Older", &[("user", "old")]);
+    store_conversation("bbbb8888", "Newer", &[("user", "new")]);
+
+    std::env::set_var("PRISM_RESUME_ID", "aaaa");
+    let app = App::new(Settings {
+        provider: "ollama".into(),
+        ..Settings::default()
+    });
+    std::env::remove_var("PRISM_RESUME_ID");
+    assert_eq!(app.conv.id, "aaaa7777");
+    assert_eq!(app.conv.messages[0].content, "old");
+    drop(guard);
+}
+
+fn node_available() -> bool {
+    std::process::Command::new("node")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn fake_mcp_server() -> String {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../crates/prism-core/tests/fixtures/mcp-fake-server.mjs")
+        .to_string_lossy()
+        .to_string()
+}
+
+#[test]
+fn mcp_panel_discovers_and_calls_a_tool_directly() {
+    if !node_available() {
+        eprintln!("skipping: node not available");
+        return;
+    }
+    let guard = env_lock();
+    let dir = tempfile::tempdir().unwrap();
+    std::env::set_var("PRISM_CONFIG_DIR", dir.path().join("mcp-panel"));
+    std::env::remove_var("PRISM_MCP_CONFIG");
+    let root = dir.path().join("mcp-panel");
+    std::fs::create_dir_all(&root).unwrap();
+    let config = serde_json::json!({
+        "mcpServers": {
+            "calc": { "command": "node", "args": [fake_mcp_server()] }
+        }
+    });
+    std::fs::write(root.join("mcp.json"), config.to_string()).unwrap();
+
+    let mut app = App::new(Settings {
+        provider: "ollama".into(),
+        ..Settings::default()
+    });
+    let (tx, rx) = mpsc::channel::<Event>();
+    type_line(&mut app, &tx, "/mcp panel");
+    assert_eq!(app.mode, Mode::Mcp);
+    assert!(app.mcp_panel.is_some());
+
+    // Discovery lands as an event; apply it like the main loop would.
+    let mut found: Option<Vec<prism_cli::events::McpToolRow>> = None;
+    while let Ok(ev) = rx.recv_timeout(Duration::from_secs(15)) {
+        if let Event::McpTools { tools, errors, .. } = ev {
+            assert!(errors.is_empty(), "{errors:?}");
+            found = Some(tools.clone());
+            app.handle(
+                Event::McpTools {
+                    path: Some("test".into()),
+                    tools,
+                    errors,
+                },
+                &tx,
+            );
+            break;
+        }
+    }
+    let tools = found.expect("discovery event arrived");
+    assert_eq!(tools.len(), 3, "tools: {:?}", tools.len());
+
+    let add_idx = tools
+        .iter()
+        .position(|t| t.raw == "add")
+        .expect("add tool present");
+    for _ in 0..add_idx {
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), &tx);
+    }
+    assert_eq!(app.mcp_panel.as_ref().unwrap().selected, add_idx);
+
+    // Enter starts args editing; replace the default args and run.
+    app.handle_key(enter(), &tx);
+    assert!(app.mcp_panel.as_ref().unwrap().editing);
+    app.handle_key(
+        KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
+        &tx,
+    );
+    for c in r#"{"a":2,"b":3}"#.chars() {
+        app.handle_key(key(c), &tx);
+    }
+    app.handle_key(enter(), &tx);
+
+    let mut output = None;
+    while let Ok(ev) = rx.recv_timeout(Duration::from_secs(15)) {
+        if let Event::McpCall { tool, output: out } = ev {
+            output = Some((tool.clone(), out.clone()));
+            app.handle(Event::McpCall { tool, output: out }, &tx);
+            break;
+        }
+    }
+    let (tool, out) = output.expect("tool call returned");
+    assert_eq!(tool, "mcp__calc__add");
+    assert_eq!(out, "5");
+    assert_eq!(app.mcp_panel.as_ref().unwrap().result.as_deref(), Some("5"));
+
+    // Esc closes the panel and restores the normal keymap.
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), &tx);
+    assert_eq!(app.mode, Mode::Normal);
+    assert!(app.mcp_panel.is_none());
+    drop(guard);
+}
+
+// -- non-daemon commands, daemon routes, ACP ---------------------------------
+
+#[test]
+fn permissions_auth_and_api_commands_persist() {
+    let (_g, _dir, _app, _tx) = fresh_app("cmd-settings");
+
+    prism_cli::cmd::permissions_cli(&args(&["set", "calculator", "ask"])).unwrap();
+    prism_cli::cmd::permissions_cli(&args(&["default", "deny"])).unwrap();
+    let stored = host::load_settings();
+    assert_eq!(stored.tool_permission("calculator").unwrap().label(), "ask");
+    // An unlisted tool follows the default.
+    assert_eq!(stored.tool_permission("read_file").unwrap().label(), "deny");
+    prism_cli::cmd::permissions_cli(&args(&["reset", "calculator"])).unwrap();
+    assert!(host::load_settings()
+        .tool_permissions
+        .get("calculator")
+        .is_none());
+    prism_cli::cmd::permissions_cli(&args(&["reset"])).unwrap();
+    assert!(host::load_settings().default_tool_permission.is_empty());
+
+    prism_cli::cmd::auth_cli(&args(&["set", "openai", "sk-test"])).unwrap();
+    assert_eq!(host::load_settings().key_for("openai"), "sk-test");
+    prism_cli::cmd::auth_cli(&args(&["clear", "openai"])).unwrap();
+    assert!(host::load_settings().key_for("openai").is_empty());
+
+    prism_cli::cmd::api_cli(&args(&["url", "http://127.0.0.1:9999"])).unwrap();
+    prism_cli::cmd::api_cli(&args(&["token", "jwt"])).unwrap();
+    let stored = host::load_settings();
+    assert_eq!(stored.prism_api_url, "http://127.0.0.1:9999");
+    assert_eq!(stored.prism_api_token, "jwt");
+}
+
+#[test]
+fn pair_and_debug_commands_write_real_output() {
+    let (_g, _dir, _app, _tx) = fresh_app("cmd-pair");
+    prism_cli::cmd::pair_cli(&args(&["slint", "--ttl", "60"])).unwrap();
+    let path = host::config_dir().unwrap().join("pair/slint.json");
+    let text = std::fs::read_to_string(&path).expect("pair file written");
+    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(value["target"], "slint");
+    assert_eq!(value["token"].as_str().unwrap().len(), 32);
+    assert!(value["expires_at"].as_u64().unwrap() > value["created_at"].as_u64().unwrap());
+
+    // Debug is a JSON bundle and never leaks a stored key.
+    prism_cli::cmd::debug_cli(&[]).unwrap();
+    let app = prism_cli::state::App::new(host::load_settings());
+    drop(app);
+}
+
+#[test]
+fn mcp_command_lists_and_tests_the_configured_server() {
+    if !node_available() {
+        eprintln!("skipping: node not available");
+        return;
+    }
+    let (_g, dir, _app, _tx) = fresh_app("cmd-mcp");
+    let config = serde_json::json!({
+        "mcpServers": { "calc": { "command": "node", "args": [fake_mcp_server()] } }
+    });
+    write_mcp_config(&dir, "cmd-mcp", &config.to_string());
+    prism_cli::cmd::mcp_cli(&args(&["list"])).unwrap();
+    prism_cli::cmd::mcp_cli(&args(&["test"])).unwrap();
+    prism_cli::cmd::mcp_cli(&args(&["call", "calc", "add", r#"{"a":4,"b":5}"#])).unwrap();
+    assert!(prism_cli::cmd::mcp_cli(&args(&["call", "calc", "missing", "{}"])).is_err());
+}
+
+#[test]
+fn serve_daemon_answers_health_status_and_shuts_down() {
+    let guard = env_lock();
+    let dir = tempfile::tempdir().unwrap();
+    std::env::set_var("PRISM_CONFIG_DIR", dir.path().join("serve"));
+    std::env::remove_var("PRISM_MCP_CONFIG");
+
+    let handle = std::thread::spawn(|| prism_cli::serve::serve_cli(&args(&["--port", "0"])));
+    let mut info = None;
+    for _ in 0..250 {
+        info = prism_cli::serve::running_server();
+        if info.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let info = info.expect("server.json appeared");
+    assert_eq!(info["pid"].as_u64().unwrap(), std::process::id() as u64);
+
+    let health = prism_cli::serve::ping_server().expect("health answered");
+    assert_eq!(health["ok"], true);
+
+    let status = prism_cli::serve::server_request("GET", "/status", None).unwrap();
+    assert!(status["jobs"].is_array());
+    let jobs = prism_cli::serve::server_request("GET", "/jobs", None).unwrap();
+    assert!(jobs["jobs"].is_array());
+    let agents = prism_cli::serve::server_request("GET", "/agents", None).unwrap();
+    assert!(agents["agents"].as_array().unwrap().len() >= 6);
+    let models = prism_cli::serve::server_request("GET", "/models?provider=openai", None).unwrap();
+    assert_eq!(models["provider"], "openai");
+
+    prism_cli::serve::server_request("POST", "/shutdown", Some(serde_json::json!({}))).unwrap();
+    handle.join().unwrap().unwrap();
+    assert!(!host::config_dir().unwrap().join("server.json").exists());
+    drop(guard);
+}
+
+#[test]
+fn acp_initializes_and_opens_a_session() {
+    use std::io::{BufRead, BufReader, Write};
+    let guard = env_lock();
+    let dir = tempfile::tempdir().unwrap();
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("acp")
+        .env("PRISM_CONFIG_DIR", dir.path().join("acp"))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("acp binary starts");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut send = |value: serde_json::Value| {
+        writeln!(stdin, "{value}").unwrap();
+        stdin.flush().unwrap();
+    };
+    send(serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}));
+    let mut line = String::new();
+    stdout.read_line(&mut line).unwrap();
+    let init: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(init["result"]["protocolVersion"], 1);
+    assert_eq!(init["result"]["agentCapabilities"]["mcp"]["stdio"], true);
+
+    send(serde_json::json!({"jsonrpc":"2.0","id":2,"method":"session/new","params":{}}));
+    line.clear();
+    stdout.read_line(&mut line).unwrap();
+    let session: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(session["result"]["sessionId"], "s1");
+
+    send(serde_json::json!({"jsonrpc":"2.0","id":3,"method":"nope","params":{}}));
+    line.clear();
+    stdout.read_line(&mut line).unwrap();
+    let unknown: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(unknown["error"]["code"], -32601);
+
+    send(serde_json::json!({"jsonrpc":"2.0","id":4,"method":"shutdown","params":{}}));
+    line.clear();
+    stdout.read_line(&mut line).unwrap();
+    let bye: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert!(bye["result"].is_object());
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+    drop(guard);
+}
+
+#[test]
+fn rag_command_indexes_files_and_retrieves_context() {
+    let (_g, dir, mut app, tx) = fresh_app("rag");
+    let path = dir.path().join("notes.md");
+    std::fs::write(
+        &path,
+        "The reactor coolant loop uses heavy water.\n\nSourdough needs flour and water.",
+    )
+    .unwrap();
+
+    type_line(&mut app, &tx, &format!("/rag {}", path.display()));
+    assert_eq!(app.rag.documents.len(), 1);
+    assert_eq!(app.rag.documents[0].title, "notes.md");
+    assert!(app.rag.documents[0].chunk_count() >= 1);
+
+    let ctx = app.rag.context("reactor coolant boron", 2);
+    assert!(ctx.contains("reactor coolant"), "{ctx}");
+    assert!(!ctx.contains("Sourdough"), "{ctx}");
+
+    type_line(&mut app, &tx, "/rag list");
+    let text = app
+        .conv
+        .messages
+        .iter()
+        .map(|m| m.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("notes.md"), "{text}");
+
+    type_line(&mut app, &tx, "/rag clear");
+    assert!(app.rag.is_empty());
+}
+
+#[test]
+fn help_lists_the_new_parity_commands() {
+    let text = prism_cli::ui::HELP_LINES.join("\n");
+    for needle in [
+        "/vault",
+        "/card",
+        "/persona",
+        "/hardware",
+        "/rag",
+        "/mcp panel",
+    ] {
+        assert!(text.contains(needle), "missing {needle}");
+    }
+}

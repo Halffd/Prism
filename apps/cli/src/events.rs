@@ -24,8 +24,31 @@ pub enum Event {
         spec: String,
         result: prism_core::agent::AgentResult,
     },
+    /// One MCP discovery pass finished (panel refresh).
+    McpTools {
+        path: Option<String>,
+        tools: Vec<McpToolRow>,
+        errors: Vec<String>,
+    },
+    /// One MCP tool call finished (panel test).
+    McpCall {
+        tool: String,
+        output: String,
+    },
     Resize(u16, u16),
     Tick(u64),
+}
+
+/// One configured MCP tool, flattened for the in-app panel. The config
+/// key and raw tool name are kept so the panel can spawn a fresh server
+/// and call the tool directly.
+#[derive(Debug, Clone)]
+pub struct McpToolRow {
+    pub server: String,
+    pub raw: String,
+    pub advertised: String,
+    pub description: String,
+    pub schema: serde_json::Value,
 }
 
 /// True for key-press events only. Windows fires extra Release events;

@@ -5,8 +5,9 @@
 //! report back as `Event::Stream`.
 
 use crate::chat;
-use crate::events::Event;
+use crate::events::{Event, McpToolRow};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use prism_core::agent::Tool as _;
 use prism_core::client::StreamEvent;
 use prism_core::conversations::{self, Conversation, ConversationMeta, StoredMessage};
 use prism_core::host;
@@ -35,6 +36,43 @@ pub struct StreamState {
 pub enum Mode {
     Normal,
     Search,
+    /// The in-app MCP monitor/test panel owns the keyboard.
+    Mcp,
+}
+
+/// The in-app MCP panel: every tool the configured servers advertise,
+/// the connection errors, and one directly executable call.
+#[derive(Debug, Clone)]
+pub struct McpPanel {
+    pub path: Option<String>,
+    pub tools: Vec<McpToolRow>,
+    pub errors: Vec<String>,
+    pub selected: usize,
+    pub args: String,
+    pub editing: bool,
+    pub busy: bool,
+    pub result: Option<String>,
+    pub result_scroll: usize,
+}
+
+impl McpPanel {
+    fn new() -> Self {
+        McpPanel {
+            path: None,
+            tools: Vec::new(),
+            errors: Vec::new(),
+            selected: 0,
+            args: "{}".into(),
+            editing: false,
+            busy: true,
+            result: None,
+            result_scroll: 0,
+        }
+    }
+
+    pub fn selected_tool(&self) -> Option<&McpToolRow> {
+        self.tools.get(self.selected)
+    }
 }
 
 /// Interaction mode: the six-mode taxonomy (Chat/Agent/Code/Creative/
@@ -95,6 +133,14 @@ pub struct App {
     pub history_pos: Option<usize>,
     pub status: String,
     pub quit: bool,
+
+    /// Active character card and the user's persona (creative mode).
+    pub card: Option<prism_core::cards::CharacterCard>,
+    pub persona: prism_core::cards::Persona,
+    /// Open MCP monitor/test panel.
+    pub mcp_panel: Option<McpPanel>,
+    /// Session-scoped retrieval over local files (`/rag`).
+    pub rag: prism_core::rag::RagStore,
 }
 
 impl App {
@@ -142,12 +188,33 @@ impl App {
             history_pos: None,
             status: "ready".into(),
             quit: false,
+            card: None,
+            persona: prism_core::cards::Persona {
+                name: "User".into(),
+                description: String::new(),
+            },
+            mcp_panel: None,
+            rag: prism_core::rag::RagStore::new(),
         };
-        // Resume the most recent conversation so a restart keeps working.
-        if let Some(meta) = app.metas.first().cloned() {
-            if let Some(conv) = host::load_conversation(&meta.id) {
+        // Resume the requested conversation (`prism resume [id]` sets
+        // the env var), else the most recent one so a restart keeps
+        // working.
+        let wanted = std::env::var("PRISM_RESUME_ID")
+            .ok()
+            .filter(|s| !s.is_empty());
+        let resume = wanted
+            .as_deref()
+            .and_then(|id| {
+                app.metas
+                    .iter()
+                    .find(|m| m.id == id || m.id.starts_with(id))
+                    .map(|m| m.id.clone())
+            })
+            .or_else(|| app.metas.first().map(|m| m.id.clone()));
+        if let Some(id) = resume {
+            if let Some(conv) = host::load_conversation(&id) {
                 app.conv = conv;
-                app.selected = 0;
+                app.selected = app.metas.iter().position(|m| m.id == id).unwrap_or(0);
             }
         }
         let total = providers::PROVIDERS.len() + app.settings.custom_providers.len();
@@ -287,6 +354,34 @@ impl App {
             Event::Notice(text) => self.push_message("system", &text),
             Event::SubagentDone { id, spec, result } => {
                 self.handle_subagent_done(&id, &spec, result)
+            }
+            Event::McpTools {
+                path,
+                tools,
+                errors,
+            } => {
+                if let Some(panel) = self.mcp_panel.as_mut() {
+                    panel.path = path;
+                    panel.busy = false;
+                    panel.selected = panel.selected.min(tools.len().saturating_sub(1));
+                    panel.tools = tools;
+                    panel.errors = errors;
+                    let n = panel.tools.len();
+                    let failed = panel.errors.len();
+                    self.status = if failed == 0 {
+                        format!("mcp: {n} tool(s) ready — ↑/↓ select, Enter to call")
+                    } else {
+                        format!("mcp: {n} tool(s), {failed} server(s) failed — r to retry")
+                    };
+                }
+            }
+            Event::McpCall { tool, output } => {
+                if let Some(panel) = self.mcp_panel.as_mut() {
+                    panel.busy = false;
+                    panel.result = Some(output);
+                    panel.result_scroll = 0;
+                    self.status = format!("mcp: called {tool}");
+                }
             }
             Event::Resize(_, _) => {}
             Event::Tick(t) => self.handle_tick(t),
@@ -523,7 +618,7 @@ impl App {
             return;
         }
         self.queue_paused = false;
-        let mut history = self.history();
+        let history = self.history();
         // Plugin pipeline: snippet expansion, tone suffix, counters.
         let content = self.plugins.before_send(
             &*host::storage(),
@@ -531,9 +626,68 @@ impl App {
             &content,
             &self.settings,
         );
-        history.push(prism_core::client::ChatMessage::text("user", &content));
 
-        match chat::start_job(&self.settings, history, tx) {
+        // Retrieval first: the best chunks become a system block both
+        // the card path and the plain path carry into the request.
+        let rag_context = if self.rag.is_empty() {
+            String::new()
+        } else {
+            self.rag.context(&content, 4)
+        };
+
+        // With a character card active the prompt is the card's system
+        // blocks + triggered lore + the transcript + this turn, exactly
+        // as `prism_core::cards` builds it for the desktop app.
+        let (messages, prebuilt) = match &self.card {
+            Some(card) => {
+                let lore = card
+                    .character_book
+                    .as_ref()
+                    .map(|book| {
+                        let recent: Vec<String> = history
+                            .iter()
+                            .rev()
+                            .take(10)
+                            .map(|m| m.content.clone())
+                            .collect();
+                        prism_core::cards::scan_lore(book, &content, &recent)
+                    })
+                    .unwrap_or_default();
+                let mut messages = prism_core::cards::build_messages(
+                    card,
+                    &self.persona,
+                    &history,
+                    &lore,
+                    &content,
+                    None,
+                );
+                if !rag_context.is_empty() {
+                    messages.insert(
+                        0,
+                        prism_core::client::ChatMessage::text("system", &rag_context),
+                    );
+                }
+                (messages, true)
+            }
+            None => {
+                let mut history = history;
+                if !rag_context.is_empty() {
+                    history.insert(
+                        0,
+                        prism_core::client::ChatMessage::text("system", &rag_context),
+                    );
+                }
+                history.push(prism_core::client::ChatMessage::text("user", &content));
+                (history, false)
+            }
+        };
+
+        let started = if prebuilt {
+            chat::start_job_prebuilt(&self.settings, messages, tx)
+        } else {
+            chat::start_job(&self.settings, messages, tx)
+        };
+        match started {
             Ok(()) => {
                 self.push_message("user", &content);
                 self.conv.messages.push(StoredMessage {
@@ -961,6 +1115,10 @@ impl App {
             }
             "quit" | "q" => self.quit = true,
             "mcp" => {
+                if arg == "panel" || arg == "ui" || arg == "test" {
+                    self.open_mcp_panel(tx);
+                    return;
+                }
                 // Probe the configured MCP servers: connect, list, stop.
                 // Agent runs connect their own sessions, so this is a
                 // diagnostic — it never touches a live run.
@@ -1127,6 +1285,309 @@ impl App {
                     );
                 }
             }
+            "vault" => {
+                // The shared conversation store (same files the desktop
+                // and `prism sessions` read).
+                let mut it = arg.split_whitespace();
+                let sub = it.next().unwrap_or("list");
+                match sub {
+                    "list" => {
+                        if self.metas.is_empty() {
+                            self.push_message("system", "vault: empty");
+                        } else {
+                            let rows: Vec<String> = self
+                                .metas
+                                .iter()
+                                .take(10)
+                                .map(|m| {
+                                    format!(
+                                        "  {}  {}  {}",
+                                        &m.id[..m.id.len().min(8)],
+                                        m.updated_at,
+                                        m.title
+                                    )
+                                })
+                                .collect();
+                            for line in rows {
+                                self.push_message("system", &line);
+                            }
+                        }
+                    }
+                    "save" => {
+                        self.save();
+                        self.push_message(
+                            "system",
+                            &format!("vault: saved {} — {}", self.conv.id, self.conv.title),
+                        );
+                    }
+                    "open" => match it.next() {
+                        Some(id) => {
+                            let full = self
+                                .metas
+                                .iter()
+                                .find(|m| m.id == id)
+                                .or_else(|| self.metas.iter().find(|m| m.id.starts_with(id)))
+                                .map(|m| m.id.clone());
+                            match full {
+                                Some(id) => self.open_conversation(&id),
+                                None => {
+                                    self.push_message("system", &format!("vault: no chat {id:?}"))
+                                }
+                            }
+                        }
+                        None => self.push_message("system", "usage: /vault open <id>"),
+                    },
+                    "delete" | "del" => match it.next() {
+                        Some(id) => {
+                            let full = self
+                                .metas
+                                .iter()
+                                .find(|m| m.id == id)
+                                .or_else(|| self.metas.iter().find(|m| m.id.starts_with(id)))
+                                .map(|m| m.id.clone());
+                            match full {
+                                Some(id) => match host::delete_conversation(&id) {
+                                    Ok(()) => {
+                                        self.metas.retain(|m| m.id != id);
+                                        if self.conv.id == id {
+                                            self.push_message(
+                                                "system",
+                                                "vault: current chat deleted — /new",
+                                            );
+                                        } else {
+                                            self.push_message(
+                                                "system",
+                                                &format!(
+                                                    "vault: deleted {}",
+                                                    &id[..id.len().min(8)]
+                                                ),
+                                            );
+                                        }
+                                    }
+                                    Err(e) => self.push_message(
+                                        "system",
+                                        &format!("vault: delete failed: {e}"),
+                                    ),
+                                },
+                                None => {
+                                    self.push_message("system", &format!("vault: no chat {id:?}"))
+                                }
+                            }
+                        }
+                        None => self.push_message("system", "usage: /vault delete <id>"),
+                    },
+                    _ => self.push_message(
+                        "system",
+                        "vault: /vault list · /vault save · /vault open <id> · /vault delete <id>",
+                    ),
+                }
+            }
+            "rag" => {
+                let sub = arg.split_whitespace().next().unwrap_or("");
+                match sub {
+                    "" | "list" | "status" => {
+                        if self.rag.is_empty() {
+                            self.push_message(
+                                "system",
+                                "rag: no documents — /rag <path> to index a file",
+                            );
+                        } else {
+                            let rows: Vec<String> = self
+                                .rag
+                                .documents
+                                .iter()
+                                .map(|d| {
+                                    format!(
+                                        "  {} · {} chunk(s) · {}",
+                                        d.title,
+                                        d.chunk_count(),
+                                        d.path
+                                    )
+                                })
+                                .collect();
+                            self.push_message(
+                                "system",
+                                &format!(
+                                    "rag: {} document(s), {} chunk(s)",
+                                    self.rag.documents.len(),
+                                    self.rag.chunk_count()
+                                ),
+                            );
+                            for row in rows {
+                                self.push_message("system", &row);
+                            }
+                        }
+                    }
+                    "clear" => {
+                        let n = self.rag.documents.len();
+                        self.rag.clear();
+                        self.status = format!("rag: cleared {n} document(s)");
+                    }
+                    _ => {
+                        let path = std::path::PathBuf::from(&arg);
+                        match self.rag.ingest_path(&path) {
+                            Ok(doc) => {
+                                let (title, chunks) = (doc.title.clone(), doc.chunk_count());
+                                self.status = format!("rag: {title} indexed ({chunks} chunks)");
+                                self.push_message(
+                                    "system",
+                                    &format!(
+                                        "rag: indexed {title} — {chunks} chunk(s); ask a question to retrieve it"
+                                    ),
+                                );
+                            }
+                            Err(e) => self.push_message("system", &format!("rag: {e}")),
+                        }
+                    }
+                }
+            }
+            "card" => {
+                if arg.is_empty() {
+                    match &self.card {
+                        Some(card) => self.push_message(
+                            "system",
+                            &format!(
+                                "card: {} · {} lore entries · /card off to unload",
+                                card.name,
+                                card.character_book
+                                    .as_ref()
+                                    .map(|b| b.entries.len())
+                                    .unwrap_or(0)
+                            ),
+                        ),
+                        None => self.push_message(
+                            "system",
+                            "no card — /card <path.json> loads a V1/V2 character card",
+                        ),
+                    }
+                } else if matches!(arg.as_str(), "off" | "none" | "clear") {
+                    self.card = None;
+                    self.push_message("system", "card unloaded — plain chat");
+                } else {
+                    match std::fs::read_to_string(&arg)
+                        .map_err(|e| e.to_string())
+                        .and_then(|text| prism_core::cards::parse_card(&text))
+                    {
+                        Ok(card) => {
+                            let name = card.name.clone();
+                            let first = card.first_mes.clone();
+                            let lore = card
+                                .character_book
+                                .as_ref()
+                                .map(|b| b.entries.len())
+                                .unwrap_or(0);
+                            let first_turn = self.conv.messages.is_empty();
+                            self.card = Some(card);
+                            if first_turn && !first.trim().is_empty() {
+                                self.push_message("assistant", &first);
+                            }
+                            self.push_message(
+                                "system",
+                                &format!("card loaded: {name} ({lore} lore entries)"),
+                            );
+                        }
+                        Err(e) => self.push_message("system", &format!("card: {e}")),
+                    }
+                }
+            }
+            "persona" => {
+                if arg.is_empty() {
+                    self.push_message(
+                        "system",
+                        &format!(
+                            "persona: {} | {} (usage: /persona <name[|description]>)",
+                            self.persona.name, self.persona.description
+                        ),
+                    );
+                } else if let Some((name, desc)) = arg.split_once('|') {
+                    self.persona.name = name.trim().to_string();
+                    self.persona.description = desc.trim().to_string();
+                    self.status = format!("persona: {}", self.persona.name);
+                } else {
+                    self.persona.name = arg.trim().to_string();
+                    self.persona.description.clear();
+                    self.status = format!("persona: {}", self.persona.name);
+                }
+            }
+            "hardware" => {
+                let mut it = arg.split_whitespace();
+                let sub = it.next().unwrap_or("show");
+                match sub {
+                    "show" | "" => {
+                        self.push_message(
+                            "system",
+                            &format!(
+                                "hardware: compute {} · gpu {:?} · ctx {:?}",
+                                self.settings.hardware.preferred_compute,
+                                self.settings.hardware.gpu_layers_override,
+                                self.settings.hardware.context_tokens
+                            ),
+                        );
+                    }
+                    "compute" => match it.next() {
+                        Some(level)
+                            if matches!(
+                                level,
+                                "auto"
+                                    | "cpu-only"
+                                    | "gpu-auto"
+                                    | "gpu-nvidia"
+                                    | "gpu-amd"
+                                    | "gpu-intel"
+                            ) =>
+                        {
+                            self.settings.hardware.preferred_compute = level.to_string();
+                            self.persist_settings();
+                            self.status = format!("compute: {level}");
+                        }
+                        _ => self.push_message(
+                            "system",
+                            "usage: /hardware compute auto|cpu-only|gpu-auto|gpu-nvidia|gpu-amd|gpu-intel",
+                        ),
+                    },
+                    "gpu" => match it.next() {
+                        Some("off") => {
+                            self.settings.hardware.gpu_layers_override = None;
+                            self.persist_settings();
+                            self.status = "gpu layers: auto".into();
+                        }
+                        Some(n) => match n.parse::<u32>() {
+                            Ok(v) => {
+                                self.settings.hardware.gpu_layers_override = Some(v);
+                                self.persist_settings();
+                                self.status = format!("gpu layers: {v}");
+                            }
+                            Err(_) => self.push_message("system", "usage: /hardware gpu <n|off>"),
+                        },
+                        None => self.push_message("system", "usage: /hardware gpu <n|off>"),
+                    },
+                    "ctx" => match it.next() {
+                        Some("off") => {
+                            self.settings.hardware.context_tokens = None;
+                            self.persist_settings();
+                            self.status = "context: server default".into();
+                        }
+                        Some(n) => match n.parse::<u32>() {
+                            Ok(v) => {
+                                self.settings.hardware.context_tokens = Some(v);
+                                self.persist_settings();
+                                self.status = format!("context: {v}");
+                            }
+                            Err(_) => self.push_message("system", "usage: /hardware ctx <tokens|off>"),
+                        },
+                        None => self.push_message("system", "usage: /hardware ctx <tokens|off>"),
+                    },
+                    "reset" => {
+                        self.settings.hardware = prism_core::settings::HardwareSettings::default();
+                        self.persist_settings();
+                        self.status = "hardware: defaults".into();
+                    }
+                    _ => self.push_message(
+                        "system",
+                        "hardware: /hardware [compute <level>|gpu <n|off>|ctx <n|off>|reset]",
+                    ),
+                }
+            }
             other => {
                 // Plugin commands are namespaced: /memory.save, /snippets.add...
                 // Rewrite `/memory.save foo` -> `plugins.run_command("memory.save", "foo")`.
@@ -1158,6 +1619,118 @@ impl App {
         }
     }
 
+    // -- MCP panel ---------------------------------------------------------
+
+    /// Open (or re-focus) the MCP monitor and start a discovery pass.
+    fn open_mcp_panel(&mut self, tx: &std::sync::mpsc::Sender<Event>) {
+        if self.mcp_panel.is_none() {
+            self.mcp_panel = Some(McpPanel::new());
+        }
+        self.mode = Mode::Mcp;
+        self.refresh_mcp_panel(tx);
+        self.status = "mcp panel — ↑/↓ select · Enter args · r refresh · Esc close".into();
+    }
+
+    /// Connect every configured server on a background thread; results
+    /// arrive as [`Event::McpTools`] so the UI never blocks.
+    fn refresh_mcp_panel(&mut self, tx: &std::sync::mpsc::Sender<Event>) {
+        if let Some(panel) = self.mcp_panel.as_mut() {
+            panel.busy = true;
+            panel.errors.clear();
+        }
+        let tx = tx.clone();
+        std::thread::spawn(move || {
+            let path = prism_core::mcp::config_path().map(|p| p.display().to_string());
+            let Some(file) = prism_core::mcp::load_file() else {
+                let _ = tx.send(Event::McpTools {
+                    path,
+                    tools: Vec::new(),
+                    errors: vec!["no usable configuration (add an \"mcpServers\" object)".into()],
+                });
+                return;
+            };
+            if file.mcp_servers.is_empty() {
+                let _ = tx.send(Event::McpTools {
+                    path,
+                    tools: Vec::new(),
+                    errors: vec!["configuration has no servers with a command".into()],
+                });
+                return;
+            }
+            let surface = prism_core::mcp::McpSurface::connect(&file, Duration::from_secs(10));
+            let tools = surface
+                .tools
+                .iter()
+                .map(|t| McpToolRow {
+                    server: t.server_name().to_string(),
+                    raw: t.raw.clone(),
+                    advertised: t.advertised.clone(),
+                    description: t.description().to_string(),
+                    schema: t.schema.clone(),
+                })
+                .collect();
+            let _ = tx.send(Event::McpTools {
+                path,
+                tools,
+                errors: surface.errors,
+            });
+        });
+    }
+
+    /// Call the selected tool with the panel's JSON args on a background
+    /// thread. A fresh server is spawned for the call, so a hung tool can
+    /// never wedge the UI.
+    fn run_mcp_call(&mut self, tx: &std::sync::mpsc::Sender<Event>) {
+        let Some(panel) = self.mcp_panel.as_mut() else {
+            return;
+        };
+        let Some(tool) = panel.selected_tool().cloned() else {
+            return;
+        };
+        let args = panel.args.trim().to_string();
+        panel.busy = true;
+        panel.editing = false;
+        panel.result = None;
+        panel.result_scroll = 0;
+        let tx = tx.clone();
+        std::thread::spawn(move || {
+            let output = match prism_core::mcp::load_file()
+                .and_then(|f| f.mcp_servers.get(&tool.server).cloned())
+            {
+                Some(cfg) => match prism_core::mcp::StdioMcpServer::spawn(
+                    &tool.server,
+                    &cfg,
+                    Duration::from_secs(20),
+                ) {
+                    Ok(server) => {
+                        let out = server.call_tool(
+                            &tool.raw,
+                            if args.is_empty() { "{}" } else { &args },
+                            &tool.schema,
+                        );
+                        server.stop();
+                        out
+                    }
+                    Err(e) => format!("Error: {e}"),
+                },
+                None => format!(
+                    "Error: server {:?} is no longer configured — refresh",
+                    tool.server
+                ),
+            };
+            let _ = tx.send(Event::McpCall {
+                tool: tool.advertised,
+                output,
+            });
+        });
+    }
+
+    fn close_mcp_panel(&mut self) {
+        self.mcp_panel = None;
+        self.mode = Mode::Normal;
+        self.status = "ready".into();
+    }
+
     fn persist_settings(&mut self) {
         if let Err(e) = host::save_settings(&self.settings) {
             self.status = format!("settings save failed: {e}");
@@ -1186,6 +1759,80 @@ impl App {
         match (self.mode, key.code, ctrl, alt) {
             (_, KeyCode::Char('c'), true, _) => {
                 self.quit = true;
+            }
+            (Mode::Mcp, KeyCode::Esc, _, _) => {
+                let editing = self.mcp_panel.as_ref().map(|p| p.editing).unwrap_or(false);
+                if editing {
+                    if let Some(panel) = self.mcp_panel.as_mut() {
+                        panel.editing = false;
+                    }
+                    self.status = "mcp: args discarded".into();
+                } else {
+                    self.close_mcp_panel();
+                }
+            }
+            (Mode::Mcp, KeyCode::Enter, _, _) => {
+                let editing = self.mcp_panel.as_ref().map(|p| p.editing).unwrap_or(false);
+                if editing {
+                    self.run_mcp_call(tx);
+                } else if let Some(panel) = self.mcp_panel.as_mut() {
+                    panel.editing = true;
+                    if panel.args.trim().is_empty() {
+                        panel.args = "{}".into();
+                    }
+                    self.status = "mcp: edit JSON args, Enter to run, Esc to cancel".into();
+                }
+            }
+            (Mode::Mcp, KeyCode::Up, false, false) => {
+                if let Some(panel) = self.mcp_panel.as_mut() {
+                    if !panel.editing {
+                        panel.selected = panel.selected.saturating_sub(1);
+                    }
+                }
+            }
+            (Mode::Mcp, KeyCode::Down, false, false) => {
+                if let Some(panel) = self.mcp_panel.as_mut() {
+                    if !panel.editing && panel.selected + 1 < panel.tools.len() {
+                        panel.selected += 1;
+                    }
+                }
+            }
+            (Mode::Mcp, KeyCode::PageUp, _, _) => {
+                if let Some(panel) = self.mcp_panel.as_mut() {
+                    panel.result_scroll = panel.result_scroll.saturating_sub(5);
+                }
+            }
+            (Mode::Mcp, KeyCode::PageDown, _, _) => {
+                if let Some(panel) = self.mcp_panel.as_mut() {
+                    panel.result_scroll += 5;
+                }
+            }
+            (Mode::Mcp, KeyCode::Char('r'), false, false) => {
+                let editing = self.mcp_panel.as_ref().map(|p| p.editing).unwrap_or(false);
+                if !editing {
+                    self.refresh_mcp_panel(tx);
+                }
+            }
+            (Mode::Mcp, KeyCode::Backspace, false, _) => {
+                if let Some(panel) = self.mcp_panel.as_mut() {
+                    if panel.editing {
+                        panel.args.pop();
+                    }
+                }
+            }
+            (Mode::Mcp, KeyCode::Char('u'), true, _) => {
+                if let Some(panel) = self.mcp_panel.as_mut() {
+                    if panel.editing {
+                        panel.args.clear();
+                    }
+                }
+            }
+            (Mode::Mcp, KeyCode::Char(c), false, false) => {
+                if let Some(panel) = self.mcp_panel.as_mut() {
+                    if panel.editing && panel.args.len() < 4096 {
+                        panel.args.push(c);
+                    }
+                }
             }
             (Mode::Search, KeyCode::Esc, _, _) => {
                 self.mode = Mode::Normal;

@@ -42,6 +42,7 @@ pub mod plugins;
 pub mod prompt_history;
 pub mod prompt_picker;
 pub mod providers;
+pub mod rag;
 pub mod sandbox;
 pub mod search;
 pub mod session;

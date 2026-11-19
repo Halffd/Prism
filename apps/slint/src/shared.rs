@@ -467,6 +467,17 @@ mod agent_integration {
         }
     }
 
+    /// Persisted per-tool policy (`Settings::tool_permissions`, shared
+    /// with `prism permissions`). Explicit entries only; the registry's
+    /// own defaults stand everywhere else.
+    fn apply_persisted_permissions(reg: &ToolRegistry, settings: &prism_core::settings::Settings) {
+        for tool in settings.tool_permissions.keys() {
+            if let Some(level) = settings.tool_permission(tool) {
+                reg.set_permission(tool, level);
+            }
+        }
+    }
+
     /// The tool surface every run starts from: calculator, the
     /// workspace-scoped native tools, and the guarded shell when a
     /// sandbox policy resolved.
@@ -623,6 +634,7 @@ mod agent_integration {
         std::thread::spawn(move || {
             let reg = build_registry(&workspace_root, &sandbox);
             register_mcp_tools(&reg, &atx);
+            apply_persisted_permissions(&reg, &settings);
 
             let Some(resolved) = settings.resolve_provider(&provider) else {
                 let _ = atx.send(AgentEvent::Failed(format!("unknown provider {provider}")));
@@ -904,6 +916,7 @@ mod agent_integration {
         std::thread::spawn(move || {
             let reg = build_registry(&workspace_root, &sandbox);
             register_mcp_tools(&reg, &tx);
+            apply_persisted_permissions(&reg, &settings);
             let advertised = reg.tool_names();
             let effective = match registry.clamp_tools(&spec_name, &advertised) {
                 Ok(names) => names,

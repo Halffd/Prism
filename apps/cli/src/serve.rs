@@ -583,6 +583,7 @@ pub fn serve_cli(args: &[String]) -> anyhow::Result<()> {
     }
     let listener = TcpListener::bind(format!("{host}:{port}"))
         .map_err(|e| anyhow::anyhow!("bind {host}:{port}: {e}"))?;
+    listener.set_nonblocking(true)?;
     port = listener.local_addr()?.port();
     let state = Arc::new(Mutex::new(ServerState {
         started_at: prism_core::conversations::now_ms(),
@@ -609,23 +610,31 @@ pub fn serve_cli(args: &[String]) -> anyhow::Result<()> {
         "prism serve — http://{host}:{port} (auth: {})",
         if token.is_empty() { "off" } else { "bearer" }
     );
-    for stream in listener.incoming() {
+    loop {
         if state.lock().unwrap().shutdown.load(Ordering::Relaxed) {
             break;
         }
-        let Ok(mut stream) = stream else { continue };
-        let state = state.clone();
-        let need_auth = !state.lock().unwrap().token.is_empty();
-        std::thread::spawn(move || {
-            let Ok(req) = parse_request(&mut stream) else {
-                return;
-            };
-            // Settings are re-read per request so `prism reload` (and
-            // edits made by other tools) apply without a restart.
-            let settings = host::load_settings();
-            let (status, value) = handle(state, &settings, req, need_auth);
-            write_json(&mut stream, status, &value);
-        });
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                let state = state.clone();
+                let need_auth = !state.lock().unwrap().token.is_empty();
+                std::thread::spawn(move || {
+                    let Ok(req) = parse_request(&mut stream) else {
+                        return;
+                    };
+                    // Settings are re-read per request so `prism reload`
+                    // (and edits made by other tools) apply without a
+                    // restart.
+                    let settings = host::load_settings();
+                    let (status, value) = handle(state, &settings, req, need_auth);
+                    write_json(&mut stream, status, &value);
+                });
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(e) => return Err(anyhow::anyhow!("accept failed: {e}")),
+        }
     }
     if let Some(path) = server_file() {
         let _ = std::fs::remove_file(path);

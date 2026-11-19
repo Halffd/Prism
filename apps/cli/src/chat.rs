@@ -18,8 +18,28 @@ use std::sync::mpsc::Sender;
 /// updates. Returns `Err` with a user-facing message for missing keys.
 pub fn start_job(
     settings: &Settings,
+    history: Vec<ChatMessage>,
+    tx: &Sender<Event>,
+) -> Result<(), String> {
+    start_job_inner(settings, history, tx, true)
+}
+
+/// Like [`start_job`], but the caller already built the full message
+/// list (a character card's system blocks and lore). Settings prompt
+/// injection is skipped; transport, thinking and plugins still apply.
+pub fn start_job_prebuilt(
+    settings: &Settings,
+    history: Vec<ChatMessage>,
+    tx: &Sender<Event>,
+) -> Result<(), String> {
+    start_job_inner(settings, history, tx, false)
+}
+
+fn start_job_inner(
+    settings: &Settings,
     mut history: Vec<ChatMessage>,
     tx: &Sender<Event>,
+    inject_system: bool,
 ) -> Result<(), String> {
     let (stx, srx) = std::sync::mpsc::channel::<StreamEvent>();
     match settings.connection {
@@ -34,7 +54,7 @@ pub fn start_job(
                     .unwrap_or("provider");
                 return Err(format!("API key required for {label} — /key <key>"));
             }
-            if !settings.system_prompt.trim().is_empty() {
+            if inject_system && !settings.system_prompt.trim().is_empty() {
                 history.insert(
                     0,
                     ChatMessage::text("system", settings.system_prompt.trim()),
@@ -48,7 +68,16 @@ pub fn start_job(
                 settings,
             );
             if !suffix.trim().is_empty() {
-                let combined = format!("{}\n\n{}", settings.system_prompt.trim(), suffix.trim());
+                let base = if inject_system {
+                    settings.system_prompt.trim()
+                } else {
+                    ""
+                };
+                let combined = if base.is_empty() {
+                    suffix.trim().to_string()
+                } else {
+                    format!("{base}\n\n{}", suffix.trim())
+                };
                 history.insert(0, ChatMessage::text("system", &combined));
             }
             if settings.thinking_enabled {

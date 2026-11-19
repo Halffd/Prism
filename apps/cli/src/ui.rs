@@ -12,11 +12,15 @@ use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
 pub const HELP_LINES: &[&str] = &[
-    "Prism CLI — commands: /help /new /load N /del N /model X /provider X /key X /mode [id] /mix [id] /unmix [id] /cap [feature [on|off]] /perm <tool> allow|ask|deny /system X /think /temp X /conn direct|api /search X /agent <task> /mcp /agents [list|spawn <name> <task>] /quit",
+    "Prism CLI — commands: /help /new /load N /del N /model X /provider X /key X /mode [id] /mix [id] /unmix [id] /cap [feature [on|off]] /perm <tool> allow|ask|deny /system X /think /temp X /conn direct|api /search X /agent <task> /mcp [panel] /agents [list|spawn <name> <task>] /quit",
+    "rag: /rag <path> indexes a local file (paragraph chunks, TF-IDF retrieval) · /rag list · /rag clear — relevant chunks ride into every request",
+    "creative: /card <path.json>|off loads a V1/V2 character card (description, lore book, examples) · /persona <name[|description]> sets {{user}} · card prompts go through prism_core::cards",
+    "storage: /vault list · /vault save · /vault open <id> · /vault delete <id> — the shared conversation store (same files as prism sessions)",
+    "hardware: /hardware [show] · /hardware compute auto|cpu-only|gpu-auto|gpu-nvidia|gpu-amd|gpu-intel · /hardware gpu <n|off> · /hardware ctx <tokens|off> · /hardware reset",
     "modes: chat (no tools) · agent (tools+subagents) · code (style only) · creative (cards+lore) · daemon (tasks, always-on) · generative (image/video/audio) · Alt+M cycles, /mode lists",
     "mixing: /mix <id> blends another mode in (capabilities union, prompt voice stays primary) · /unmix <id> removes it · /cap tools|subagents|commands|character-cards|media|tasks|strategy [on|off] toggles one capability · /perm <tool> allow|ask|deny edits the policy",
     "agent shell: PRISM_AGENT_SANDBOX_POLICY (JSON or file) adds the sandboxed `shell` tool · prism sandbox preflight [--policy FILE] [--json] probes the host",
-    "mcp: ~/.config/prism/mcp.json (PRISM_MCP_CONFIG overrides) — \"mcpServers\" registers stdio servers as mcp__server__tool in every agent run · /mcp reports what connects",
+    "mcp: ~/.config/prism/mcp.json (PRISM_MCP_CONFIG overrides) — \"mcpServers\" registers stdio servers as mcp__server__tool in every agent run · /mcp reports what connects · /mcp panel monitors servers and calls any tool with JSON args",
     "subagents: /agents lists the core registry (explore, security-review, bugbot, ci-investigation, browser-use, shell-ops) plus \"subagents\" entries in mcp.json · /agents spawn <name> <task> runs one in the background with its forced model and clamped tools",
     "keys: Enter send · Esc stop/clear · Ctrl+F search (n/N navigate) · PgUp/PgDn scroll · Ctrl+T thinking · Alt+N new chat · Alt+P/K pick chat · Alt+O open · Alt+M mode · Ctrl+U clear input · Ctrl+W del word · Ctrl+C quit",
     "plugins: /snippets.list · /snippets.add <trigger> <body> · /memory.save <type> <scope> <text> · /memory.read [day] · /memory.search <q> · /ponytail.mode <off|lite|full|ultra> · /planning.plan|plans|read|link|spec|done · /usage.show · /skills.list",
@@ -40,11 +44,158 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     ])
     .split(outer[0]);
 
-    draw_conversations(f, app, panes[0]);
-    draw_timeline(f, app, panes[1]);
-    draw_details(f, app, panes[2]);
+    if app.mcp_panel.is_some() {
+        draw_mcp_panel(f, app, outer[0]);
+    } else {
+        draw_conversations(f, app, panes[0]);
+        draw_timeline(f, app, panes[1]);
+        draw_details(f, app, panes[2]);
+    }
     draw_composer(f, app, outer[1]);
     draw_status(f, app, outer[2]);
+}
+
+/// The in-app MCP monitor/test panel: servers+tools on the left, the
+/// selected tool's schema, arguments and last result on the right.
+fn draw_mcp_panel(f: &mut Frame, app: &App, area: Rect) {
+    let Some(panel) = &app.mcp_panel else {
+        return;
+    };
+    let cols = Layout::horizontal([Constraint::Percentage(45), Constraint::Min(0)]).split(area);
+
+    let mut items: Vec<ListItem> = Vec::new();
+    let mut last_server = "";
+    for (i, tool) in panel.tools.iter().enumerate() {
+        if tool.server != last_server {
+            items.push(ListItem::new(RtLine::from(Span::styled(
+                format!("▸ {}", tool.server),
+                Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            ))));
+            last_server = &tool.server;
+        }
+        let style = if i == panel.selected {
+            Style::new().fg(Color::Black).bg(Color::Cyan)
+        } else {
+            Style::new().fg(Color::Gray)
+        };
+        items.push(ListItem::new(RtLine::from(Span::styled(
+            format!("  {}", tool.raw),
+            style,
+        ))));
+    }
+    if items.is_empty() {
+        items.push(ListItem::new(RtLine::from(Span::styled(
+            if panel.busy {
+                "connecting…"
+            } else {
+                "no tools — check mcp.json"
+            },
+            Style::new().fg(Color::DarkGray),
+        ))));
+    }
+    let title = format!(
+        " mcp · {} tool(s){} ",
+        panel.tools.len(),
+        if panel.busy { " · busy" } else { "" }
+    );
+    f.render_widget(
+        List::new(items).block(
+            Block::new()
+                .borders(Borders::ALL)
+                .title(Span::styled(title, Style::new().fg(Color::Cyan))),
+        ),
+        cols[0],
+    );
+
+    let mut rows: Vec<RtLine> = Vec::new();
+    if let Some(path) = &panel.path {
+        rows.push(kv("config", path));
+    }
+    for e in &panel.errors {
+        rows.push(RtLine::from(Span::styled(
+            format!("  ✗ {e}"),
+            Style::new().fg(Color::Red),
+        )));
+    }
+    match panel.selected_tool() {
+        Some(tool) => {
+            rows.push(kv("tool", &tool.advertised));
+            rows.push(kv("server", &tool.server));
+            rows.push(kv("raw", &tool.raw));
+            rows.push(RtLine::from(""));
+            for line in wrap_text(&tool.description, cols[1].width.saturating_sub(4) as usize) {
+                rows.push(RtLine::from(Span::styled(
+                    line,
+                    Style::new().fg(Color::Gray),
+                )));
+            }
+            rows.push(RtLine::from(""));
+            let schema = serde_json::to_string_pretty(&tool.schema).unwrap_or_default();
+            for line in schema.lines().take(8) {
+                rows.push(RtLine::from(Span::styled(
+                    format!("  {line}"),
+                    Style::new().fg(Color::DarkGray),
+                )));
+            }
+            rows.push(RtLine::from(""));
+            let args_style = if panel.editing {
+                Style::new().fg(Color::Yellow)
+            } else {
+                Style::new().fg(Color::Gray)
+            };
+            rows.push(RtLine::from(vec![
+                Span::styled("  args: ", Style::new().fg(Color::DarkGray)),
+                Span::styled(
+                    if panel.editing {
+                        format!("{}▌", panel.args)
+                    } else {
+                        panel.args.clone()
+                    },
+                    args_style,
+                ),
+            ]));
+            rows.push(RtLine::from(Span::styled(
+                if panel.editing {
+                    "  Enter runs · Esc cancels · Ctrl+U clears"
+                } else {
+                    "  Enter edits args · r reconnects · ↑/↓ select · Esc closes"
+                },
+                Style::new().fg(Color::DarkGray),
+            )));
+        }
+        None => rows.push(kv("tool", "—")),
+    }
+    rows.push(RtLine::from(""));
+    rows.push(kv(
+        "result",
+        if panel.busy {
+            "running…"
+        } else {
+            "PgUp/PgDn scroll"
+        },
+    ));
+    if let Some(result) = &panel.result {
+        let width = cols[1].width.saturating_sub(4) as usize;
+        let wrapped = wrap_text(result, width);
+        for line in wrapped.iter().skip(panel.result_scroll).take(30) {
+            let style = if result.starts_with("Error:") {
+                Style::new().fg(Color::Red)
+            } else {
+                Style::new().fg(Color::Gray)
+            };
+            rows.push(RtLine::from(Span::styled(format!("  {line}"), style)));
+        }
+    }
+    f.render_widget(
+        Paragraph::new(rows)
+            .block(
+                Block::new()
+                    .borders(Borders::ALL)
+                    .title(Span::styled(" test ", Style::new().fg(Color::Cyan))),
+            )
+            .wrap(Wrap { trim: false }),
+        cols[1],
+    );
 }
 
 fn age(now: u64, then: u64) -> String {
@@ -261,6 +412,26 @@ fn draw_details(f: &mut Frame, app: &App, area: Rect) {
                 "defaults".into()
             },
         ),
+        kv(
+            "card",
+            &app.card
+                .as_ref()
+                .map(|c| c.name.clone())
+                .unwrap_or_else(|| "—".into()),
+        ),
+        kv("persona", &app.persona.name),
+        kv(
+            "rag",
+            &if app.rag.is_empty() {
+                "—".into()
+            } else {
+                format!(
+                    "{} doc(s) · {} chunks",
+                    app.rag.documents.len(),
+                    app.rag.chunk_count()
+                )
+            },
+        ),
         RtLine::from(""),
         kv("messages", &app.conv.messages.len().to_string()),
         kv("ctx ~tokens", &app.estimate_tokens().to_string()),
@@ -418,6 +589,7 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     let mode = match app.mode {
         Mode::Normal => "",
         Mode::Search => "SEARCH · ",
+        Mode::Mcp => "MCP · ",
     };
     let im = app.imode;
     let t = im.traits();
