@@ -196,7 +196,11 @@ jobs:
         run: wasm-pack build --target web --out-dir ../../libs/ai-core/src/wasm-pkg-web crates/prism-wasm
 
       - name: Build extension
-        run: npx nx build @prism/extension
+        # Plain vite: nx's tsconfig-paths plugin walks every linked git
+        # worktree, so a stale tsconfig in another worktree breaks the
+        # alias map. The config reads its aliases from tsconfig.base.json.
+        working-directory: apps/extension
+        run: npx vite build --mode production
 
       - name: Lint manifest for Firefox
         # Warnings are not errors: the build's minified output trips
