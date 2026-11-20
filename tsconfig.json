@@ -73,9 +73,6 @@
       "path": "./libs/tts"
     },
     {
-      "path": "./apps/tui"
-    },
-    {
       "path": "./libs/deepsearch"
     },
     {
