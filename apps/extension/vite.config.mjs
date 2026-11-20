@@ -1,8 +1,31 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
-import { cpSync } from 'fs';
-import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
+import { cpSync, readFileSync } from 'fs';
+
+// Workspace aliases come straight from tsconfig.base.json — one source of
+// truth, no nx plugin. The nx tsconfig-paths plugin walked every linked git
+// worktree, so a stale apps/tui tsconfig in another worktree broke the
+// alias map for every build.
+function tsconfigAliases() {
+  const tsconfig = JSON.parse(
+    readFileSync(resolve(__dirname, '../../tsconfig.base.json'), 'utf-8'),
+  );
+  const paths = tsconfig.compilerOptions?.paths ?? {};
+  const aliases = [];
+  for (const [find, targets] of Object.entries(paths)) {
+    // Skip wildcard entries: the extension imports only exact specifiers,
+    // and an approximate alias rewrites deeper paths incorrectly.
+    if (find.includes('*') || !targets?.[0]) continue;
+    aliases.push({
+      // Exact match: a string `find` also rewrites deeper specifiers, so
+      // `@prism/agent/src/lib/x` would become `libs/agent/src/index.ts/src/lib/x`.
+      find: new RegExp(`^${find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`),
+      replacement: resolve(__dirname, '../../', targets[0]),
+    });
+  }
+  return aliases;
+}
 
 // Export the configuration using default export
 export default defineConfig({
@@ -21,7 +44,12 @@ export default defineConfig({
 
   plugins: [
     react(),
-    nxViteTsPaths(),
+    {
+      name: 'tsconfig-paths',
+      // No-op: the aliases are applied via resolve.alias below. This
+      // entry exists to keep the plugin list self-describing after the
+      // nx tsconfig-paths plugin was removed.
+    },
     {
       // The wasm core's browser pkg must sit next to the chunk that
       // dynamic-imports it (assets/). See libs/llm-service loader.
@@ -68,50 +96,11 @@ export default defineConfig({
           configFile: false,
           logLevel: 'error',
           resolve: {
-            alias: [
-              // The content script dynamically imports the React popups,
-              // which pull in several workspace packages. Each one ships
-              // only type declarations, so they must all be aliased to
-              // their source entries.
-              //
-              // The aliases are exact matches: a string alias also
-              // rewrites deeper specifiers, so `@prism/firebase-auth/src/utils`
-              // would become `.../index.ts/src/utils` and fail to load.
-              ...[
-                'ui-components',
-                'shared-types',
-                'redux-store',
-                'api-client',
-                'shared-db',
-                'image-gen',
-                'supabase-client',
-                'logging',
-                'ai-core',
-                'agent',
-                'context-manager',
-                'llm',
-                'rag',
-                'deepsearch',
-                'web-search',
-                'firebase-auth',
-                'ocr',
-                'stt',
-                'tts',
-                'inpaint',
-                'model-gen',
-                'audio-gen',
-                'video-gen',
-                'ai-factory',
-                'ai-builder',
-                'council',
-              ].map((name) => ({
-                find: new RegExp(`^@prism/${name}$`),
-                replacement: resolve(
-                  __dirname,
-                  `../../libs/${name}/src/index.ts`,
-                ),
-              })),
-            ],
+            // The content script dynamically imports the React popups,
+            // which pull in several workspace packages. Each one ships
+            // only type declarations, so they must all be aliased to
+            // their source entries.
+            alias: tsconfigAliases(),
           },
           plugins: [react()],
           // The content script runs as a classic script in the page, where
@@ -144,11 +133,7 @@ export default defineConfig({
   ],
 
   resolve: {
-    alias: {
-      '@prism/api-client': resolve(__dirname, '../../libs/api-client/src'),
-      '@prism/shared-types': resolve(__dirname, '../../libs/shared-types/src'),
-      '@prism/image-gen': resolve(__dirname, '../../libs/image-gen/src'),
-    },
+    alias: tsconfigAliases(),
   },
 
   build: {
