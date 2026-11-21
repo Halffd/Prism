@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { CORE_PROVIDER_IDS } from '../generated/core-providers';
 import {
   AIConfig,
   ExtensionSettings,
@@ -59,6 +60,16 @@ const defaultAIConfig: AIConfig = {
 interface SettingsProps {
   onClose?: () => void;
 }
+
+/** Providers whose model list the core can refresh: each exposes an
+ *  OpenAI-compatible `/models` endpoint. The extension-only providers
+ *  (Claude's native API, Poe, Transformers, Cloudflare Workers, Z.AI)
+ *  have no such endpoint, so auto-refresh is skipped for them. Ids come
+ *  from the core's own table, so adding a provider to the core does not
+ *  need an edit here. */
+const REFRESHABLE_PROVIDER_IDS: ReadonlySet<string> = new Set(
+  CORE_PROVIDER_IDS.filter((id) => id !== 'prism-api'),
+);
 
 export function Settings({ onClose }: SettingsProps) {
   const [aiConfig, setAiConfig] = useState<AIConfig>(defaultAIConfig);
@@ -534,6 +545,34 @@ export function Settings({ onClose }: SettingsProps) {
       setFetchingModels(false);
     }
   };
+
+  // Auto-refresh the model list when the provider (or its key) changes,
+  // so switching providers never presents a stale list. Matches the
+  // desktop surfaces, where selecting a provider re-reads the model
+  // list rather than relying only on the manual Fetch Available Models
+  // button. The key is a dependency because a provider whose key is
+  // entered last cannot be fetched until the key is known.
+  //
+  // Silently skipped: an in-flight fetch (the button owns the status),
+  // a provider with no refreshable endpoint, and a missing key (the
+  // button surfaces that error; an automatic fetch would fire it on
+  // every keypress).
+  useEffect(() => {
+    if (fetchingModels) return undefined;
+    if (!REFRESHABLE_PROVIDER_IDS.has(aiConfig.provider)) return undefined;
+    if ((aiConfig.providerKeys?.[aiConfig.provider] ?? '').trim() === '') {
+      return undefined;
+    }
+    let cancelled = false;
+    const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
+      if (!cancelled) void fetchAvailableModels();
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiConfig.provider, aiConfig.providerKeys?.[aiConfig.provider]]);
 
   const updateSettings = async () => {
     try {
