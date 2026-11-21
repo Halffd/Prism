@@ -4,7 +4,7 @@
 //!
 //! Like the rest of the host, state lives here; `ui/app.slint` is
 //! presentation only. Generation runs on a simulated render timer —
-//! parity with the web studio (dioxus-video-studio), which also
+//! parity with the Next.js studio (`apps/web`), which also
 //! simulates clips. The real provider pipeline stays where it already
 //! is: the media capability panel (`media.rs`) over `prism_core::media`.
 

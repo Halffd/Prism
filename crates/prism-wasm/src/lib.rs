@@ -229,6 +229,116 @@ pub fn build_api_chat_body(req_json: &str) -> String {
     )
 }
 
+// ---------------------------------------------------------------------------
+// Media — the same decoder-first contract as chat: the core builds every
+// wire body and parses every response, while the JS host drives fetch.
+// ---------------------------------------------------------------------------
+
+use prism_core::media::{self, MediaRequest};
+
+fn parse_media_request(json: &str) -> Result<MediaRequest, String> {
+    parse_req::<MediaRequest>(json)
+}
+
+/// Default local-SD knobs, so hosts do not duplicate core constants.
+#[wasm_bindgen]
+pub fn media_defaults() -> String {
+    let (width, height) = media::a1111_size(Some("1:1"));
+    serde_json::json!({
+        "steps": media::LOCAL_SD_STEPS,
+        "cfg": media::LOCAL_SD_CFG,
+        "sampler": media::DEFAULT_SAMPLER,
+        "scheduler": media::DEFAULT_SCHEDULER,
+        "maxBatch": media::MAX_BATCH,
+        "width": width,
+        "height": height,
+        "providers": {
+            "a1111": media::A1111_ID,
+            "comfyui": media::COMFYUI_ID,
+            "native": media::NATIVE_ID,
+            "candle": media::CANDLE_ID,
+        },
+    })
+    .to_string()
+}
+
+/// Build the A1111 `/sdapi/v1/txt2img` body from a JSON `MediaRequest`.
+#[wasm_bindgen]
+pub fn media_a1111_body(req_json: &str) -> String {
+    result_json(&parse_media_request(req_json).map(|req| media::a1111_txt2img_body(&req)))
+}
+
+/// Build the A1111 `/sdapi/v1/img2img` body from a JSON `MediaRequest`.
+#[wasm_bindgen]
+pub fn media_a1111_img2img_body(req_json: &str) -> String {
+    result_json(&parse_media_request(req_json).map(|req| media::a1111_img2img_body(&req)))
+}
+
+/// Build a ComfyUI API-format workflow graph. `checkpoint` is the filename
+/// discovered from `/object_info`; the core fills in every other node.
+#[wasm_bindgen]
+pub fn media_comfyui_workflow(req_json: &str, checkpoint: &str) -> String {
+    result_json(
+        &parse_media_request(req_json)
+            .map(|req| media::comfyui_workflow_body(&req, checkpoint)),
+    )
+}
+
+/// Render an image through the deterministic in-process preview engine.
+/// Returns a PNG `data:` URL so no host-side image encoding is needed.
+#[wasm_bindgen]
+pub fn media_native_png_data_url(req_json: &str) -> String {
+    result_json(
+        &parse_media_request(req_json)
+            .and_then(|req| prism_core::native_sd::png_data_url(&req)),
+    )
+}
+
+/// Extract the first generated image from an A1111 JSON response.
+#[wasm_bindgen]
+pub fn media_parse_a1111_image(body: &str) -> String {
+    result_json(&media::parse_a1111_image(body))
+}
+
+/// Every image in an A1111 response, in batch order.
+#[wasm_bindgen]
+pub fn media_parse_a1111_images(body: &str) -> String {
+    result_json(&media::a1111_images(body))
+}
+
+/// Extract a ready URL from a provider's JSON response.
+#[wasm_bindgen]
+pub fn media_parse_media_url(body: &str) -> String {
+    result_json(&media::parse_media_url(body))
+}
+
+/// Extract a polling task id from a provider's JSON response.
+#[wasm_bindgen]
+pub fn media_parse_task_id(body: &str) -> String {
+    result_json(&media::parse_task_id(body))
+}
+
+/// ComfyUI history entry: `[filename, subfolder, type]`.
+#[wasm_bindgen]
+pub fn media_comfyui_output_from_history(body: &str) -> String {
+    result_json(&media::comfyui_output_from_history(body))
+}
+
+#[wasm_bindgen]
+pub fn media_comfyui_image_from_history(body: &str) -> String {
+    result_json(&media::comfyui_image_from_history(body))
+}
+
+#[wasm_bindgen]
+pub fn media_default_base_url(provider: &str) -> String {
+    media::default_base_url(provider).to_string()
+}
+
+#[wasm_bindgen]
+pub fn media_is_async_provider(provider: &str) -> bool {
+    media::is_async_provider(provider)
+}
+
 // ---- agent loop (extension system) ------------------------------------
 
 use prism_core::agent::{run_with_strategy, AgentResult, AgentStrategy, Permission, StepMessage, ToolRegistry};

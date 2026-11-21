@@ -30,6 +30,9 @@
       "@prism/shared-db": [
         "../../libs/shared-db/src/index.ts"
       ],
+      "@prism/shared-types": [
+        "../../libs/shared-types/src/index.ts"
+      ],
       "@prism/image-gen": [
         "../../libs/image-gen/src/index.ts"
       ],
@@ -58,6 +61,8 @@
     "../../apps/web/.next/types/**/*.ts",
     "../../dist/apps/web/.next/types/**/*.ts",
     "next-env.d.ts",
+    "app/**/*.ts",
+    "app/**/*.tsx",
     "src/**/*.js",
     "src/**/*.jsx",
     "src/**/*.ts",

@@ -11,15 +11,10 @@ import { UnifiedAIClient } from '@prism/api-client';
 import {
   saveChatHistory,
   loadChatHistory,
-  getChatSessions,
-  deleteChatSession,
   setCache,
   getCache,
-  ChatSession,
   savePromptShortcut,
   getPromptShortcuts,
-  deletePromptShortcut,
-  PromptShortcut
 } from '@prism/shared-db';
 import { ImageGenerationService } from '@prism/image-gen';
 import type { Message, ContextData, AIConfig } from '@prism/shared-types';
@@ -27,7 +22,7 @@ import {
   setMessages,
   addMessage,
   setLoading,
-  setCurrentSessionId,
+  setSessions,
   setAIConfig,
   updateAIConfig,
   RootState
@@ -47,7 +42,7 @@ export default function ChatPage() {
   const dispatch = useDispatch();
   const { messages, loading, currentSessionId } = useSelector((state: RootState) => state.chat);
   const { config: aiConfig } = useSelector((state: RootState) => state.aiConfig);
-  const { user, isAuthenticated, loading: authLoading, signInWithGoogle, signOut } = useAuth();
+  const { user, isAuthenticated, signInWithGoogle, signOut } = useAuth();
   const [input, setInput] = useState('');
 
   // Image generation state
@@ -185,11 +180,6 @@ export default function ChatPage() {
     }
   };
 
-  const saveImageGenerationConfig = () => {
-    localStorage.setItem('imageGenApiKey', imageGenerationApiKey);
-    localStorage.setItem('imageGenModel', imageGenerationModel);
-  };
-
   const handleUpdateAIConfig = (config: AIConfig) => {
     dispatch(updateAIConfig(config));
     localStorage.setItem('aiConfig', JSON.stringify(config));
@@ -254,7 +244,7 @@ export default function ChatPage() {
       const errorMessage: Message = {
         id: `error-${Date.now()}`,
         role: 'assistant',
-        content: `Error: ${error.message || 'Failed to connect to AI service'}`,
+        content: `Error: ${(error as Error).message || 'Failed to connect to AI service'}`,
         timestamp: Date.now()
       };
       dispatch(addMessage(errorMessage));
@@ -314,6 +304,7 @@ export default function ChatPage() {
       clearInterval(syncIntervalId);
       setSyncIntervalId(null);
     }
+    return undefined;
   }, [autoSyncEnabled, messages]);
 
   const toggleAutoSync = () => {
@@ -436,7 +427,7 @@ export default function ChatPage() {
           <label className="block text-sm font-medium mb-1">AI Provider</label>
             <select
               value={aiConfig.provider}
-              onChange={(e) => handleUpdateAIConfig({ provider: e.target.value as any })}
+              onChange={(e) => handleUpdateAIConfig({ ...aiConfig, provider: e.target.value as AIConfig['provider'] })}
               className="w-full p-2 border rounded"
             >
               <option value="prism-api">Prism API</option>
@@ -469,7 +460,7 @@ export default function ChatPage() {
               <input
                 type="password"
                 value={aiConfig.apiKey || ''}
-                onChange={(e) => handleUpdateAIConfig({ apiKey: e.target.value })}
+                onChange={(e) => handleUpdateAIConfig({ ...aiConfig, apiKey: e.target.value })}
                 placeholder={`Enter ${aiConfig.provider} API key`}
                 className="w-full p-2 border rounded"
               />
@@ -480,7 +471,7 @@ export default function ChatPage() {
               <input
                 type="text"
                 value={aiConfig.model || ''}
-                onChange={(e) => handleUpdateAIConfig({ model: e.target.value })}
+                onChange={(e) => handleUpdateAIConfig({ ...aiConfig, model: e.target.value })}
                 placeholder="e.g., gpt-3.5-turbo, gemini-pro, qwen-max"
                 className="w-full p-2 border rounded"
               />
@@ -494,7 +485,7 @@ export default function ChatPage() {
             <input
               type="text"
               value={aiConfig.apiUrl || ''}
-              onChange={(e) => handleUpdateAIConfig({ apiUrl: e.target.value })}
+              onChange={(e) => handleUpdateAIConfig({ ...aiConfig, apiUrl: e.target.value })}
               placeholder="Enter Prism API URL"
               className="w-full p-2 border rounded"
             />
@@ -601,8 +592,10 @@ export default function ChatPage() {
              <ReactMarkdown
                remarkPlugins={[remarkGfm]}
                components={{
-                 code({node, inline, className, children, ...props}) {
+                 code({className, children, ...props}) {
                    const match = /language-(\w+)/.exec(className || '');
+                   // react-markdown 9 dropped the `inline` prop; a language class marks a block.
+                   const inline = !match;
                    if (!inline && match && match[1] === 'mermaid') {
                      return (
                        <div className="mermaid-container my-2 p-4 bg-gray-800 rounded-lg border border-gray-600 overflow-x-auto">

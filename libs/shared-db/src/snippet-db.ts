@@ -82,7 +82,7 @@ async function mirrorToChromeStorage(snippets: Snippet[]): Promise<void> {
   }
 
   try {
-    await globalThis.chrome.storage.local.set({
+    await (globalThis as any).chrome.storage.local.set({
       [SNIPPETS_STORAGE_KEY]: snippets,
     });
   } catch (error) {
@@ -102,7 +102,7 @@ export async function getMirroredSnippets(): Promise<Snippet[]> {
   }
 
   try {
-    const result = await globalThis.chrome.storage.local.get([
+    const result = await (globalThis as any).chrome.storage.local.get([
       SNIPPETS_STORAGE_KEY,
     ]);
     const snippets = result[SNIPPETS_STORAGE_KEY];
@@ -222,7 +222,7 @@ async function mirrorHotkeys(bindings: HotkeyBinding[]): Promise<void> {
   }
 
   try {
-    await globalThis.chrome.storage.local.set({
+    await (globalThis as any).chrome.storage.local.set({
       [HOTKEYS_STORAGE_KEY]: bindings,
     });
   } catch (error) {
@@ -237,7 +237,7 @@ export async function getMirroredHotkeys(): Promise<HotkeyBinding[]> {
   }
 
   try {
-    const result = await globalThis.chrome.storage.local.get([
+    const result = await (globalThis as any).chrome.storage.local.get([
       HOTKEYS_STORAGE_KEY,
     ]);
     const bindings = result[HOTKEYS_STORAGE_KEY];

@@ -35,7 +35,8 @@ pub enum MediaKind {
 /// One shape covers all four capabilities: the fields that do not apply to
 /// a capability are simply not set. This keeps one transport path and one
 /// result type instead of four near-identical ones.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct MediaRequest {
     /// Provider id (`stability`, `runway`, `meshy`, …).
     pub provider: String,
@@ -465,28 +466,44 @@ pub fn a1111_img2img_body(req: &MediaRequest) -> serde_json::Value {
     body
 }
 
-/// Pull the first image out of an A1111 response (`{"images": [b64]}`)
-/// and wrap it in a data URL like the remote providers return.
-pub fn parse_a1111_image(text: &str) -> Result<String, String> {
+/// Pull every image out of an A1111 response (`{"images": [b64]}`) and
+/// wrap each in a data URL, preserving batch order.
+pub fn a1111_images(text: &str) -> Result<Vec<String>, String> {
     let v: serde_json::Value =
         serde_json::from_str(text).map_err(|e| format!("invalid JSON: {e}"))?;
-    let image = v
+    let images: Vec<String> = v
         .get("images")
         .and_then(|i| i.as_array())
-        .and_then(|items| items.first())
-        .and_then(|item| item.as_str())
-        .unwrap_or("");
-    if image.is_empty() {
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .filter(|image| !image.is_empty())
+                .map(|image| {
+                    if image.starts_with("data:") {
+                        image.to_string()
+                    } else {
+                        format!("data:image/png;base64,{image}")
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if images.is_empty() {
         return Err(format!(
             "no image in A1111 response: {}",
             truncate(text, 200)
         ));
     }
-    if image.starts_with("data:") {
-        Ok(image.to_string())
-    } else {
-        Ok(format!("data:image/png;base64,{image}"))
-    }
+    Ok(images)
+}
+
+/// Pull the first image out of an A1111 response.
+pub fn parse_a1111_image(text: &str) -> Result<String, String> {
+    a1111_images(text)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| format!("no image in A1111 response: {}", truncate(text, 200)))
 }
 
 /// The default filename prefix ComfyUI's SaveImage node writes under.

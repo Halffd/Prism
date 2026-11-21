@@ -114,6 +114,65 @@ fn settings_fixtures_normalize_to_expected() {
     }
 }
 
+// Plain #[test] so the bridge is exercised by `cargo test` on native hosts
+// too; the bindings are ordinary Rust functions returning JSON strings.
+#[test]
+fn media_bindings_build_and_parse_without_host_logic() {
+    let defaults: Value = serde_json::from_str(&prism_wasm::media_defaults()).unwrap();
+    assert_eq!(defaults["steps"], 20);
+    assert_eq!(defaults["cfg"], 7.0);
+    assert_eq!(defaults["sampler"], "euler");
+    assert_eq!(defaults["maxBatch"], 8);
+    assert_eq!(defaults["providers"]["native"], "native");
+
+    let req = serde_json::json!({
+        "provider": "a1111",
+        "base_url": "http://127.0.0.1:7861",
+        "prompt": "a red fox",
+        "negative_prompt": "blur",
+        "model": "v1-5.safetensors",
+        "vae": "kl-f8",
+        "clip_skip": 2,
+        "steps": 12,
+        "cfg": 5.5,
+        "sampler": "dpmpp_2m",
+        "scheduler": "karras",
+        "seed": 42,
+        "batch": 2,
+        "width": 512,
+        "height": 768,
+        "loras": [{ "name": "detail.safetensors", "weight": 0.75 }],
+    });
+    let wrapped: Value =
+        serde_json::from_str(&prism_wasm::media_a1111_body(&req.to_string())).unwrap();
+    let body = wrapped["Ok"].as_object().expect("A1111 body");
+    assert_eq!(body["steps"], 12);
+    assert_eq!(body["cfg_scale"], 5.5);
+    assert_eq!(body["width"], 512);
+    assert_eq!(body["height"], 768);
+    assert_eq!(body["batch_size"], 2);
+    assert_eq!(body["sampler_name"], "DPM++ 2M Karras");
+    assert_eq!(body["seed"], 42);
+    assert_eq!(body["override_settings"]["sd_model_checkpoint"], "v1-5.safetensors");
+    assert_eq!(body["override_settings"]["sd_vae"], "kl-f8");
+    assert_eq!(body["override_settings"]["CLIP_stop_at_last_layers"], 2);
+    assert!(body["prompt"].as_str().unwrap().contains("<lora:detail.safetensors:0.75>"));
+
+    let rendered: Value =
+        serde_json::from_str(&prism_wasm::media_native_png_data_url(&req.to_string())).unwrap();
+    let url = rendered["Ok"].as_str().expect("native PNG url");
+    assert!(url.starts_with("data:image/png;base64,"), "{url}");
+
+    let parsed: Value =
+        serde_json::from_str(&prism_wasm::media_parse_a1111_image(r#"{"images":["QUJD"]}"#))
+            .unwrap();
+    assert_eq!(parsed["Ok"], "data:image/png;base64,QUJD");
+
+    let invalid: Value =
+        serde_json::from_str(&prism_wasm::media_a1111_body("{not json")).unwrap();
+    assert!(invalid["Err"].is_string());
+}
+
 #[wasm_bindgen_test]
 fn providers_and_defaults_are_sane() {
     let providers: Value = serde_json::from_str(&prism_wasm::providers_json()).unwrap();

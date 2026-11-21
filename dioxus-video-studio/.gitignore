@@ -1,6 +1,0 @@
-/target
-/dist
-/node_modules
-# This crate is a workspace member; the authoritative lockfile lives at the repo root.
-/Cargo.lock
-.DS_Store
