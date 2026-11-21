@@ -1,20 +1,20 @@
-import {
-  CORE_PROVIDER_IDS,
-  loadCore,
-  providerTable,
-  type CoreProvider,
-} from '@prism/ai-core';
+import { CORE_PROVIDER_IDS } from '../generated/core-providers';
+import { loadCore, providerTable, type CoreProvider } from '@prism/ai-core';
 
 /**
  * The provider catalogue used by the extension's selectors.
  *
- * The ids come from the shared core table (`CORE_PROVIDER_IDS`), so the
- * popup cannot drift away from the providers the core actually knows how
- * to talk to. A handful of providers the extension supports but the core
- * does not compile a body for (Anthropic's native API, the hosted Prism
- * API, Poe, Cloudflare Workers, Z.AI and the in-browser transformers
- * runtime) are appended here — the list lives in one shared module, not
- * duplicated as `<option>` elements in a component.
+ * The core-table ids come from the generated snapshot
+ * (`../generated/core-providers`), which `scripts/generate-core-providers.mjs`
+ * produces by running prism-core's own `providers_json()` export. That
+ * keeps the popup's first-paint list in sync with the core without a
+ * hand-maintained copy.
+ *
+ * A handful of providers the extension supports but the core does not
+ * compile a body for (Anthropic's native API, the hosted Prism API, Poe,
+ * Cloudflare Workers, Z.AI and the in-browser transformers runtime) are
+ * appended here — the list lives in one shared module, not duplicated
+ * as `<option>` elements in a component.
  */
 
 export interface ProviderOption {

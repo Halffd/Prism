@@ -328,26 +328,18 @@ export function parseModels(core: WasmCore, body: string): string[] {
 
 // A custom provider is a base URL that
 // aliases a built-in: same body shape, different endpoint + key. The
-// core already builds the body; the host only needs the resolution:
-export const CORE_PROVIDER_IDS: string[] = [
-  'openai',
-  'gemini',
-  'qwen',
-  'deepseek',
-  'groq',
-  'openrouter',
-  'mistral',
-  'grok',
-  'nvidia-nim',
-  'cerebras',
-  'together',
-  'fireworks',
-  'perplexity',
-  'ollama',
-  'llamacpp',
-  'koboldcpp',
-  'sglang',
-];
+// core already builds the body; the host only needs the resolution.
+//
+// There is deliberately no copy of the provider-id list in this file.
+// The table lives once, in Rust (`providers.rs` -> `PROVIDERS`), and
+// every reader below goes through `providerTable()` -> `providers_json()`.
+// A hand-maintained TypeScript copy drifts whenever the core gains a
+// provider, and nothing catches it.
+//
+// Hosts that need the ids before the wasm loads (the extension's first
+// paint) read the generated snapshot at
+// `apps/extension/src/generated/core-providers.ts`, produced by
+// `scripts/generate-core-providers.mjs` from this same export.
 
 /** Stable id for a custom endpoint (aliasing a canonical provider). */
 export function customProviderId(canonical: string, baseUrl: string): string {

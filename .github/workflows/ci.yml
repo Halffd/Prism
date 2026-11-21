@@ -195,6 +195,13 @@ jobs:
       - name: Build core wasm (web)
         run: wasm-pack build --target web --out-dir ../../libs/ai-core/src/wasm-pkg-web crates/prism-wasm
 
+      - name: Check core provider snapshot is current
+        # The extension's offline provider list is generated from the
+        # core's own table (scripts/generate-core-providers.mjs). This
+        # fails when the core gained a provider and the snapshot was
+        # not regenerated, which is exactly the drift it exists to stop.
+        run: node scripts/generate-core-providers.mjs --check
+
       - name: Build extension
         # Plain vite: nx's tsconfig-paths plugin walks every linked git
         # worktree, so a stale tsconfig in another worktree breaks the
