@@ -1,0 +1,25 @@
+[package]
+name = "prism-native-server"
+version = "0.1.0"
+edition = "2021"
+description = "Rust-native local chat and image generation server"
+
+# A local backend that speaks A1111's `sdapi/v1` image wire format plus
+# OpenAI-compatible `/v1` and Ollama-native `/api` chat wire formats, all
+# running in Rust with no Python and no external service. Point Prism chat
+# at `http://127.0.0.1:7861/v1` with provider `local`, or the media panel
+# at `http://127.0.0.1:7861` with provider `a1111`.
+
+[dependencies]
+# Rendering only: the HTTP server uses std, so no native transport.
+prism-core = { path = "../../crates/prism-core", default-features = false }
+serde_json = { workspace = true }
+
+[features]
+default = []
+# Opt into real Stable Diffusion weights. Without this the server uses the
+# deterministic in-process preview renderer for images.
+candle-sd = ["prism-core/candle-sd"]
+# Opt into real quantized chat models. Without this the server uses the
+# deterministic in-process preview engine for chat.
+candle-llm = ["prism-core/candle-llm"]

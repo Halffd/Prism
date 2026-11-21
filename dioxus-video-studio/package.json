@@ -1,0 +1,12 @@
+{
+  "name": "video-studio-ui",
+  "private": true,
+  "description": "Tailwind CSS tooling for the Dioxus Video Studio dashboard",
+  "scripts": {
+    "css": "tailwindcss -i src/tailwind.css -o public/tailwind.css --minify",
+    "css:watch": "tailwindcss -i src/tailwind.css -o public/tailwind.css --watch"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.0.0"
+  }
+}

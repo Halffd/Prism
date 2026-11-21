@@ -1,6 +1,21 @@
 [workspace]
 resolver = "2"
-members = ["crates/prism-core", "crates/prism-wasm", "apps/slint", "apps/cli"]
+# `video-studio` (dioxus-video-studio/) is a full member (shared lock +
+# target dir, workspace deps, path deps). It is excluded from
+# default-members only because it is a web-only crate: its `web-sys`
+# dependencies exist solely for the wasm32 target, so native root
+# builds would fail. Check it explicitly:
+#   cargo check -p video-studio --target wasm32-unknown-unknown
+# (trunk serve/build inside dioxus-video-studio/ works as usual)
+default-members = ["crates/prism-core", "crates/prism-wasm", "apps/slint", "apps/cli", "apps/native-server"]
+members = [
+    "crates/prism-core",
+    "crates/prism-wasm",
+    "apps/slint",
+    "apps/cli",
+    "apps/native-server",
+    "dioxus-video-studio",
+]
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

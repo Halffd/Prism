@@ -38,6 +38,172 @@ export struct TreeRow {
     depth: int,
 }
 
+// Video studio: a model card is one selectable engine; a tile is one
+// finished clip in the workspace grid. Gradient colors are derived in
+// Rust from the model's hue (Slint has no hsl()).
+export struct StudioModel {
+    name: string,
+    spec: string,     // "480-4k | 4-30s"
+    features: string, // "Reference · Start-End · Audio"
+    badge: string,    // "" | "Top pick" | "Fast" | "New"
+    c1: color,
+    c2: color,
+}
+
+export struct StudioTile {
+    title: string,
+    ratio: string,
+    res: string,
+    dur: string,
+    model: string,
+    c1: color,
+    c2: color,
+}
+
+// Image studio: one finished image in the result grid (pixels for the
+// native renderer / decoded data URLs; `image` is empty for remote
+// URL-only tiles), and one LoRA adapter row in the panel.
+export struct ImageTileUi {
+    image: image,
+    label: string,
+    url: string,
+}
+
+export struct ImageLoraRow {
+    name: string,
+    weight: string,
+}
+
+// One finished clip in the workspace list: vibe gradient thumbnail
+// with a play glyph, title, spec line, model in the studio purple.
+component TileCard inherits Rectangle {
+    in property <StudioTile> tile;
+    height: 76px;
+    background: #161616;
+    border-width: 1px;
+    border-color: #333333;
+    border-radius: 8px;
+    clip: true;
+    HorizontalLayout {
+        padding: 6px;
+        spacing: 8px;
+        Rectangle {
+            width: 64px;
+            background: @linear-gradient(140deg, tile.c1, tile.c2);
+            border-radius: 6px;
+            clip: true;
+            Text {
+                text: "▶";
+                color: rgba(255, 255, 255, 0.9);
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        VerticalLayout {
+            spacing: 2px;
+            Text {
+                text: tile.title;
+                color: #ffffff;
+                font-size: 11px;
+                overflow: elide;
+            }
+            Text {
+                text: tile.ratio + " · " + tile.res + " · " + tile.dur;
+                color: #a3a3a3;
+                font-size: 9px;
+            }
+            Text {
+                text: tile.model;
+                color: #c084fc;
+                font-size: 9px;
+            }
+        }
+    }
+}
+
+// Image studio: a node-style parameter group (ComfyUI's node bodies).
+component NodeSection inherits Rectangle {
+    in property <string> title;
+    background: #141414;
+    border-width: 1px;
+    border-color: #2c2c2c;
+    border-radius: 8px;
+    VerticalLayout {
+        padding: 8px;
+        spacing: 6px;
+        Text {
+            text: title;
+            color: #c084fc;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 1px;
+        }
+        @children
+    }
+}
+
+// A − value + stepper for integer knobs (batch size, CLIP skip).
+component IntStepper inherits Rectangle {
+    in property <int> value;
+    in property <int> min: 1;
+    in property <int> max: 8;
+    callback changed(int); // +/- 1
+    height: 24px;
+    HorizontalLayout {
+        spacing: 4px;
+        Rectangle {
+            width: 26px;
+            background: value > min ? #1e1e1e : #161616;
+            border-width: 1px;
+            border-color: #333333;
+            border-radius: 6px;
+            TouchArea {
+                enabled: value > min;
+                clicked => { changed(-1); }
+                mouse-cursor: pointer;
+            }
+            Text {
+                text: "−";
+                color: value > min ? #ffffff : #555555;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+            background: #1e1e1e;
+            border-width: 1px;
+            border-color: #333333;
+            border-radius: 6px;
+            Text {
+                text: "\{value}";
+                color: #ffffff;
+                font-size: 11px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        Rectangle {
+            width: 26px;
+            background: value < max ? #1e1e1e : #161616;
+            border-width: 1px;
+            border-color: #333333;
+            border-radius: 6px;
+            TouchArea {
+                enabled: value < max;
+                clicked => { changed(1); }
+                mouse-cursor: pointer;
+            }
+            Text {
+                text: "+";
+                color: value < max ? #ffffff : #555555;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     title: "Prism";
     preferred-width: 1150px;
@@ -152,10 +318,49 @@ export component AppWindow inherits Window {
     in-out property <string> media-duration;
     in-out property <string> media-seed;
     in-out property <string> media-format;
+    // Overrides the provider's default base URL (local installs on a
+    // non-default port).
+    in-out property <string> media-base-url;
     in property <string> media-status;
     in property <string> media-result-url;
     in property <bool> media-busy: false;
     in property <bool> media-pending: false;
+    // ---- video studio (surface mode 3) ----
+    in property <[StudioModel]> studio-models;
+    in-out property <int> studio-model-idx: 0;
+    in property <[StudioTile]> studio-tiles;
+    in-out property <string> studio-prompt;
+    in-out property <int> studio-quantity: 1;
+    in-out property <int> studio-aspect-idx: 0;
+    in-out property <int> studio-res-idx: 0;
+    in-out property <int> studio-dur-idx: 0;
+    in property <bool> studio-busy: false;
+    in property <string> studio-status;
+    // ---- image studio (surface mode 4) ----
+    in property <[string]> image-provider-labels;
+    in-out property <int> image-provider-idx: 0;
+    in property <string> image-provider;
+    in property <[string]> image-sampler-labels;
+    in-out property <int> image-sampler-idx: 0;
+    in property <[string]> image-scheduler-labels;
+    in-out property <int> image-scheduler-idx: 0;
+    in property <[ImageLoraRow]> image-loras;
+    in property <[ImageTileUi]> image-tiles;
+    in-out property <string> image-prompt;
+    in-out property <string> image-negative;
+    in-out property <string> image-model;
+    in-out property <string> image-vae;
+    in-out property <int> image-clip-skip: 1;
+    in-out property <float> image-steps: 20;
+    in-out property <float> image-cfg: 7;
+    in-out property <float> image-denoise: 1;
+    in-out property <string> image-seed;
+    in-out property <int> image-batch: 1;
+    in-out property <string> image-width;
+    in-out property <string> image-height;
+    in-out property <string> image-base-url;
+    in property <bool> image-busy: false;
+    in property <string> image-status;
     // ---- IDE (three surface modes, like Cursor's composer toggles) ----
     // 0 = Chat, 1 = Agent (input drives the agent loop), 2 = IDE
     // (workspace editor + the agent in a sidebar column).
@@ -236,6 +441,25 @@ export component AppWindow inherits Window {
     callback media-provider-selected(int);
     callback media-generate();
     callback media-poll();
+    // ---- studio ----
+    callback studio-select-model(int);
+    callback studio-quantity-step(int); // +1 / -1
+    callback studio-generate();
+    callback studio-aspect-selected(int);
+    callback studio-res-selected(int);
+    callback studio-dur-selected(int);
+    // ---- image studio ----
+    callback image-provider-selected(int);
+    callback image-sampler-selected(int);
+    callback image-scheduler-selected(int);
+    callback image-generate();
+    callback image-seed-random();
+    callback image-batch-step(int);      // +1 / -1
+    callback image-clip-step(int);       // +1 / -1
+    callback image-lora-add();
+    callback image-lora-remove(int);     // row index
+    callback image-lora-name-edited(int, string);
+    callback image-lora-weight-edited(int, string);
     // ---- IDE ----
     callback mode-selected(int);       // Chat(0) / Agent(1) / IDE(2)
     callback workspace-open(string);   // workspace root (from the palette query)
@@ -251,6 +475,9 @@ export component AppWindow inherits Window {
     changed temperature => { temperature-edited(self.temperature); }
     changed media-kind-idx => { media-kind-selected(self.media-kind-idx); }
     changed media-provider-idx => { media-provider-selected(self.media-provider-idx); }
+    changed image-provider-idx => { image-provider-selected(self.image-provider-idx); }
+    changed image-sampler-idx => { image-sampler-selected(self.image-sampler-idx); }
+    changed image-scheduler-idx => { image-scheduler-selected(self.image-scheduler-idx); }
 
     scroll-to-end => {
         list.content-y = list.height - list.content-height;
@@ -404,10 +631,10 @@ export component AppWindow inherits Window {
                 // the plain client, Agent routes the composer into the
                 // agent loop, IDE puts the workspace editor beside it.
                 Rectangle {
-                    width: 210px;
+                    width: 352px;
                     HorizontalLayout {
                         spacing: 2px;
-                        for m[i] in ["Chat", "Agent", "IDE"] : Rectangle {
+                        for m[i] in ["Chat", "Agent", "IDE", "Studio", "Image"] : Rectangle {
                             height: 26px;
                             HorizontalLayout {
                                 padding-left: 8px;
@@ -531,7 +758,12 @@ export component AppWindow inherits Window {
                 // Chat mode it is the whole surface; in Agent mode the
                 // composer routes into the agent loop; in IDE mode it
                 // becomes Cursor-style agent sidebar beside the editor.
+                // Studio (3) and Image (4) modes replace it with their
+                // generation surfaces.
+                // (visible:, not if — the root scroll-to-end handler
+                // reaches into this layout for `list`.)
                 VerticalLayout {
+                    visible: ui-mode != 3 && ui-mode != 4;
                     horizontal-stretch: 2;
                     spacing: 4px;
             if transcript.length == 0 : Text {
@@ -652,6 +884,902 @@ export component AppWindow inherits Window {
                     }
                 }
             }
+                }
+
+                // ---- video studio surface (mode 3) ----
+                // Freepik-style: a linear generation panel beside a
+                // workspace grid, in the studio purple no other surface
+                // uses. State lives in shared/studio.rs.
+                if ui-mode == 3 : HorizontalLayout {
+                    spacing: 8px;
+
+                    // ---- generation panel ----
+                    Rectangle {
+                        width: 320px;
+                        background: #161616;
+                        border-width: 1px;
+                        border-color: #333333;
+                        border-radius: 10px;
+                        clip: true;
+                        ScrollView {
+                            VerticalLayout {
+                                padding: 10px;
+                                spacing: 8px;
+
+                                Text { text: "Video Studio"; color: #ffffff; font-size: 16px; font-weight: 700; }
+                                Text { text: "Unrestricted — no credits, no limits."; color: #a3a3a3; font-size: 10px; }
+
+                                Text { text: "Mode"; color: #a3a3a3; font-size: 11px; }
+                                ComboBox {
+                                    model: ["Text to Video", "Image to Video", "First & Last Frame", "Lip Sync"];
+                                }
+
+                                // Model choice as shopping: card list with
+                                // vibe thumbnails, spec lines and chips.
+                                Text { text: "Model"; color: #a3a3a3; font-size: 11px; }
+                                for m[i] in studio-models : Rectangle {
+                                    height: 78px;
+                                    background: studio-model-idx == i ? #1e1e1e : transparent;
+                                    border-width: 1px;
+                                    border-color: studio-model-idx == i ? #b026ff : #333333;
+                                    border-radius: 8px;
+                                    TouchArea {
+                                        clicked => { studio-select-model(i); }
+                                        mouse-cursor: pointer;
+                                    }
+                                    HorizontalLayout {
+                                        padding: 8px;
+                                        spacing: 8px;
+                                        Rectangle {
+                                            width: 44px;
+                                            background: @linear-gradient(140deg, m.c1, m.c2);
+                                            border-radius: 6px;
+                                            clip: true;
+                                            Text {
+                                                text: "▶";
+                                                color: rgba(255, 255, 255, 0.85);
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                        VerticalLayout {
+                                            spacing: 2px;
+                                            HorizontalLayout {
+                                                spacing: 6px;
+                                                Text {
+                                                    text: m.name;
+                                                    color: #ffffff;
+                                                    font-size: 12px;
+                                                    font-weight: 700;
+                                                    vertical-alignment: center;
+                                                    overflow: elide;
+                                                    horizontal-stretch: 1;
+                                                }
+                                                if m.badge != "" : Rectangle {
+                                                    width: badge-t.preferred-width + 10px;
+                                                    height: 15px;
+                                                    background: m.badge == "New" ? rgba(176, 38, 255, 0.22) : rgba(255, 255, 255, 0.08);
+                                                    border-width: 1px;
+                                                    border-color: m.badge == "New" ? rgba(176, 38, 255, 0.5) : rgba(255, 255, 255, 0.15);
+                                                    border-radius: 7px;
+                                                    badge-t := Text {
+                                                        text: m.badge;
+                                                        color: m.badge == "New" ? #d9b3ff : #a3a3a3;
+                                                        font-size: 8px;
+                                                        font-weight: 700;
+                                                        horizontal-alignment: center;
+                                                        vertical-alignment: center;
+                                                    }
+                                                }
+                                            }
+                                            Text { text: m.spec; color: #a3a3a3; font-size: 10px; }
+                                            Text { text: m.features; color: #c084fc; font-size: 9px; }
+                                        }
+                                        if studio-model-idx == i : Text {
+                                            text: "✓";
+                                            color: #b026ff;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+
+                                Text { text: "Prompt"; color: #a3a3a3; font-size: 11px; }
+                                TextEdit {
+                                    height: 64px;
+                                    text <=> studio-prompt;
+                                    placeholder-text: "Describe your video…";
+                                }
+
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    VerticalLayout {
+                                        spacing: 2px;
+                                        Text { text: "Quantity"; color: #a3a3a3; font-size: 11px; }
+                                        HorizontalLayout {
+                                            spacing: 4px;
+                                            Rectangle {
+                                                width: 26px;
+                                                height: 24px;
+                                                background: studio-quantity > 1 ? #1e1e1e : #161616;
+                                                border-width: 1px;
+                                                border-color: #333333;
+                                                border-radius: 6px;
+                                                TouchArea {
+                                                    enabled: studio-quantity > 1;
+                                                    clicked => { studio-quantity-step(-1); }
+                                                    mouse-cursor: pointer;
+                                                }
+                                                Text {
+                                                    text: "−";
+                                                    color: studio-quantity > 1 ? #ffffff : #555555;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                            Rectangle {
+                                                horizontal-stretch: 1;
+                                                height: 24px;
+                                                background: #1e1e1e;
+                                                border-width: 1px;
+                                                border-color: #333333;
+                                                border-radius: 6px;
+                                                Text {
+                                                    text: "\{studio-quantity} / 8";
+                                                    color: #ffffff;
+                                                    font-size: 11px;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                            Rectangle {
+                                                width: 26px;
+                                                height: 24px;
+                                                background: studio-quantity < 8 ? #1e1e1e : #161616;
+                                                border-width: 1px;
+                                                border-color: #333333;
+                                                border-radius: 6px;
+                                                TouchArea {
+                                                    enabled: studio-quantity < 8;
+                                                    clicked => { studio-quantity-step(1); }
+                                                    mouse-cursor: pointer;
+                                                }
+                                                Text {
+                                                    text: "+";
+                                                    color: studio-quantity < 8 ? #ffffff : #555555;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        spacing: 2px;
+                                        Text { text: "Aspect"; color: #a3a3a3; font-size: 11px; }
+                                        HorizontalLayout {
+                                            spacing: 4px;
+                                            for a[i] in ["16:9", "9:16", "1:1"] : Rectangle {
+                                                width: 34px;
+                                                height: 24px;
+                                                background: studio-aspect-idx == i ? rgba(176, 38, 255, 0.28) : #1e1e1e;
+                                                border-width: 1px;
+                                                border-color: studio-aspect-idx == i ? #b026ff : #333333;
+                                                border-radius: 5px;
+                                                TouchArea {
+                                                    clicked => { studio-aspect-selected(i); }
+                                                    mouse-cursor: pointer;
+                                                }
+                                                Text {
+                                                    text: a;
+                                                    color: studio-aspect-idx == i ? #ffffff : #a3a3a3;
+                                                    font-size: 9px;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    VerticalLayout {
+                                        spacing: 2px;
+                                        Text { text: "Resolution"; color: #a3a3a3; font-size: 11px; }
+                                        HorizontalLayout {
+                                            spacing: 4px;
+                                            for r[i] in ["480p", "720p", "1080p"] : Rectangle {
+                                                width: 38px;
+                                                height: 24px;
+                                                background: studio-res-idx == i ? rgba(176, 38, 255, 0.28) : #1e1e1e;
+                                                border-width: 1px;
+                                                border-color: studio-res-idx == i ? #b026ff : #333333;
+                                                border-radius: 5px;
+                                                TouchArea {
+                                                    clicked => { studio-res-selected(i); }
+                                                    mouse-cursor: pointer;
+                                                }
+                                                Text {
+                                                    text: r;
+                                                    color: studio-res-idx == i ? #ffffff : #a3a3a3;
+                                                    font-size: 9px;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        spacing: 2px;
+                                        Text { text: "Duration"; color: #a3a3a3; font-size: 11px; }
+                                        HorizontalLayout {
+                                            spacing: 4px;
+                                            for d[i] in ["5s", "10s"] : Rectangle {
+                                                width: 30px;
+                                                height: 24px;
+                                                background: studio-dur-idx == i ? rgba(176, 38, 255, 0.28) : #1e1e1e;
+                                                border-width: 1px;
+                                                border-color: studio-dur-idx == i ? #b026ff : #333333;
+                                                border-radius: 5px;
+                                                TouchArea {
+                                                    clicked => { studio-dur-selected(i); }
+                                                    mouse-cursor: pointer;
+                                                }
+                                                Text {
+                                                    text: d;
+                                                    color: studio-dur-idx == i ? #ffffff : #a3a3a3;
+                                                    font-size: 9px;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Generate — big, purple, unmissable.
+                                Rectangle {
+                                    height: 40px;
+                                    background: @linear-gradient(90deg, #9d50bb, #6e48aa);
+                                    border-radius: 10px;
+                                    drop-shadow-blur: 14px;
+                                    drop-shadow-color: rgba(176, 38, 255, 0.35);
+                                    TouchArea {
+                                        enabled: !studio-busy;
+                                        clicked => { studio-generate(); }
+                                        mouse-cursor: pointer;
+                                    }
+                                    Text {
+                                        text: studio-busy ? "Generating…" : "Generate";
+                                        color: #ffffff;
+                                        font-size: 13px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                if studio-status != "" : Text {
+                                    text: studio-status;
+                                    color: #a3a3a3;
+                                    font-size: 10px;
+                                    wrap: word-wrap;
+                                }
+                            }
+                        }
+                    }
+
+                    // ---- workspace ----
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        background: #0d0d0d;
+                        border-width: 1px;
+                        border-color: #333333;
+                        border-radius: 10px;
+                        clip: true;
+                        VerticalLayout {
+                            spacing: 8px;
+
+                            Rectangle {
+                                height: 34px;
+                                background: #161616;
+                                border-radius: 10px;
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 10px;
+                                    spacing: 10px;
+                                    Text { text: "Unsorted"; color: #ffffff; font-size: 12px; font-weight: 700; vertical-alignment: center; }
+                                    Text { text: "Labels"; color: #a3a3a3; font-size: 11px; vertical-alignment: center; }
+                                    Text { text: "Folders"; color: #a3a3a3; font-size: 11px; vertical-alignment: center; }
+                                    Text { text: "Templates"; color: #a3a3a3; font-size: 11px; vertical-alignment: center; }
+                                    Rectangle { horizontal-stretch: 1; }
+                                    Text {
+                                        text: studio-busy ? "Rendering…" : "\{studio-tiles.length} clips";
+                                        color: #a3a3a3;
+                                        font-size: 11px;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+
+                            // Empty state — the floating polaroid stack.
+                            if studio-tiles.length == 0 && !studio-busy : Rectangle {
+                                horizontal-stretch: 1;
+                                vertical-stretch: 1;
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 4px;
+                                    Rectangle {
+                                        width: 250px;
+                                        height: 180px;
+                                        Rectangle {
+                                            x: 8px;
+                                            y: 26px;
+                                            width: 108px;
+                                            height: 128px;
+                                            background: #ece9e2;
+                                            border-radius: 5px;
+                                            transform-rotation: -10deg;
+                                            drop-shadow-blur: 16px;
+                                            drop-shadow-color: rgba(0, 0, 0, 0.5);
+                                            Rectangle {
+                                                x: 6px;
+                                                y: 6px;
+                                                width: 96px;
+                                                height: 88px;
+                                                background: @linear-gradient(140deg, #16233a, #3f6ea8);
+                                                border-radius: 3px;
+                                                clip: true;
+                                                Text {
+                                                    text: "▶";
+                                                    color: rgba(255, 255, 255, 0.85);
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+                                        Rectangle {
+                                            x: 134px;
+                                            y: 16px;
+                                            width: 108px;
+                                            height: 128px;
+                                            background: #ece9e2;
+                                            border-radius: 5px;
+                                            transform-rotation: 9deg;
+                                            drop-shadow-blur: 16px;
+                                            drop-shadow-color: rgba(0, 0, 0, 0.5);
+                                            Rectangle {
+                                                x: 6px;
+                                                y: 6px;
+                                                width: 96px;
+                                                height: 88px;
+                                                background: @linear-gradient(140deg, #3a1626, #b0567f);
+                                                border-radius: 3px;
+                                                clip: true;
+                                                Text {
+                                                    text: "▶";
+                                                    color: rgba(255, 255, 255, 0.85);
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+                                        Rectangle {
+                                            x: 66px;
+                                            y: 34px;
+                                            width: 116px;
+                                            height: 136px;
+                                            background: #ece9e2;
+                                            border-radius: 5px;
+                                            transform-rotation: -3deg;
+                                            drop-shadow-blur: 20px;
+                                            drop-shadow-color: rgba(0, 0, 0, 0.6);
+                                            Rectangle {
+                                                x: 6px;
+                                                y: 6px;
+                                                width: 104px;
+                                                height: 94px;
+                                                background: @linear-gradient(140deg, #2c1b40, #8a4fd0);
+                                                border-radius: 3px;
+                                                clip: true;
+                                                Text {
+                                                    text: "▶";
+                                                    color: rgba(255, 255, 255, 0.85);
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+                                        Text {
+                                            x: 212px;
+                                            y: 4px;
+                                            text: "✦";
+                                            color: #b026ff;
+                                            font-size: 18px;
+                                        }
+                                    }
+                                    Text {
+                                        text: "Empty, for now";
+                                        color: #ffffff;
+                                        font-size: 24px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                    }
+                                    Text {
+                                        text: "Your first creation changes that.";
+                                        color: #a3a3a3;
+                                        font-size: 12px;
+                                        horizontal-alignment: center;
+                                    }
+                                }
+                            }
+
+                            // Generating placeholder
+                            if studio-busy : Rectangle {
+                                horizontal-stretch: 1;
+                                vertical-stretch: 1;
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 6px;
+                                    Text {
+                                        text: "Rendering your clip…";
+                                        color: #b026ff;
+                                        font-size: 14px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                    }
+                                    Text {
+                                        text: "The workspace fills as results land.";
+                                        color: #a3a3a3;
+                                        font-size: 11px;
+                                        horizontal-alignment: center;
+                                    }
+                                    Rectangle {
+                                        width: 180px;
+                                        height: 3px;
+                                        background: #1e1e1e;
+                                        border-radius: 2px;
+                                        Rectangle {
+                                            width: 70px;
+                                            background: #b026ff;
+                                            border-radius: 2px;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Results list (newest first)
+                            if studio-tiles.length > 0 && !studio-busy : ScrollView {
+                                horizontal-stretch: 1;
+                                vertical-stretch: 1;
+                                VerticalLayout {
+                                    spacing: 8px;
+                                    for t in studio-tiles : TileCard {
+                                        tile: t;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ---- image studio surface (mode 4) ----
+                // ComfyUI-style parameter panel with node sections
+                // (Checkpoint / LoRA / Prompt / Sampler / Latent / Seed)
+                // over the local backends: the in-process native
+                // renderer, an Automatic1111 install, or ComfyUI.
+                // State lives in shared/image.rs.
+                if ui-mode == 4 : HorizontalLayout {
+                    spacing: 8px;
+
+                    // ---- parameter panel (node sections) ----
+                    Rectangle {
+                        width: 360px;
+                        background: #161616;
+                        border-width: 1px;
+                        border-color: #333333;
+                        border-radius: 10px;
+                        clip: true;
+                        ScrollView {
+                            VerticalLayout {
+                                padding: 10px;
+                                spacing: 8px;
+
+                                Text { text: "Image Studio"; color: #ffffff; font-size: 16px; font-weight: 700; }
+                                Text { text: "Local backends — no cloud, no credits."; color: #a3a3a3; font-size: 10px; }
+
+                                Text { text: "Backend"; color: #a3a3a3; font-size: 11px; }
+                                ComboBox {
+                                    model: image-provider-labels;
+                                    current-index <=> image-provider-idx;
+                                }
+
+                                NodeSection {
+                                    title: "CHECKPOINT";
+                                    VerticalLayout {
+                                        spacing: 2px;
+                                        Text { text: "Checkpoint"; color: #8b95a1; font-size: 10px; }
+                                        LineEdit { text <=> image-model; placeholder-text: "install default"; }
+                                    }
+                                    VerticalLayout {
+                                        spacing: 2px;
+                                        Text { text: "VAE"; color: #8b95a1; font-size: 10px; }
+                                        LineEdit { text <=> image-vae; placeholder-text: "checkpoint's built-in VAE"; }
+                                    }
+                                    VerticalLayout {
+                                        spacing: 2px;
+                                        Text { text: "CLIP skip"; color: #8b95a1; font-size: 10px; }
+                                        IntStepper {
+                                            value <=> image-clip-skip;
+                                            min: 1;
+                                            max: 12;
+                                            changed(d) => { image-clip-step(d); }
+                                        }
+                                    }
+                                }
+
+                                NodeSection {
+                                    title: "LORA";
+                                    if image-loras.length == 0 : Text {
+                                        text: "No adapters attached.";
+                                        color: #666666;
+                                        font-size: 10px;
+                                    }
+                                    for l[i] in image-loras : HorizontalLayout {
+                                        spacing: 4px;
+                                        LineEdit {
+                                            horizontal-stretch: 1;
+                                            text: l.name;
+                                            placeholder-text: "lora name";
+                                            edited(t) => { image-lora-name-edited(i, t); }
+                                        }
+                                        LineEdit {
+                                            width: 56px;
+                                            text: l.weight;
+                                            edited(t) => { image-lora-weight-edited(i, t); }
+                                        }
+                                        Rectangle {
+                                            width: 22px;
+                                            background: #1e1e1e;
+                                            border-width: 1px;
+                                            border-color: #333333;
+                                            border-radius: 5px;
+                                            TouchArea {
+                                                clicked => { image-lora-remove(i); }
+                                                mouse-cursor: pointer;
+                                            }
+                                            Text {
+                                                text: "×";
+                                                color: #a3a3a3;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+                                    Rectangle {
+                                        height: 24px;
+                                        background: #1e1e1e;
+                                        border-width: 1px;
+                                        border-color: #333333;
+                                        border-radius: 6px;
+                                        TouchArea {
+                                            clicked => { image-lora-add(); }
+                                            mouse-cursor: pointer;
+                                        }
+                                        Text {
+                                            text: image-loras.length >= 8 ? "Max 8 adapters" : "+ Add LoRA";
+                                            color: #c084fc;
+                                            font-size: 11px;
+                                            font-weight: 700;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+
+                                NodeSection {
+                                    title: "PROMPT";
+                                    VerticalLayout {
+                                        spacing: 2px;
+                                        Text { text: "Positive"; color: #8b95a1; font-size: 10px; }
+                                        TextEdit {
+                                            height: 64px;
+                                            text <=> image-prompt;
+                                            placeholder-text: "Describe the image…";
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        spacing: 2px;
+                                        Text { text: "Negative"; color: #8b95a1; font-size: 10px; }
+                                        TextEdit {
+                                            height: 44px;
+                                            text <=> image-negative;
+                                            placeholder-text: "What to avoid…";
+                                        }
+                                    }
+                                }
+
+                                NodeSection {
+                                    title: "SAMPLER";
+                                    VerticalLayout {
+                                        spacing: 2px;
+                                        Text { text: "Sampler"; color: #8b95a1; font-size: 10px; }
+                                        ComboBox {
+                                            model: image-sampler-labels;
+                                            current-index <=> image-sampler-idx;
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        spacing: 2px;
+                                        Text { text: "Scheduler"; color: #8b95a1; font-size: 10px; }
+                                        ComboBox {
+                                            model: image-scheduler-labels;
+                                            current-index <=> image-scheduler-idx;
+                                        }
+                                    }
+                                    HorizontalLayout {
+                                        Text { text: "Steps"; color: #8b95a1; font-size: 10px; vertical-alignment: center; }
+                                        Rectangle { horizontal-stretch: 1; }
+                                        Text { text: round(image-steps); color: #ffffff; font-size: 10px; vertical-alignment: center; }
+                                    }
+                                    Slider {
+                                        minimum: 1;
+                                        maximum: 150;
+                                        value <=> image-steps;
+                                    }
+                                    HorizontalLayout {
+                                        Text { text: "CFG"; color: #8b95a1; font-size: 10px; vertical-alignment: center; }
+                                        Rectangle { horizontal-stretch: 1; }
+                                        Text { text: round(image-cfg * 10) / 10; color: #ffffff; font-size: 10px; vertical-alignment: center; }
+                                    }
+                                    Slider {
+                                        minimum: 0;
+                                        maximum: 30;
+                                        value <=> image-cfg;
+                                    }
+                                    HorizontalLayout {
+                                        Text { text: "Denoise"; color: #8b95a1; font-size: 10px; vertical-alignment: center; }
+                                        Rectangle { horizontal-stretch: 1; }
+                                        Text { text: round(image-denoise * 100) / 100; color: #ffffff; font-size: 10px; vertical-alignment: center; }
+                                    }
+                                    Slider {
+                                        minimum: 0;
+                                        maximum: 1;
+                                        value <=> image-denoise;
+                                    }
+                                }
+
+                                NodeSection {
+                                    title: "LATENT";
+                                    HorizontalLayout {
+                                        spacing: 6px;
+                                        VerticalLayout {
+                                            spacing: 2px;
+                                            Text { text: "Width"; color: #8b95a1; font-size: 10px; }
+                                            LineEdit { text <=> image-width; placeholder-text: "512"; }
+                                        }
+                                        VerticalLayout {
+                                            spacing: 2px;
+                                            Text { text: "Height"; color: #8b95a1; font-size: 10px; }
+                                            LineEdit { text <=> image-height; placeholder-text: "512"; }
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        spacing: 2px;
+                                        Text { text: "Batch"; color: #8b95a1; font-size: 10px; }
+                                        IntStepper {
+                                            value <=> image-batch;
+                                            min: 1;
+                                            max: 8;
+                                            changed(d) => { image-batch-step(d); }
+                                        }
+                                    }
+                                }
+
+                                NodeSection {
+                                    title: "SEED";
+                                    HorizontalLayout {
+                                        spacing: 6px;
+                                        LineEdit {
+                                            horizontal-stretch: 1;
+                                            text <=> image-seed;
+                                            placeholder-text: "random";
+                                        }
+                                        Rectangle {
+                                            width: 30px;
+                                            background: #1e1e1e;
+                                            border-width: 1px;
+                                            border-color: #333333;
+                                            border-radius: 6px;
+                                            TouchArea {
+                                                clicked => { image-seed-random(); }
+                                                mouse-cursor: pointer;
+                                            }
+                                            Text {
+                                                text: "🎲";
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+                                    if image-provider != "native" : VerticalLayout {
+                                        spacing: 2px;
+                                        Text { text: "Base URL"; color: #8b95a1; font-size: 10px; }
+                                        LineEdit {
+                                            text <=> image-base-url;
+                                            placeholder-text: image-provider == "a1111" ? "http://127.0.0.1:7860" : "http://127.0.0.1:8188";
+                                        }
+                                    }
+                                }
+
+                                // Generate — big, purple, unmissable.
+                                Rectangle {
+                                    height: 40px;
+                                    background: @linear-gradient(90deg, #9d50bb, #6e48aa);
+                                    border-radius: 10px;
+                                    drop-shadow-blur: 14px;
+                                    drop-shadow-color: rgba(176, 38, 255, 0.35);
+                                    TouchArea {
+                                        enabled: !image-busy;
+                                        clicked => { image-generate(); }
+                                        mouse-cursor: pointer;
+                                    }
+                                    Text {
+                                        text: image-busy ? "Generating…" : "Generate";
+                                        color: #ffffff;
+                                        font-size: 13px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                if image-status != "" : Text {
+                                    text: image-status;
+                                    color: #a3a3a3;
+                                    font-size: 10px;
+                                    wrap: word-wrap;
+                                }
+                            }
+                        }
+                    }
+
+                    // ---- output grid ----
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        background: #0d0d0d;
+                        border-width: 1px;
+                        border-color: #333333;
+                        border-radius: 10px;
+                        clip: true;
+                        VerticalLayout {
+                            spacing: 8px;
+
+                            Rectangle {
+                                height: 34px;
+                                background: #161616;
+                                border-radius: 10px;
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 10px;
+                                    spacing: 10px;
+                                    Text { text: "Output"; color: #ffffff; font-size: 12px; font-weight: 700; vertical-alignment: center; }
+                                    Rectangle { horizontal-stretch: 1; }
+                                    Text {
+                                        text: image-busy ? "Rendering…" : "\{image-tiles.length} images";
+                                        color: #a3a3a3;
+                                        font-size: 11px;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+
+                            // Empty state.
+                            if image-tiles.length == 0 && !image-busy : Rectangle {
+                                horizontal-stretch: 1;
+                                vertical-stretch: 1;
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 4px;
+                                    Text {
+                                        text: "No images yet";
+                                        color: #ffffff;
+                                        font-size: 22px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                    }
+                                    Text {
+                                        text: "Pick a backend, write a prompt, and Generate.";
+                                        color: #a3a3a3;
+                                        font-size: 12px;
+                                        horizontal-alignment: center;
+                                    }
+                                }
+                            }
+
+                            // Generating placeholder.
+                            if image-busy : Rectangle {
+                                horizontal-stretch: 1;
+                                vertical-stretch: 1;
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 6px;
+                                    Text {
+                                        text: "Sampling…";
+                                        color: #b026ff;
+                                        font-size: 14px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                    }
+                                    Text {
+                                        text: "Images land here as the backend finishes.";
+                                        color: #a3a3a3;
+                                        font-size: 11px;
+                                        horizontal-alignment: center;
+                                    }
+                                    Rectangle {
+                                        width: 180px;
+                                        height: 3px;
+                                        background: #1e1e1e;
+                                        border-radius: 2px;
+                                        Rectangle {
+                                            width: 70px;
+                                            background: #b026ff;
+                                            border-radius: 2px;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Results (newest first).
+                            if image-tiles.length > 0 && !image-busy : ScrollView {
+                                horizontal-stretch: 1;
+                                vertical-stretch: 1;
+                                VerticalLayout {
+                                    spacing: 8px;
+                                    for t in image-tiles : Rectangle {
+                                        height: 264px;
+                                        background: #161616;
+                                        border-width: 1px;
+                                        border-color: #333333;
+                                        border-radius: 8px;
+                                        clip: true;
+                                        VerticalLayout {
+                                            padding: 6px;
+                                            spacing: 4px;
+                                            Rectangle {
+                                                horizontal-stretch: 1;
+                                                background: #0d0d0d;
+                                                border-radius: 6px;
+                                                clip: true;
+                                                Image {
+                                                    width: parent.width;
+                                                    height: parent.height;
+                                                    source: t.image;
+                                                    image-fit: contain;
+                                                }
+                                            }
+                                            HorizontalLayout {
+                                                spacing: 6px;
+                                                Text {
+                                                    text: t.label;
+                                                    color: #c084fc;
+                                                    font-size: 10px;
+                                                    vertical-alignment: center;
+                                                }
+                                                Rectangle { horizontal-stretch: 1; }
+                                                if t.url != "" : Text {
+                                                    text: t.url;
+                                                    color: #7fb3d5;
+                                                    font-size: 9px;
+                                                    overflow: elide;
+                                                    width: 220px;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
         }
             }
@@ -1114,6 +2242,17 @@ export component AppWindow inherits Window {
                         ComboBox {
                             model: media-provider-labels;
                             current-index <=> media-provider-idx;
+                        }
+                        Text { text: "Base URL (empty = default)"; color: #8b95a1; font-size: 12px; }
+                        LineEdit {
+                            text <=> media-base-url;
+                            placeholder-text: "http://127.0.0.1:8188";
+                        }
+                        if media-provider == "comfyui" : Text {
+                            text: "ComfyUI: Model = checkpoint (or the AnimateDiff motion module for Video). Inpaint needs a source image and a mask.";
+                            color: #8b95a1;
+                            font-size: 11px;
+                            wrap: word-wrap;
                         }
                         Text { text: "Prompt"; color: #8b95a1; font-size: 12px; }
                         TextEdit {

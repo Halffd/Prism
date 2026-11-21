@@ -1,0 +1,47 @@
+[package]
+name = "video-studio"
+version = "0.1.0"
+edition = "2021"
+description = "AI video generation dashboard UI built with Dioxus + Tailwind CSS, wired to the Prism AI core"
+
+# Member of the Prism monorepo workspace (see ../Cargo.toml). A
+# web-only crate: checked/built with the wasm32 target, e.g.
+#   cargo check -p video-studio --target wasm32-unknown-unknown
+#   trunk serve   (from this directory)
+
+[dependencies]
+dioxus = { version = "0.7", features = ["web", "router"] }
+gloo-timers = { version = "0.3", features = ["futures"] }
+
+# The Prism system: provider table, wire builders and stream decoders.
+# WASM builds drive their own transport (browser fetch) per the
+# single-core boundary design, so native transport is disabled.
+prism-core = { path = "../crates/prism-core", default-features = false }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# The browser's counterpart of the core's reqwest transport: the host
+# owns the sockets, the core builds the wire bodies and parses replies.
+async-trait = { workspace = true }
+
+# Browser platform bindings (web target only): fetch streaming, storage.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", features = [
+    "Headers",
+    "Request",
+    "RequestInit",
+    "RequestMode",
+    "Response",
+    "Window",
+    "Storage",
+    "Navigator",
+    "Clipboard",
+    "AbortController",
+    "AbortSignal",
+    "ReadableStream",
+    "TextDecoder",
+    "TextDecodeOptions",
+    "Element",
+] }
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"

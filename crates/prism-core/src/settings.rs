@@ -489,6 +489,20 @@ mod tests {
         assert!(hw.has_overrides());
     }
     #[test]
+    fn bundled_local_provider_resolves_to_native_server() {
+        let settings = Settings::default();
+        let resolved = settings.resolve_provider("local").unwrap();
+        assert_eq!(resolved.base_url, "http://127.0.0.1:7861/v1");
+        assert_eq!(resolved.default_model, crate::native_llm::MODEL_ID);
+        assert!(!resolved.needs_key);
+        assert!(resolved.env.is_empty());
+        assert_eq!(
+            crate::providers::chat_completions_url(&resolved.base_url),
+            "http://127.0.0.1:7861/v1/chat/completions"
+        );
+    }
+
+    #[test]
     fn custom_alias_clones_canonical_defaults() {
         let mut s = Settings::default();
         s.custom_providers.insert(

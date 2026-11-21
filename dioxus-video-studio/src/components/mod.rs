@@ -1,0 +1,9 @@
+pub mod chat_page;
+pub mod generation_panel;
+pub mod image_page;
+pub mod settings_page;
+pub mod shell;
+pub mod sidebar;
+pub mod studio;
+pub mod ui;
+pub mod workspace;

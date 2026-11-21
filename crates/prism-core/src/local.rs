@@ -7,9 +7,9 @@
 //!
 //! - **Native** (Ollama `/api/tags`, llama.cpp native): a provider with
 //!   its own JSON shape and hardware-aware chat options.
-//! - **OpenAI-compat** (LM Studio, vLLM, koboldcpp, sglang): reached
-//!   through the standard `/v1/models` list and `/v1/chat/completions`
-//!   stream.
+//! - **OpenAI-compat** (the bundled Prism Native server, LM Studio, vLLM,
+//!   koboldcpp, sglang): reached through the standard `/v1/models` list
+//!   and `/v1/chat/completions` stream.
 //!
 //! Discovery and health are pure functions over response bytes so they
 //! test without a server; the host drives the HTTP.
@@ -66,6 +66,16 @@ impl LocalProvider {
 
 /// Every local provider Prism knows, in UI order.
 pub const LOCAL_PROVIDERS: &[LocalProvider] = &[
+    LocalProvider {
+        id: "local",
+        label: "Prism Native",
+        // The bundled Rust server (apps/native-server): OpenAI-compatible
+        // chat on /v1 plus A1111-compatible images on the same host.
+        base_url: "http://127.0.0.1:7861/v1",
+        wire: LocalWire::OpenAiCompat,
+        hardware_overrides: false,
+        gguf: false,
+    },
     LocalProvider {
         id: "ollama",
         label: "Ollama",
@@ -329,10 +339,13 @@ pub fn read_gguf_metadata(bytes: &[u8]) -> GgufMetadata {
             break;
         };
         pos = after_key;
-        let Some(value_type) = bytes.get(pos).copied() else {
+        // GGUF stores the value type as a little-endian u32, not a single byte.
+        if pos + 4 > bytes.len() {
             break;
-        };
-        pos += 1;
+        }
+        let value_type =
+            u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap_or([0; 4]));
+        pos += 4;
         match value_type {
             8 => {
                 if let Some((s, n)) = read_gguf_string(bytes, pos) {
@@ -342,32 +355,72 @@ pub fn read_gguf_metadata(bytes: &[u8]) -> GgufMetadata {
                     break;
                 }
             }
-            4 | 5 | 6 => {
-                let width = if value_type == 4 { 8 } else { 4 };
-                if pos + width <= bytes.len() {
-                    let v = if width == 8 {
-                        u64::from_le_bytes(bytes[pos..pos + 8].try_into().unwrap_or([0; 8]))
-                    } else {
-                        u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap_or([0; 4])) as u64
-                    };
-                    assign_int(&mut meta, &key, v);
-                    pos += width;
-                } else {
+            0..=7 | 10..=12 => {
+                let width = gguf_value_width(value_type);
+                if pos + width > bytes.len() {
                     break;
                 }
-            }
-            10 => {
-                if let Some((s, n)) = read_gguf_string(bytes, pos) {
-                    assign(&mut meta, &key, Some(s));
-                    pos = n;
+                let v = if width == 8 {
+                    u64::from_le_bytes(bytes[pos..pos + 8].try_into().unwrap_or([0; 8]))
+                } else if width == 4 {
+                    u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap_or([0; 4])) as u64
                 } else {
+                    bytes[pos] as u64
+                };
+                assign_int(&mut meta, &key, v);
+                pos += width;
+            }
+            9 => {
+                // Array: element type (u32) + count (u64) + payload. Skip the
+                // payload because the UI only surfaces scalar metadata.
+                if pos + 12 > bytes.len() {
                     break;
+                }
+                let element_type =
+                    u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap_or([0; 4]));
+                let count = u64::from_le_bytes(bytes[pos + 4..pos + 12].try_into().unwrap_or([0; 8]));
+                pos += 12;
+                if count > 16 * 1024 * 1024 {
+                    break;
+                }
+                if element_type == 8 {
+                    let mut ok = true;
+                    for _ in 0..count {
+                        match read_gguf_string(bytes, pos) {
+                            Some((_, n)) => pos = n,
+                            None => {
+                                ok = false;
+                                break;
+                            }
+                        }
+                    }
+                    if !ok {
+                        break;
+                    }
+                } else {
+                    let width = gguf_value_width(element_type);
+                    if width == 0 || count.saturating_mul(width as u64) > bytes.len() as u64 {
+                        break;
+                    }
+                    pos += (count as usize) * width;
                 }
             }
             _ => break,
         }
     }
     meta
+}
+
+/// Byte width of a scalar GGUF value type. Zero means variable-length or
+/// unknown (strings and arrays are handled by the caller).
+fn gguf_value_width(value_type: u32) -> usize {
+    match value_type {
+        0 | 1 | 7 => 1,
+        2 | 3 => 2,
+        4 | 5 | 6 => 4,
+        10 | 11 | 12 => 8,
+        _ => 0,
+    }
 }
 
 /// GGUF string: u64 length + UTF-8 bytes.
@@ -398,10 +451,20 @@ fn assign(meta: &mut GgufMetadata, key: &str, value: Option<String>) {
 
 fn assign_int(meta: &mut GgufMetadata, key: &str, value: u64) {
     match key {
-        "llama.context_length" | "qwen.context_length" | "gemma.context_length" => {
-            meta.context_length = Some(value)
-        }
-        "llama.block_count" | "qwen.block_count" => {
+        "llama.context_length"
+        | "qwen.context_length"
+        | "qwen2.context_length"
+        | "qwen3.context_length"
+        | "qwen35.context_length"
+        | "gemma.context_length"
+        | "gemma2.context_length"
+        | "gemma3.context_length" => meta.context_length = Some(value),
+        "llama.block_count"
+        | "qwen.block_count"
+        | "qwen3.block_count"
+        | "qwen35.block_count"
+        | "gemma.block_count"
+        | "gemma3.block_count" => {
             if value > 0 {
                 meta.parameter_count = Some(format!("{value} blocks"));
             }
@@ -416,9 +479,12 @@ mod tests {
 
     #[test]
     fn registry_covers_expected_locals() {
-        for id in ["ollama", "lmstudio", "llamacpp", "koboldcpp", "sglang", "vllm"] {
+        for id in [
+            "local", "ollama", "lmstudio", "llamacpp", "koboldcpp", "sglang", "vllm",
+        ] {
             assert!(find(id).is_some(), "missing {id}");
         }
+        assert!(is_local("local"));
         assert!(is_local("llamacpp"));
         assert!(!is_local("openai"));
     }
@@ -427,10 +493,21 @@ mod tests {
     fn only_ollama_carries_hardware_overrides() {
         assert!(supports_hardware_overrides("ollama"));
         assert!(!supports_hardware_overrides("lmstudio"));
+        assert!(!supports_hardware_overrides("local"));
     }
 
     #[test]
     fn models_urls_depend_on_wire() {
+        let bundled = find("local").unwrap();
+        assert_eq!(
+            bundled.models_url(bundled.base_url),
+            "http://127.0.0.1:7861/v1/models"
+        );
+        assert_eq!(
+            bundled.health_url(bundled.base_url),
+            "http://127.0.0.1:7861/v1/models"
+        );
+
         let ollama = find("ollama").unwrap();
         assert_eq!(
             ollama.models_url("http://localhost:11434/v1"),
@@ -518,17 +595,35 @@ mod tests {
         b.extend_from_slice(b"GGUF");
         b.extend_from_slice(&3u32.to_le_bytes()); // version
         b.extend_from_slice(&1u64.to_le_bytes()); // tensor count
-        b.extend_from_slice(&1u64.to_le_bytes()); // kv count
-        // key: "test.name"
-        let key = b"test.name";
+        b.extend_from_slice(&3u64.to_le_bytes()); // kv count
+        // key: "general.architecture"
+        let key = b"general.architecture";
         b.extend_from_slice(&(key.len() as u64).to_le_bytes());
         b.extend_from_slice(key);
-        b.push(8); // string type
-        let val = b"hello";
+        b.extend_from_slice(&8u32.to_le_bytes()); // GGUF string type is u32
+        let val = b"gemma3";
         b.extend_from_slice(&(val.len() as u64).to_le_bytes());
         b.extend_from_slice(val);
+        // A scalar context length and an array of tokens follow, and must be
+        // skipped/read correctly rather than ending the parse early.
+        let key = b"gemma3.context_length";
+        b.extend_from_slice(&(key.len() as u64).to_le_bytes());
+        b.extend_from_slice(key);
+        b.extend_from_slice(&4u32.to_le_bytes());
+        b.extend_from_slice(&32768u32.to_le_bytes());
+        let key = b"tokenizer.ggml.tokens";
+        b.extend_from_slice(&(key.len() as u64).to_le_bytes());
+        b.extend_from_slice(key);
+        b.extend_from_slice(&9u32.to_le_bytes()); // array
+        b.extend_from_slice(&8u32.to_le_bytes()); // string elements
+        b.extend_from_slice(&2u64.to_le_bytes());
+        for token in [b"<bos>".as_slice(), b"hello".as_slice()] {
+            b.extend_from_slice(&(token.len() as u64).to_le_bytes());
+            b.extend_from_slice(token);
+        }
         let meta = read_gguf_metadata(&b);
-        // "test.name" is not a mapped key, so nothing is read but no crash.
         assert_eq!(meta.file_size, Some(b.len() as u64));
+        assert_eq!(meta.architecture.as_deref(), Some("gemma3"));
+        assert_eq!(meta.context_length, Some(32768));
     }
 }

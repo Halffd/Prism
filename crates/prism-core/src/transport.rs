@@ -22,7 +22,11 @@ pub struct HttpRequest {
 /// arbitrary; decoders must buffer.
 pub type ByteStream = Pin<Box<dyn Stream<Item = Result<Vec<u8>, String>> + Send>>;
 
-#[async_trait]
+// `JsFuture` (and the browser's fetch types) are not `Send`, so the WASM
+// transport must be allowed to keep its futures on the single UI thread.
+// Native hosts keep the stricter `Send` contract.
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait Transport: Send + Sync {
     /// POST and stream the response body. Non-2xx responses are
     /// `Err` with the status and a body excerpt.
@@ -31,6 +35,18 @@ pub trait Transport: Send + Sync {
     async fn post_body(&self, req: HttpRequest) -> Result<Vec<u8>, String>;
     /// GET and await the full response body.
     async fn get_body(&self, req: HttpRequest) -> Result<Vec<u8>, String>;
+    /// POST a binary body (multipart uploads) and await the response.
+    ///
+    /// The default fails rather than silently dropping the bytes: a
+    /// transport that cannot carry binary bodies must say so.
+    async fn post_bytes(
+        &self,
+        _req: HttpRequest,
+        _body: Vec<u8>,
+        _content_type: &str,
+    ) -> Result<Vec<u8>, String> {
+        Err("binary POST not supported by this transport".to_string())
+    }
 }
 
 #[cfg(feature = "native-transport")]
@@ -75,7 +91,8 @@ mod native {
         }
     }
 
-    #[async_trait]
+    #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
     impl Transport for ReqwestTransport {
         async fn post_stream(&self, req: HttpRequest) -> Result<ByteStream, String> {
             let mut http = self.client.post(&req.url);
@@ -127,6 +144,38 @@ mod native {
                 ));
             }
             Ok(text.into_bytes())
+        }
+
+        async fn post_bytes(
+            &self,
+            req: HttpRequest,
+            body: Vec<u8>,
+            content_type: &str,
+        ) -> Result<Vec<u8>, String> {
+            let mut http = self.client.post(&req.url).body(body);
+            if !content_type.is_empty() {
+                http = http.header("Content-Type", content_type);
+            }
+            for (k, v) in &req.headers {
+                http = http.header(k, v);
+            }
+            let resp = http
+                .send()
+                .await
+                .map_err(|e| format!("request failed: {e}"))?;
+            let status = resp.status();
+            let bytes = resp
+                .bytes()
+                .await
+                .map_err(|e| format!("response read failed: {e}"))?;
+            if !status.is_success() {
+                let text = String::from_utf8_lossy(&bytes);
+                return Err(format!(
+                    "server returned {status}: {}",
+                    truncate(&text, 300)
+                ));
+            }
+            Ok(bytes.to_vec())
         }
 
         async fn get_body(&self, req: HttpRequest) -> Result<Vec<u8>, String> {

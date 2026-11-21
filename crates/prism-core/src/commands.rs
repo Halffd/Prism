@@ -86,6 +86,8 @@ pub const COMMANDS: &[CommandDef] = &[
     CommandDef { id: "ide.mode.chat", title: "Mode: Chat", group: CommandGroup::Ide, takes_arg: false, while_streaming: false },
     CommandDef { id: "ide.mode.agent", title: "Mode: Agent (input drives the agent loop)", group: CommandGroup::Ide, takes_arg: false, while_streaming: false },
     CommandDef { id: "ide.mode.agent_sidebar", title: "Mode: IDE (editor + agent sidebar)", group: CommandGroup::Ide, takes_arg: false, while_streaming: false },
+    CommandDef { id: "ide.mode.studio", title: "Mode: Studio (video generation panel + workspace)", group: CommandGroup::Ide, takes_arg: false, while_streaming: false },
+    CommandDef { id: "ide.mode.image", title: "Mode: Image (node-style local generation panel)", group: CommandGroup::Ide, takes_arg: false, while_streaming: false },
     CommandDef { id: "ide.workspace.open", title: "Open workspace folder…", group: CommandGroup::Ide, takes_arg: true, while_streaming: false },
     CommandDef { id: "ide.workspace.refresh", title: "Refresh workspace file tree", group: CommandGroup::Ide, takes_arg: false, while_streaming: true },
     CommandDef { id: "ide.workspace.save", title: "Save the open editor file", group: CommandGroup::Ide, takes_arg: false, while_streaming: true },
