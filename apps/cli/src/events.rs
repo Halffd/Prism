@@ -35,6 +35,9 @@ pub enum Event {
         tool: String,
         output: String,
     },
+    /// A research job finished (web, deep search, multi-send, council,
+    /// debate). `body` is already formatted by the shared core helper.
+    Research { title: String, body: String },
     Resize(u16, u16),
     Tick(u64),
 }

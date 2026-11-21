@@ -152,6 +152,106 @@ fn commands_update_and_persist_settings() {
 }
 
 #[test]
+fn search_provider_settings_persist() {
+    let (_g, _dir, mut app, tx) = fresh_app("search-provider");
+    type_line(&mut app, &tx, "/search-provider searxng https://searx.example");
+    assert_eq!(app.settings.search_provider, "searxng");
+    assert_eq!(app.settings.searxng_url, "https://searx.example");
+    let reloaded = host::load_settings();
+    assert_eq!(reloaded.search_provider, "searxng");
+    assert_eq!(reloaded.searxng_url, "https://searx.example");
+
+    type_line(&mut app, &tx, "/search-provider duckduckgo");
+    assert_eq!(app.settings.search_provider, "duckduckgo");
+
+    type_line(&mut app, &tx, "/search-provider");
+    let shown = &app.conv.messages.last().unwrap().content;
+    assert!(shown.contains("duckduckgo"), "{shown}");
+
+    type_line(&mut app, &tx, "/search-provider bing");
+    assert!(app
+        .conv
+        .messages
+        .last()
+        .unwrap()
+        .content
+        .contains("unknown search provider"));
+}
+
+#[test]
+fn research_panel_renders_scrolls_and_closes() {
+    let (_g, _dir, mut app, tx) = fresh_app("research-panel");
+    app.handle(
+        Event::Research {
+            title: "Web: rust".into(),
+            body: "1. Rust\n   https://rust-lang.org/".into(),
+        },
+        &tx,
+    );
+    assert_eq!(app.mode, Mode::Research);
+    let panel = app.research_panel.as_ref().unwrap();
+    assert_eq!(panel.title, "Web: rust");
+    assert!(panel.body.contains("rust-lang.org"));
+    assert!(!panel.busy);
+
+    app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), &tx);
+    app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), &tx);
+    assert_eq!(app.research_panel.as_ref().unwrap().scroll, 2);
+    app.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE), &tx);
+    assert_eq!(app.research_panel.as_ref().unwrap().scroll, 0);
+
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), &tx);
+    assert_eq!(app.mode, Mode::Normal);
+    assert!(app.research_panel.is_none());
+}
+
+#[test]
+fn research_commands_require_input() {
+    let (_g, _dir, mut app, tx) = fresh_app("research-usage");
+    for cmd in ["/web", "/deep", "/multi", "/council", "/debate"] {
+        type_line(&mut app, &tx, cmd);
+        let last = &app.conv.messages.last().unwrap().content;
+        assert!(last.contains("usage:"), "{cmd} -> {last}");
+    }
+    // No background job was started, so the panel stayed closed.
+    assert!(app.research_panel.is_none());
+    assert_eq!(app.mode, Mode::Normal);
+}
+
+#[test]
+fn research_result_reaches_a_closed_panel() {
+    let (_g, _dir, mut app, tx) = fresh_app("research-late");
+    app.research_panel = Some(prism_cli::state::ResearchPanel::busy(
+        "Deep search: q",
+        "working…",
+    ));
+    app.mode = Mode::Research;
+    app.handle(
+        Event::Research {
+            title: "Deep search: q".into(),
+            body: "Summary: done".into(),
+        },
+        &tx,
+    );
+    let panel = app.research_panel.as_ref().unwrap();
+    assert!(!panel.busy);
+    assert_eq!(panel.body, "Summary: done");
+    assert_eq!(app.mode, Mode::Research);
+
+    // Close it, then a late result must not silently disappear.
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), &tx);
+    app.handle(
+        Event::Research {
+            title: "Late".into(),
+            body: "late body".into(),
+        },
+        &tx,
+    );
+    assert_eq!(app.mode, Mode::Research);
+    assert_eq!(app.research_panel.as_ref().unwrap().title, "Late");
+}
+
+#[test]
 fn unknown_provider_rejected() {
     let (_g, _dir, mut app, tx) = fresh_app("bad-provider");
     type_line(&mut app, &tx, "/provider nonexistent");

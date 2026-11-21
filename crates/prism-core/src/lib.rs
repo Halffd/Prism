@@ -26,6 +26,7 @@ pub mod cards;
 pub mod catalog;
 pub mod client;
 pub mod commands;
+pub mod ensemble;
 pub mod context;
 pub mod conversations;
 #[cfg(feature = "native-transport")]
@@ -53,6 +54,7 @@ pub mod subagents;
 pub mod sync;
 pub mod thinking;
 pub mod toolgate;
+pub mod web;
 pub mod transport;
 #[cfg(feature = "native-transport")]
 pub mod workspace;

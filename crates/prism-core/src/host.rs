@@ -458,6 +458,113 @@ pub fn is_transient_error(e: &anyhow::Error) -> bool {
     false
 }
 
+/// Run a web search on the shared runtime. Never fails: errors arrive
+/// inside the outcome so every surface shows them with the query.
+pub fn spawn_search(
+    settings: Settings,
+    query: String,
+    limit: usize,
+    tx: Sender<crate::web::SearchOutcome>,
+) {
+    runtime().spawn(async move {
+        let outcome = crate::web::search(transport(), &settings, &query, limit).await;
+        let _ = tx.send(outcome);
+    });
+}
+
+/// Run a deep search (search + fetch + model synthesis) on the shared
+/// runtime. `target` empty means the settings' primary provider.
+pub fn spawn_deep_search(
+    settings: Settings,
+    query: String,
+    limit: usize,
+    fetch_count: usize,
+    tx: Sender<crate::web::DeepSearch>,
+) {
+    runtime().spawn(async move {
+        let target = crate::ensemble::CompletionTarget::primary(&settings);
+        let deep = crate::web::deep_search(
+            transport(),
+            &settings,
+            target.as_ref(),
+            &query,
+            limit,
+            fetch_count,
+        )
+        .await;
+        let _ = tx.send(deep);
+    });
+}
+
+/// Send one prompt to every available provider.
+pub fn spawn_multi(
+    settings: Settings,
+    prompt: String,
+    max: usize,
+    tx: Sender<Vec<crate::ensemble::MemberResponse>>,
+) {
+    runtime().spawn(async move {
+        let targets = crate::ensemble::settings_targets(&settings, max);
+        let responses = crate::ensemble::multi_send(transport(), &targets, "", &[], &prompt).await;
+        let _ = tx.send(responses);
+    });
+}
+
+/// Run a council over the available providers; the primary provider
+/// judges (unless `judge` is false, for peer-vote).
+pub fn spawn_council(
+    settings: Settings,
+    prompt: String,
+    strategy: crate::ensemble::VotingStrategy,
+    max: usize,
+    tx: Sender<Result<crate::ensemble::CouncilResponse, String>>,
+) {
+    runtime().spawn(async move {
+        let targets = crate::ensemble::settings_targets(&settings, max);
+        let judge = if strategy == crate::ensemble::VotingStrategy::PeerVote {
+            None
+        } else {
+            crate::ensemble::CompletionTarget::primary(&settings)
+        };
+        let result =
+            crate::ensemble::council(transport(), &targets, &prompt, strategy, judge.as_ref())
+                .await;
+        let _ = tx.send(result);
+    });
+}
+
+/// Run a two-sided debate and a judge summary.
+pub fn spawn_debate(
+    settings: Settings,
+    topic: String,
+    turns: usize,
+    max_speakers: usize,
+    tx: Sender<Result<crate::ensemble::DebateResponse, String>>,
+) {
+    runtime().spawn(async move {
+        let targets = crate::ensemble::settings_targets(&settings, max_speakers.max(1));
+        let stances = ["support", "oppose", "alternative"];
+        let participants: Vec<crate::ensemble::DebateParticipant> = targets
+            .iter()
+            .enumerate()
+            .map(|(i, target)| crate::ensemble::DebateParticipant {
+                target: target.clone(),
+                stance: stances[i % stances.len()].to_string(),
+            })
+            .collect();
+        let judge = crate::ensemble::CompletionTarget::primary(&settings);
+        let result = crate::ensemble::debate(
+            transport(),
+            &participants,
+            &topic,
+            turns,
+            judge.as_ref(),
+        )
+        .await;
+        let _ = tx.send(result);
+    });
+}
+
 pub fn spawn_models_fetch(req: ModelsRequest, tx: Sender<ModelsEvent>) {
     runtime().spawn(async move {
         if let Err(e) = run_models_fetch(transport(), &req, &tx).await {

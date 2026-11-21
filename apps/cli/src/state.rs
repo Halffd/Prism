@@ -38,6 +38,8 @@ pub enum Mode {
     Search,
     /// The in-app MCP monitor/test panel owns the keyboard.
     Mcp,
+    /// The in-app research panel (web / deep / multi / council / debate).
+    Research,
 }
 
 /// The in-app MCP panel: every tool the configured servers advertise,
@@ -72,6 +74,36 @@ impl McpPanel {
 
     pub fn selected_tool(&self) -> Option<&McpToolRow> {
         self.tools.get(self.selected)
+    }
+}
+
+/// Results of a research command (web, deep search, multi-send,
+/// council, debate), rendered in one scrollable in-app panel.
+#[derive(Debug, Clone)]
+pub struct ResearchPanel {
+    pub title: String,
+    pub body: String,
+    pub scroll: usize,
+    pub busy: bool,
+}
+
+impl ResearchPanel {
+    pub fn new(title: &str, body: &str) -> Self {
+        ResearchPanel {
+            title: title.to_string(),
+            body: body.to_string(),
+            scroll: 0,
+            busy: false,
+        }
+    }
+
+    pub fn busy(title: &str, note: &str) -> Self {
+        ResearchPanel {
+            title: title.to_string(),
+            body: note.to_string(),
+            scroll: 0,
+            busy: true,
+        }
     }
 }
 
@@ -139,6 +171,8 @@ pub struct App {
     pub persona: prism_core::cards::Persona,
     /// Open MCP monitor/test panel.
     pub mcp_panel: Option<McpPanel>,
+    /// Open research panel (web, deep search, ensemble runs).
+    pub research_panel: Option<ResearchPanel>,
     /// Session-scoped retrieval over local files (`/rag`).
     pub rag: prism_core::rag::RagStore,
 }
@@ -194,6 +228,7 @@ impl App {
                 description: String::new(),
             },
             mcp_panel: None,
+            research_panel: None,
             rag: prism_core::rag::RagStore::new(),
         };
         // Resume the requested conversation (`prism resume [id]` sets
@@ -352,6 +387,19 @@ impl App {
             Event::Stream(ev) => self.handle_stream(ev, tx),
             Event::AgentDone(result) => self.handle_agent_done(result),
             Event::Notice(text) => self.push_message("system", &text),
+            Event::Research { title, body } => {
+                if let Some(panel) = self.research_panel.as_mut() {
+                    panel.title = title;
+                    panel.body = body;
+                    panel.scroll = 0;
+                    panel.busy = false;
+                    self.status = format!("research: {}", panel.title);
+                } else {
+                    self.research_panel = Some(ResearchPanel::new(&title, &body));
+                    self.mode = Mode::Research;
+                    self.status = format!("research: {title}");
+                }
+            }
             Event::SubagentDone { id, spec, result } => {
                 self.handle_subagent_done(&id, &spec, result)
             }
@@ -1136,6 +1184,147 @@ impl App {
                     }
                 }
             }
+            "web" => {
+                if arg.is_empty() {
+                    self.push_message("system", "usage: /web <query> — web search in the research panel");
+                } else {
+                    self.open_research_busy(&format!("Web: {arg}"), &format!("searching for {arg}…"));
+                    let (ctx, crx) = std::sync::mpsc::channel();
+                    host::spawn_search(self.settings.clone(), arg.clone(), 8, ctx);
+                    deliver_research(tx, crx, |outcome| Event::Research {
+                        title: format!("Web: {}", outcome.query),
+                        body: prism_core::web::format_search(&outcome),
+                    });
+                }
+            }
+            "deep" => {
+                if arg.is_empty() {
+                    self.push_message(
+                        "system",
+                        "usage: /deep <query> — search, fetch the top pages, then synthesize an answer",
+                    );
+                } else {
+                    self.open_research_busy(
+                        &format!("Deep search: {arg}"),
+                        &format!("searching and fetching pages for {arg}…"),
+                    );
+                    let (ctx, crx) = std::sync::mpsc::channel();
+                    host::spawn_deep_search(self.settings.clone(), arg.clone(), 6, 3, ctx);
+                    deliver_research(tx, crx, |deep| Event::Research {
+                        title: format!("Deep search: {}", deep.query),
+                        body: prism_core::web::format_deep(&deep),
+                    });
+                }
+            }
+            "multi" => {
+                if arg.is_empty() {
+                    self.push_message("system", "usage: /multi <prompt> — send one prompt to every configured provider");
+                } else {
+                    let targets = prism_core::ensemble::settings_targets(&self.settings, 4);
+                    if targets.is_empty() {
+                        self.push_message("system", "multi: no usable provider targets");
+                    } else {
+                        self.open_research_busy(
+                            &format!("Multi-send: {arg}"),
+                            &format!("asking {} model(s)…", targets.len()),
+                        );
+                        let (ctx, crx) = std::sync::mpsc::channel();
+                        host::spawn_multi(self.settings.clone(), arg.clone(), 4, ctx);
+                        deliver_research(tx, crx, move |responses| Event::Research {
+                            title: format!("Multi-send: {arg}"),
+                            body: prism_core::ensemble::format_multi(&arg, &responses),
+                        });
+                    }
+                }
+            }
+            "council" => {
+                let mut it = arg.splitn(2, char::is_whitespace);
+                let first = it.next().unwrap_or("");
+                let (strategy, prompt) = match prism_core::ensemble::VotingStrategy::parse(first) {
+                    Some(strategy) => (strategy, it.next().unwrap_or("").trim().to_string()),
+                    None => (prism_core::ensemble::VotingStrategy::SingleJudge, arg.clone()),
+                };
+                if prompt.is_empty() {
+                    self.push_message(
+                        "system",
+                        "usage: /council [single-judge|peer-vote|consensus] <prompt>",
+                    );
+                } else {
+                    let title = format!("Council ({}): {prompt}", strategy.label());
+                    self.open_research_busy(&title, "collecting member answers and votes…");
+                    let (ctx, crx) = std::sync::mpsc::channel();
+                    host::spawn_council(self.settings.clone(), prompt.clone(), strategy, 4, ctx);
+                    deliver_research(tx, crx, move |result| Event::Research {
+                        title: title.clone(),
+                        body: match result {
+                            Ok(response) => prism_core::ensemble::format_council(&response),
+                            Err(e) => format!("council failed: {e}"),
+                        },
+                    });
+                }
+            }
+            "debate" => {
+                let mut it = arg.splitn(2, char::is_whitespace);
+                let first = it.next().unwrap_or("");
+                let (turns, topic) = match first.parse::<usize>() {
+                    Ok(n) if (1..=12).contains(&n) => (n, it.next().unwrap_or("").trim().to_string()),
+                    _ => (4, arg.clone()),
+                };
+                if topic.is_empty() {
+                    self.push_message("system", "usage: /debate [turns] <topic>");
+                } else {
+                    let title = format!("Debate: {topic}");
+                    self.open_research_busy(&title, &format!("running {turns} debate turns…"));
+                    let (ctx, crx) = std::sync::mpsc::channel();
+                    host::spawn_debate(self.settings.clone(), topic.clone(), turns, 2, ctx);
+                    deliver_research(tx, crx, move |result| Event::Research {
+                        title: title.clone(),
+                        body: match result {
+                            Ok(response) => prism_core::ensemble::format_debate(&topic, &response),
+                            Err(e) => format!("debate failed: {e}"),
+                        },
+                    });
+                }
+            }
+            "search-provider" => {
+                let mut it = arg.splitn(2, char::is_whitespace);
+                let provider = it.next().unwrap_or("");
+                match provider {
+                    "" => self.push_message(
+                        "system",
+                        &format!(
+                            "web search: {} · searxng url: {} (usage: /search-provider duckduckgo|searxng [url])",
+                            self.settings.search_provider,
+                            if self.settings.searxng_url.is_empty() {
+                                "<unset>"
+                            } else {
+                                &self.settings.searxng_url
+                            }
+                        ),
+                    ),
+                    "duckduckgo" | "ddg" => {
+                        self.settings.search_provider = "duckduckgo".into();
+                        self.persist_settings();
+                        self.status = "web search: duckduckgo".into();
+                    }
+                    "searxng" | "searx" => {
+                        self.settings.search_provider = "searxng".into();
+                        if let Some(url) = it.next().map(str::trim).filter(|u| !u.is_empty()) {
+                            self.settings.searxng_url = url.to_string();
+                        }
+                        self.persist_settings();
+                        self.status = if self.settings.searxng_url.is_empty() {
+                            "web search: searxng (set a url with /search-provider searxng <url>)".into()
+                        } else {
+                            format!("web search: searxng · {}", self.settings.searxng_url)
+                        };
+                    }
+                    other => self.push_message(
+                        "system",
+                        &format!("unknown search provider {other:?} — use duckduckgo or searxng"),
+                    ),
+                }
+            }
             "quit" | "q" => self.quit = true,
             "mcp" => {
                 if arg == "panel" || arg == "ui" || arg == "test" {
@@ -1642,6 +1831,22 @@ impl App {
         }
     }
 
+    // -- research panel ----------------------------------------------------
+
+    fn open_research_busy(&mut self, title: &str, note: &str) {
+        self.research_panel = Some(ResearchPanel::busy(title, note));
+        self.mode = Mode::Research;
+        self.status = format!("research running: {title}");
+    }
+
+    fn close_research_panel(&mut self) {
+        self.research_panel = None;
+        if self.mode == Mode::Research {
+            self.mode = Mode::Normal;
+        }
+        self.status = "ready".into();
+    }
+
     // -- MCP panel ---------------------------------------------------------
 
     /// Open (or re-focus) the MCP monitor and start a discovery pass.
@@ -1855,6 +2060,33 @@ impl App {
                     if panel.editing && panel.args.len() < 4096 {
                         panel.args.push(c);
                     }
+                }
+            }
+            (Mode::Research, KeyCode::Esc, _, _) => self.close_research_panel(),
+            (Mode::Research, KeyCode::Char('q'), false, false) => self.close_research_panel(),
+            (Mode::Research, KeyCode::Up, false, false) => {
+                if let Some(panel) = self.research_panel.as_mut() {
+                    panel.scroll = panel.scroll.saturating_sub(1);
+                }
+            }
+            (Mode::Research, KeyCode::Down, false, false) => {
+                if let Some(panel) = self.research_panel.as_mut() {
+                    panel.scroll += 1;
+                }
+            }
+            (Mode::Research, KeyCode::PageUp, _, _) => {
+                if let Some(panel) = self.research_panel.as_mut() {
+                    panel.scroll = panel.scroll.saturating_sub(10);
+                }
+            }
+            (Mode::Research, KeyCode::PageDown, _, _) => {
+                if let Some(panel) = self.research_panel.as_mut() {
+                    panel.scroll += 10;
+                }
+            }
+            (Mode::Research, KeyCode::Home, _, _) => {
+                if let Some(panel) = self.research_panel.as_mut() {
+                    panel.scroll = 0;
                 }
             }
             (Mode::Search, KeyCode::Esc, _, _) => {
@@ -2266,4 +2498,19 @@ impl App {
         const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         FRAMES[self.spinner % FRAMES.len()]
     }
+}
+
+/// Wait for one background research result and post it to the app. Keeps
+/// the UI thread free while the shared host runtime does the work.
+fn deliver_research<T: Send + 'static>(
+    tx: &std::sync::mpsc::Sender<Event>,
+    rx: std::sync::mpsc::Receiver<T>,
+    map: impl FnOnce(T) -> Event + Send + 'static,
+) {
+    let tx = tx.clone();
+    std::thread::spawn(move || {
+        if let Ok(value) = rx.recv() {
+            let _ = tx.send(map(value));
+        }
+    });
 }

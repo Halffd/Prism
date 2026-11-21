@@ -80,6 +80,15 @@ pub enum AgentEvent {
     },
 }
 
+/// One finished research job (web, deep search, ensemble). Formatted by
+/// the core so the desktop and CLI show the same text.
+#[derive(Debug, Clone)]
+pub struct ResearchResult {
+    pub title: String,
+    pub body: String,
+    pub status: String,
+}
+
 /// One line in the chat transcript.
 #[derive(Clone, Debug)]
 pub struct Line {
@@ -142,6 +151,8 @@ pub struct State {
     pub streaming: bool,
     pub rx: Option<Receiver<StreamEvent>>,
     pub rx_models: Option<Receiver<ModelsEvent>>,
+    /// Receivers for research jobs, drained by the timer pump.
+    pub rx_research: Vec<Receiver<ResearchResult>>,
 
     /// Receivers for agent/subagent jobs, drained by the timer pump
     /// (`drain_agent`); Slint handles are not `Send`, so worker threads
@@ -227,6 +238,7 @@ impl State {
             streaming: false,
             rx: None,
             rx_models: None,
+            rx_research: Vec::new(),
             #[cfg(feature = "agent")]
             rx_agent: Vec::new(),
             gpu_idx,
@@ -2194,6 +2206,186 @@ pub fn drain_models(ui: &AppWindow, state: &Rc<RefCell<State>>) {
     }
 }
 
+/// Panel title for a research kind. Kept pure so the mapping is
+/// testable without a Slint window.
+pub fn research_title(
+    kind: &str,
+    query: &str,
+    strategy: prism_core::ensemble::VotingStrategy,
+) -> String {
+    match kind {
+        "deep" => format!("Deep search: {query}"),
+        "multi" => format!("Multi-send: {query}"),
+        "council" => format!("Council ({}): {query}", strategy.label()),
+        "debate" => format!("Debate: {query}"),
+        _ => format!("Web: {query}"),
+    }
+}
+
+/// Start one research job and report through the timer pump. The
+/// provider choice is persisted, so the next run (and the CLI) sees it.
+pub fn research_run(ui: &AppWindow, state: &Rc<RefCell<State>>, kind: &str) {
+    let query = ui.get_research_query().trim().to_string();
+    if query.is_empty() {
+        ui.set_research_status("enter a question first".into());
+        return;
+    }
+    let provider = if ui.get_research_provider_idx() == 1 {
+        "searxng"
+    } else {
+        "duckduckgo"
+    };
+    let (settings, saved) = {
+        let mut st = state.borrow_mut();
+        st.settings.search_provider = provider.to_string();
+        let saved = host::save_settings(&st.settings);
+        (st.settings.clone(), saved)
+    };
+    let strategy = match ui.get_research_strategy_idx() {
+        1 => prism_core::ensemble::VotingStrategy::PeerVote,
+        2 => prism_core::ensemble::VotingStrategy::Consensus,
+        _ => prism_core::ensemble::VotingStrategy::SingleJudge,
+    };
+    let title = research_title(kind, &query, strategy);
+    ui.set_research_title(title.clone().into());
+    ui.set_research_body("working…".into());
+    ui.set_research_busy(true);
+    ui.set_research_status(
+        match saved {
+            Ok(()) => format!("{kind} running · {provider}"),
+            Err(e) => format!("{kind} running · settings not saved: {e}"),
+        }
+        .into(),
+    );
+
+    let (rtx, rrx) = mpsc::channel::<ResearchResult>();
+    state.borrow_mut().rx_research.push(rrx);
+    let kind = kind.to_string();
+    let provider_note = provider.to_string();
+    std::thread::spawn(move || {
+        let mut result = match kind.as_str() {
+            "deep" => {
+                let (tx, rx) = mpsc::channel();
+                host::spawn_deep_search(settings, query.clone(), 6, 3, tx);
+                match rx.recv() {
+                    Ok(deep) => ResearchResult {
+                        title: format!("Deep search: {}", deep.query),
+                        body: prism_core::web::format_deep(&deep),
+                        status: format!("deep search · {}", deep.provider),
+                    },
+                    Err(e) => ResearchResult {
+                        title,
+                        body: format!("deep search failed: {e}"),
+                        status: "deep search failed".into(),
+                    },
+                }
+            }
+            "multi" => {
+                let (tx, rx) = mpsc::channel();
+                host::spawn_multi(settings, query.clone(), 4, tx);
+                match rx.recv() {
+                    Ok(responses) => ResearchResult {
+                        title: format!("Multi-send: {query}"),
+                        body: prism_core::ensemble::format_multi(&query, &responses),
+                        status: format!("multi-send · {} response(s)", responses.len()),
+                    },
+                    Err(e) => ResearchResult {
+                        title,
+                        body: format!("multi-send failed: {e}"),
+                        status: "multi-send failed".into(),
+                    },
+                }
+            }
+            "council" => {
+                let (tx, rx) = mpsc::channel();
+                host::spawn_council(settings, query.clone(), strategy, 4, tx);
+                match rx.recv() {
+                    Ok(Ok(response)) => ResearchResult {
+                        title,
+                        body: prism_core::ensemble::format_council(&response),
+                        status: format!("council · winner {}", response.winner),
+                    },
+                    Ok(Err(e)) => ResearchResult {
+                        title,
+                        body: format!("council failed: {e}"),
+                        status: "council failed".into(),
+                    },
+                    Err(e) => ResearchResult {
+                        title,
+                        body: format!("council failed: {e}"),
+                        status: "council failed".into(),
+                    },
+                }
+            }
+            "debate" => {
+                let (tx, rx) = mpsc::channel();
+                host::spawn_debate(settings, query.clone(), 4, 2, tx);
+                match rx.recv() {
+                    Ok(Ok(response)) => ResearchResult {
+                        title,
+                        body: prism_core::ensemble::format_debate(&query, &response),
+                        status: format!("debate · {} turn(s)", response.turns.len()),
+                    },
+                    Ok(Err(e)) => ResearchResult {
+                        title,
+                        body: format!("debate failed: {e}"),
+                        status: "debate failed".into(),
+                    },
+                    Err(e) => ResearchResult {
+                        title,
+                        body: format!("debate failed: {e}"),
+                        status: "debate failed".into(),
+                    },
+                }
+            }
+            _ => {
+                let (tx, rx) = mpsc::channel();
+                host::spawn_search(settings, query.clone(), 8, tx);
+                match rx.recv() {
+                    Ok(outcome) => ResearchResult {
+                        title: format!("Web: {}", outcome.query),
+                        body: prism_core::web::format_search(&outcome),
+                        status: format!("web · {}", outcome.provider),
+                    },
+                    Err(e) => ResearchResult {
+                        title,
+                        body: format!("web search failed: {e}"),
+                        status: "web search failed".into(),
+                    },
+                }
+            }
+        };
+        if result.status.is_empty() {
+            result.status = format!("{provider_note} · done");
+        }
+        let _ = rtx.send(result);
+    });
+}
+
+/// Drain finished research jobs once per timer tick.
+pub fn drain_research(ui: &AppWindow, state: &Rc<RefCell<State>>) {
+    let rxs = std::mem::take(&mut state.borrow_mut().rx_research);
+    let mut keep = Vec::new();
+    for rx in rxs {
+        loop {
+            match rx.try_recv() {
+                Ok(result) => {
+                    ui.set_research_title(result.title.into());
+                    ui.set_research_body(result.body.into());
+                    ui.set_research_status(result.status.into());
+                    ui.set_research_busy(false);
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    keep.push(rx);
+                    break;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => break,
+            }
+        }
+    }
+    state.borrow_mut().rx_research = keep;
+}
+
 /// Drain every live agent/subagent channel once per timer tick. `Done`
 /// is handed to the `agent-done` callback (which renders the steps and
 /// appends the answer); `Notice` becomes a system line; a background
@@ -2487,6 +2679,36 @@ pub fn run_ui() {
                 .map(|l| SharedString::from(*l))
                 .collect::<Vec<_>>(),
         ))));
+        ui.set_research_provider_labels(ModelRc::from(Rc::new(VecModel::from(
+            vec![
+                SharedString::from("DuckDuckGo"),
+                SharedString::from("SearXNG"),
+            ],
+        ))));
+        ui.set_research_strategy_labels(ModelRc::from(Rc::new(VecModel::from(
+            vec![
+                SharedString::from("single-judge"),
+                SharedString::from("peer-vote"),
+                SharedString::from("consensus"),
+            ],
+        ))));
+        ui.set_research_provider_idx(if st.settings.search_provider == "searxng" {
+            1
+        } else {
+            0
+        });
+        ui.set_research_status(
+            format!(
+                "backend: {} · searxng url: {}",
+                st.settings.search_provider,
+                if st.settings.searxng_url.is_empty() {
+                    "<unset>"
+                } else {
+                    &st.settings.searxng_url
+                }
+            )
+            .into(),
+        );
         ui.set_provider(st.settings.provider.as_str().into());
         let total = PROVIDERS.len() + st.settings.custom_providers.len();
         let pos = (0..total)
@@ -3223,6 +3445,22 @@ pub fn run_ui() {
     }
     {
         let ui_w = ui.as_weak();
+        ui.on_research_toggle(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            let open = !ui.get_show_research();
+            ui.set_show_research(open);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_research_run(move |kind| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            research_run(&ui, &state_c, kind.as_str());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
         let state_c = state.clone();
         let lines_c = lines_model.clone();
         ui.on_search_jump(move |conversation_id, message_index| {
@@ -3641,10 +3879,32 @@ pub fn run_ui() {
                 drain_models(&ui, &state_c);
                 #[cfg(feature = "agent")]
                 drain_agent(&ui, &state_c, &lines_c);
+                drain_research(&ui, &state_c);
                 media::drain(&ui, &state_c);
             },
         );
     }
 
     ui.run().expect("slint event loop failed");
+}
+
+#[cfg(test)]
+mod research_tests {
+    use super::research_title;
+    use prism_core::ensemble::VotingStrategy;
+
+    #[test]
+    fn research_titles_name_every_view() {
+        let strategy = VotingStrategy::SingleJudge;
+        assert_eq!(research_title("web", "rust", strategy), "Web: rust");
+        assert_eq!(research_title("deep", "rust", strategy), "Deep search: rust");
+        assert_eq!(research_title("multi", "rust", strategy), "Multi-send: rust");
+        assert_eq!(
+            research_title("council", "rust", VotingStrategy::PeerVote),
+            "Council (peer-vote): rust"
+        );
+        assert_eq!(research_title("debate", "rust", strategy), "Debate: rust");
+        // Unknown kinds fall back to the web view rather than panicking.
+        assert_eq!(research_title("bogus", "rust", strategy), "Web: rust");
+    }
 }

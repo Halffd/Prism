@@ -149,6 +149,12 @@ pub struct Settings {
     /// Permission for tools with no explicit override. Empty = keep the
     /// registry default (native file tools ship read=allow, write=ask).
     pub default_tool_permission: String,
+    /// Web search backend used by `/web`, `/deep` and the Research view:
+    /// "duckduckgo" (default) or "searxng".
+    pub search_provider: String,
+    /// SearXNG base URL (e.g. `https://searx.be`); required when
+    /// `search_provider` is `searxng`.
+    pub searxng_url: String,
 }
 
 impl Default for Settings {
@@ -175,6 +181,8 @@ impl Default for Settings {
             communication_mode: "off".into(),
             tool_permissions: HashMap::new(),
             default_tool_permission: String::new(),
+            search_provider: "duckduckgo".into(),
+            searxng_url: String::new(),
         }
     }
 }

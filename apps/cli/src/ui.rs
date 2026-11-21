@@ -20,6 +20,7 @@ pub const HELP_LINES: &[&str] = &[
     "modes: chat (no tools) · agent (tools+subagents) · code (style only) · creative (cards+lore) · daemon (tasks, always-on) · generative (image/video/audio) · Alt+M cycles, /mode lists",
     "mixing: /mix <id> blends another mode in (capabilities union, prompt voice stays primary) · /unmix <id> removes it · /cap tools|subagents|commands|character-cards|media|tasks|strategy [on|off] toggles one capability · /perm <tool> allow|ask|deny edits the policy",
     "agent shell: PRISM_AGENT_SANDBOX_POLICY (JSON or file) adds the sandboxed `shell` tool · prism sandbox preflight [--policy FILE] [--json] probes the host",
+    "research: /web <query> (DuckDuckGo or SearXNG) · /deep <query> (search + fetch + synthesize) · /multi <prompt> (every provider) · /council [single-judge|peer-vote|consensus] <prompt> · /debate [turns] <topic> · /search-provider duckduckgo|searxng [url] — results open in one scrollable panel",
     "mcp: ~/.config/prism/mcp.json (PRISM_MCP_CONFIG overrides) — \"mcpServers\" registers stdio servers as mcp__server__tool in every agent run · /mcp reports what connects · /mcp panel monitors servers and calls any tool with JSON args",
     "subagents: /agents lists the core registry (explore, security-review, bugbot, ci-investigation, browser-use, shell-ops) plus \"subagents\" entries in mcp.json · /agents spawn <name> <task> runs one in the background with its forced model and clamped tools",
     "keys: Enter send · Esc stop/clear · Ctrl+F search (n/N navigate) · PgUp/PgDn scroll · Ctrl+T thinking · Alt+N new chat · Alt+P/K pick chat · Alt+O open · Alt+M mode · Ctrl+U clear input · Ctrl+W del word · Ctrl+C quit",
@@ -46,6 +47,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     if app.mcp_panel.is_some() {
         draw_mcp_panel(f, app, outer[0]);
+    } else if app.research_panel.is_some() {
+        draw_research_panel(f, app, outer[0]);
     } else {
         draw_conversations(f, app, panes[0]);
         draw_timeline(f, app, panes[1]);
@@ -53,6 +56,29 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
     draw_composer(f, app, outer[1]);
     draw_status(f, app, outer[2]);
+}
+
+/// The research panel: one scrollable transcript shared by `/web`,
+/// `/deep`, `/multi`, `/council` and `/debate`.
+fn draw_research_panel(f: &mut Frame, app: &App, area: Rect) {
+    let Some(panel) = &app.research_panel else {
+        return;
+    };
+    let title = format!(
+        " {} {} ",
+        panel.title,
+        if panel.busy { "· running" } else { "· Esc closes" }
+    );
+    let hint = "↑/↓ scroll · PgUp/PgDn page · Esc/q close";
+    let block = Block::new()
+        .borders(Borders::ALL)
+        .title(Span::styled(title, Style::new().fg(Color::Cyan)))
+        .title_bottom(Span::styled(hint, Style::new().fg(Color::DarkGray)));
+    let paragraph = Paragraph::new(panel.body.as_str())
+        .block(block)
+        .scroll((panel.scroll.min(u16::MAX as usize) as u16, 0))
+        .wrap(Wrap { trim: false });
+    f.render_widget(paragraph, area);
 }
 
 /// The in-app MCP monitor/test panel: servers+tools on the left, the
@@ -598,6 +624,7 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
         Mode::Normal => "",
         Mode::Search => "SEARCH · ",
         Mode::Mcp => "MCP · ",
+        Mode::Research => "RESEARCH · ",
     };
     let im = app.imode;
     let t = im.traits();

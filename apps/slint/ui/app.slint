@@ -173,6 +173,17 @@ export component AppWindow inherits Window {
     in property <[string]> search-sort-labels;
     in property <[SearchRow]> search-results;
     in property <string> search-status;
+    // ---- research (web / deep / multi / council / debate) ----
+    in-out property <bool> show-research: false;
+    in-out property <string> research-query;
+    in-out property <int> research-provider-idx: 0;
+    in-out property <int> research-strategy-idx: 0;
+    in property <[string]> research-provider-labels;
+    in property <[string]> research-strategy-labels;
+    in property <string> research-status;
+    in property <string> research-title;
+    in property <string> research-body;
+    in property <bool> research-busy: false;
     // ---- context management ----
     in property <[ContextRow]> context-items;
     in-out property <string> context-budget: "4000";
@@ -293,6 +304,9 @@ export component AppWindow inherits Window {
     callback tree-open(string);        // relative path of a tree row
     callback editor-changed(string);
     callback editor-save();
+    // ---- research ----
+    callback research-toggle();
+    callback research-run(string);      // "web" | "deep" | "multi" | "council" | "debate"
     // ---- search ----
     callback search-toggle();
     callback search-run();
@@ -549,6 +563,10 @@ export component AppWindow inherits Window {
                 Button {
                     text: "Search";
                     clicked => { search-toggle(); }
+                }
+                Button {
+                    text: "Research";
+                    clicked => { research-toggle(); }
                 }
                 Button { checkable: true; checked <=> show-settings; text: "Settings"; }
             }
@@ -820,6 +838,99 @@ export component AppWindow inherits Window {
                 }
         }
             }
+
+        // ---- research panel ----
+        // One panel for the whole research pipeline; the core formats
+        // the text so the CLI and desktop show identical results.
+        if show-research : Rectangle {
+            width: 430px;
+            background: #161b21;
+            border-width: 1px;
+            border-color: #232a31;
+            VerticalLayout {
+                padding: 10px;
+                spacing: 8px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: "Research";
+                        color: #e8e6e3;
+                        font-size: 17px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    if research-busy : Text {
+                        text: "running…";
+                        color: #f5d76e;
+                        vertical-alignment: center;
+                    }
+                    Button { text: "Close"; clicked => { research-toggle(); } }
+                }
+                Text { text: "Search backend"; color: #8b95a1; font-size: 11px; }
+                ComboBox {
+                    model: research-provider-labels;
+                    current-index <=> research-provider-idx;
+                }
+                Text { text: "Question"; color: #8b95a1; font-size: 11px; }
+                LineEdit {
+                    text <=> research-query;
+                    placeholder-text: "Ask the web, or give the ensemble a prompt";
+                    accepted(t) => { research-run("web"); }
+                }
+                HorizontalLayout {
+                    spacing: 4px;
+                    Button { text: "Web"; clicked => { research-run("web"); } }
+                    Button { text: "Deep"; clicked => { research-run("deep"); } }
+                    Button { text: "Multi"; clicked => { research-run("multi"); } }
+                    Button { text: "Council"; clicked => { research-run("council"); } }
+                    Button { text: "Debate"; clicked => { research-run("debate"); } }
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    Text {
+                        text: "Council vote";
+                        color: #8b95a1;
+                        font-size: 11px;
+                        vertical-alignment: center;
+                    }
+                    ComboBox {
+                        model: research-strategy-labels;
+                        current-index <=> research-strategy-idx;
+                    }
+                }
+                Text {
+                    text: research-status;
+                    color: #8b95a1;
+                    font-size: 11px;
+                    wrap: word-wrap;
+                }
+                Rectangle { height: 1px; background: #232a31; }
+                Text {
+                    text: research-title;
+                    color: #7ee787;
+                    font-size: 12px;
+                    font-weight: 700;
+                    overflow: elide;
+                }
+                Rectangle {
+                    vertical-stretch: 1;
+                    background: #101418;
+                    border-radius: 4px;
+                    ScrollView {
+                        VerticalLayout {
+                            padding: 8px;
+                            Text {
+                                text: research-body;
+                                color: #cfd8dc;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // ---- settings panel ----
         if show-settings : Rectangle {
