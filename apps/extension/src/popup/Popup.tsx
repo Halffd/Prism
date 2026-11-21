@@ -560,7 +560,9 @@ export function Popup() {
   // the popup is left open without a new message.
   useEffect(() => {
     let cancelled = false;
-    let timer: number | null = null;
+    // `@types/node` and the DOM lib each define `setInterval` with a
+    // different handle type; this matches whichever is in scope.
+    let timer: ReturnType<typeof setInterval> | null = null;
 
     void loadBackupSettings().then((settings) => {
       if (cancelled || !settings.enabled) return;

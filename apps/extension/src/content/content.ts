@@ -904,8 +904,10 @@ function injectFloatingButton() {
   button.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     button.style.opacity = '0';
-    buttonRemovedByUser = true; // Mark that user removed the button
-    void setButtonRemoved(true); // Persist the state in the extension's own storage
+    // The dismissal is persisted in the extension's own storage, which is
+    // the single source of truth: `isButtonRemoved` is read fresh wherever
+    // the decision is made, so no in-memory copy is kept.
+    void setButtonRemoved(true);
     setTimeout(() => {
       document.body.removeChild(button);
     }, 200);
@@ -1137,16 +1139,12 @@ async function loadButtonSettings() {
   }
 }
 
-// Tracks whether the user dismissed the floating button on this origin.
-// Populated from the extension's storage by `initializeFloatingButton`.
-let buttonRemovedByUser = false;
-
 // Enable the floating button. The dismissal flag lives in the extension's
-// own storage, so reading it is asynchronous: the button is injected once
-// the read resolves rather than on a bare top-level statement.
+// own storage and is read fresh on each call, so there is no cached copy
+// to keep in sync: `injectFloatingButton` checks it through
+// `isButtonRemoved` at the moment it decides.
 async function initializeFloatingButton() {
   const removed = await isButtonRemoved();
-  buttonRemovedByUser = removed;
   if (!removed) {
     injectFloatingButton();
   }
@@ -1315,7 +1313,6 @@ chrome.storage.onChanged?.addListener((changes, areaName) => {
 // read resolves — otherwise it could re-inject a button the user dismissed.
 if (isTopFrame) {
   void isButtonRemoved().then((removed) => {
-    buttonRemovedByUser = removed;
     if (removed) {
       return;
     }
