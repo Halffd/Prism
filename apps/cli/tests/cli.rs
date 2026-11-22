@@ -13,7 +13,6 @@ use prism_core::client::StreamEvent;
 use prism_core::host;
 use prism_core::settings::{Connection, Settings};
 use std::sync::mpsc;
-use std::sync::Mutex;
 
 fn env_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
