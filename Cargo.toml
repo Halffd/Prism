@@ -7,6 +7,9 @@ members = [
     "apps/slint",
     "apps/cli",
     "apps/native-server",
+    # The canvas node-graph studio (Dioxus/WASM). Web-only: it is built by
+    # trunk from apps/graph, never part of a desktop/native binary.
+    "apps/graph",
 ]
 
 [workspace.dependencies]
