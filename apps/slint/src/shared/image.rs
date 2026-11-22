@@ -72,6 +72,16 @@ pub const SCHEDULERS: &[&str] = &[
 pub const MAX_LORAS: usize = 8;
 pub const MAX_RESULTS: usize = 12;
 
+/// Aspect-ratio presets offered by the Latent node (ComfyUI's empty
+/// latent is derived from one of these plus a dimension class).
+pub const ASPECT_PRESETS: &[(&str, u32, u32)] = &[
+    ("1:1", 512, 512),
+    ("4:3", 640, 480),
+    ("3:4", 480, 640),
+    ("16:9", 640, 360),
+    ("9:16", 360, 640),
+];
+
 /// Slider ranges / defaults (mirroring the core's local-SD defaults).
 pub const DEFAULT_STEPS: f64 = 20.0;
 pub const DEFAULT_CFG: f64 = 7.0;
@@ -134,6 +144,8 @@ pub struct ImageState {
     pub task_id: Option<String>,
     /// Countdown (ms) until the next poll.
     pub poll_wait_ms: u32,
+    /// True when the seed field is locked for reuse.
+    pub seed_locked: bool,
     /// Finished images, newest first.
     pub tiles: Vec<ImageTile>,
 }
@@ -152,6 +164,7 @@ impl Default for ImageState {
             poll: None,
             task_id: None,
             poll_wait_ms: POLL_INTERVAL_MS,
+            seed_locked: false,
             tiles: Vec::new(),
         }
     }
@@ -229,6 +242,15 @@ pub fn clamp_batch(batch: i32) -> u32 {
 
 pub fn clamp_clip_skip(clip_skip: i32) -> u32 {
     clip_skip.clamp(1, 12) as u32
+}
+
+/// Look up an aspect preset by its display text ("16:9"), returning the
+/// width/height it should write into the Latent node.
+pub fn aspect_preset(ratio: &str) -> Option<(u32, u32)> {
+    ASPECT_PRESETS
+        .iter()
+        .find(|(label, _, _)| *label == ratio.trim())
+        .map(|(_, width, height)| (*width, *height))
 }
 
 /// A LoRA weight: empty means 1.0 (the trained strength).
@@ -402,6 +424,7 @@ pub fn init(ui: &AppWindow, state: &Rc<RefCell<State>>) {
     ui.set_image_provider_labels(label_model(PROVIDERS.iter().map(|(_, l)| *l)));
     ui.set_image_sampler_labels(label_model(SAMPLERS.iter().copied()));
     ui.set_image_scheduler_labels(label_model(SCHEDULERS.iter().copied()));
+    ui.set_image_aspect_labels(label_model(ASPECT_PRESETS.iter().map(|(l, _, _)| *l)));
     let st = state.borrow();
     ui.set_image_provider_idx(st.image.provider_idx as i32);
     ui.set_image_sampler_idx(st.image.sampler_idx as i32);
@@ -409,6 +432,7 @@ pub fn init(ui: &AppWindow, state: &Rc<RefCell<State>>) {
     ui.set_image_provider(provider_id(st.image.provider_idx).into());
     ui.set_image_steps(DEFAULT_STEPS as f32);
     ui.set_image_cfg(DEFAULT_CFG as f32);
+    ui.set_image_seed_locked(st.image.seed_locked);
     let loras = st.image.loras.clone();
     drop(st);
     refresh_loras(ui, &loras);
@@ -439,9 +463,33 @@ pub fn select_scheduler(ui: &AppWindow, state: &Rc<RefCell<State>>, idx: i32) {
     ui.set_image_scheduler_idx(idx as i32);
 }
 
-/// Roll a fresh random seed into the seed field.
-pub fn seed_random(ui: &AppWindow, _state: &Rc<RefCell<State>>) {
+/// Roll a fresh random seed into the seed field. A locked seed stays put,
+/// so repeated generations reuse the same value.
+pub fn seed_random(ui: &AppWindow, state: &Rc<RefCell<State>>) {
+    if state.borrow().image.seed_locked {
+        return;
+    }
     ui.set_image_seed(random_seed().to_string().into());
+}
+
+/// Apply an aspect preset to the width/height fields. Unknown ratios are
+/// ignored so a typo never blanks the user's manual dimensions.
+pub fn aspect_selected(ui: &AppWindow, ratio: &str) {
+    if let Some((width, height)) = aspect_preset(ratio) {
+        ui.set_image_width(width.to_string().into());
+        ui.set_image_height(height.to_string().into());
+    }
+}
+
+/// Toggle the seed's reuse lock and expose the new state to the panel.
+/// When locked, the dice is disabled so a generation keeps the seed.
+pub fn seed_lock_toggle(ui: &AppWindow, state: &Rc<RefCell<State>>) {
+    let locked = {
+        let mut st = state.borrow_mut();
+        st.image.seed_locked = !st.image.seed_locked;
+        st.image.seed_locked
+    };
+    ui.set_image_seed_locked(locked);
 }
 
 pub fn batch_step(ui: &AppWindow, delta: i32) {
@@ -971,6 +1019,19 @@ mod tests {
         for _ in 0..100 {
             assert_ne!(random_seed(), 0);
         }
+    }
+
+    #[test]
+    fn aspect_presets_are_looked_up_by_label() {
+        assert_eq!(aspect_preset("1:1"), Some((512, 512)));
+        assert_eq!(aspect_preset(" 16:9 "), Some((640, 360)));
+        assert_eq!(aspect_preset("21:9"), None);
+        // Every preset is positive and distinct.
+        let mut labels: Vec<&str> = ASPECT_PRESETS.iter().map(|(l, _, _)| *l).collect();
+        labels.sort_unstable();
+        labels.dedup();
+        assert_eq!(labels.len(), ASPECT_PRESETS.len());
+        assert!(ASPECT_PRESETS.iter().all(|(_, w, h)| *w > 0 && *h > 0));
     }
 
     #[test]

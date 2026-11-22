@@ -3028,6 +3028,21 @@ pub fn run_ui() {
     }
     {
         let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_image_seed_lock_toggle(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            image::seed_lock_toggle(&ui, &state_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        ui.on_image_aspect_selected(move |ratio| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            image::aspect_selected(&ui, &ratio);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
         ui.on_image_batch_step(move |d| {
             let Some(ui) = ui_w.upgrade() else { return };
             image::batch_step(&ui, d);

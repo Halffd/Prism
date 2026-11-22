@@ -122,23 +122,47 @@ component TileCard inherits Rectangle {
 }
 
 // Image studio: a node-style parameter group (ComfyUI's node bodies).
+// `accent` is the node's logic color (model / prompt / sampler);
+// `wire` draws the fake graph connector out of the node's bottom.
 component NodeSection inherits Rectangle {
     in property <string> title;
+    in property <color> accent: #b026ff;
+    in property <bool> wire: true;
     background: #141414;
     border-width: 1px;
     border-color: #2c2c2c;
     border-radius: 8px;
     VerticalLayout {
         padding: 8px;
+        padding-bottom: wire ? 18px : 8px;
         spacing: 6px;
+        Rectangle {
+            height: 2px;
+            background: accent;
+        }
         Text {
             text: title;
-            color: #c084fc;
+            color: accent;
             font-size: 10px;
             font-weight: 700;
             letter-spacing: 1px;
         }
         @children
+    }
+    if wire : Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: parent.height - self.height;
+        width: 2px;
+        height: 14px;
+        background: #3a2b48;
+        Rectangle {
+            x: -3px;
+            y: parent.height - self.height;
+            width: 8px;
+            height: 8px;
+            border-radius: 4px;
+            background: accent;
+        }
     }
 }
 
@@ -340,6 +364,7 @@ export component AppWindow inherits Window {
     in property <[string]> image-provider-labels;
     in-out property <int> image-provider-idx: 0;
     in property <string> image-provider;
+    in property <[string]> image-aspect-labels; // latent aspect presets ("16:9")
     in property <[string]> image-sampler-labels;
     in-out property <int> image-sampler-idx: 0;
     in property <[string]> image-scheduler-labels;
@@ -355,6 +380,7 @@ export component AppWindow inherits Window {
     in-out property <float> image-cfg: 7;
     in-out property <float> image-denoise: 1;
     in-out property <string> image-seed;
+    in property <bool> image-seed-locked: false;
     in-out property <int> image-batch: 1;
     in-out property <string> image-width;
     in-out property <string> image-height;
@@ -454,6 +480,8 @@ export component AppWindow inherits Window {
     callback image-scheduler-selected(int);
     callback image-generate();
     callback image-seed-random();
+    callback image-seed-lock-toggle();
+    callback image-aspect-selected(string); // aspect label, e.g. "16:9"
     callback image-batch-step(int);      // +1 / -1
     callback image-clip-step(int);       // +1 / -1
     callback image-lora-add();
@@ -1394,6 +1422,7 @@ export component AppWindow inherits Window {
 
                                 NodeSection {
                                     title: "CHECKPOINT";
+                                    accent: #b026ff;
                                     VerticalLayout {
                                         spacing: 2px;
                                         Text { text: "Checkpoint"; color: #8b95a1; font-size: 10px; }
@@ -1418,6 +1447,7 @@ export component AppWindow inherits Window {
 
                                 NodeSection {
                                     title: "LORA";
+                                    accent: #22c55e;
                                     if image-loras.length == 0 : Text {
                                         text: "No adapters attached.";
                                         color: #666666;
@@ -1477,6 +1507,7 @@ export component AppWindow inherits Window {
 
                                 NodeSection {
                                     title: "PROMPT";
+                                    accent: #38bdf8;
                                     VerticalLayout {
                                         spacing: 2px;
                                         Text { text: "Positive"; color: #8b95a1; font-size: 10px; }
@@ -1499,6 +1530,7 @@ export component AppWindow inherits Window {
 
                                 NodeSection {
                                     title: "SAMPLER";
+                                    accent: #f59e0b;
                                     VerticalLayout {
                                         spacing: 2px;
                                         Text { text: "Sampler"; color: #8b95a1; font-size: 10px; }
@@ -1549,6 +1581,7 @@ export component AppWindow inherits Window {
 
                                 NodeSection {
                                     title: "LATENT";
+                                    accent: #06b6d4;
                                     HorizontalLayout {
                                         spacing: 6px;
                                         VerticalLayout {
@@ -1560,6 +1593,31 @@ export component AppWindow inherits Window {
                                             spacing: 2px;
                                             Text { text: "Height"; color: #8b95a1; font-size: 10px; }
                                             LineEdit { text <=> image-height; placeholder-text: "512"; }
+                                        }
+                                    }
+                                    // Aspect presets write width/height (the Rust helper ignores unknown
+// labels, so manual dimensions survive a stray click).
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        Text { text: "Aspect"; color: #8b95a1; font-size: 10px; vertical-alignment: center; }
+                                        for a in image-aspect-labels : Rectangle {
+                                            height: 22px;
+                                            min-width: 32px;
+                                            background: #1e1e1e;
+                                            border-width: 1px;
+                                            border-color: #333333;
+                                            border-radius: 6px;
+                                            TouchArea {
+                                                clicked => { image-aspect-selected(a); }
+                                                mouse-cursor: pointer;
+                                            }
+                                            Text {
+                                                text: a;
+                                                color: #06b6d4;
+                                                font-size: 10px;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
                                         }
                                     }
                                     VerticalLayout {
@@ -1576,6 +1634,7 @@ export component AppWindow inherits Window {
 
                                 NodeSection {
                                     title: "SEED";
+                                    accent: #f43f5e;
                                     HorizontalLayout {
                                         spacing: 6px;
                                         LineEdit {
@@ -1590,11 +1649,29 @@ export component AppWindow inherits Window {
                                             border-color: #333333;
                                             border-radius: 6px;
                                             TouchArea {
+                                                enabled: !image-seed-locked;
                                                 clicked => { image-seed-random(); }
                                                 mouse-cursor: pointer;
                                             }
                                             Text {
                                                 text: "🎲";
+                                                opacity: image-seed-locked ? 0.35 : 1.0;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                        Rectangle {
+                                            width: 30px;
+                                            background: image-seed-locked ? #3b1220 : #1e1e1e;
+                                            border-width: 1px;
+                                            border-color: image-seed-locked ? #f43f5e : #333333;
+                                            border-radius: 6px;
+                                            TouchArea {
+                                                clicked => { image-seed-lock-toggle(); }
+                                                mouse-cursor: pointer;
+                                            }
+                                            Text {
+                                                text: image-seed-locked ? "🔒" : "🔓";
                                                 horizontal-alignment: center;
                                                 vertical-alignment: center;
                                             }
