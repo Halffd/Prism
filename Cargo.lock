@@ -6282,6 +6282,9 @@ name = "prism-graph"
 version = "0.1.0"
 dependencies = [
  "dioxus",
+ "gloo-net",
+ "js-sys",
+ "prism-core",
  "serde",
  "serde_json",
 ]

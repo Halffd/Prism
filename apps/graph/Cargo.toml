@@ -5,12 +5,31 @@ edition = "2021"
 description = "Prism canvas node-graph studio (Dioxus/WASM) — ComfyUI-style wiring over prism-core"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+# `rlib` only: the wasm artifact for the browser is the *binary* (main.rs →
+# dioxus::launch). A cdylib here would be a second wasm artifact with the
+# same base name, which trunk cannot choose between — and nothing links it,
+# because the web studio drives prism-wasm, not this crate.
+crate-type = ["rlib"]
 
 [dependencies]
-dioxus = { version = "0.7.10", features = ["web"] }
+# `default-features = false` keeps reqwest/tokio/dirs out of the WASM
+# build: the canvas only needs the transport-free graph model, which is
+# exactly what the native server and the JS bridge use too.
+prism-core = { path = "../../crates/prism-core", default-features = false }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+
+# The browser surface (`app`) and the API transport (`sync`) are the only
+# wasm-only parts of this crate, so their dependencies are too. Scoping them
+# by target keeps them out of the host build, which is both faster and free
+# of "unused dependency" warnings — the model and its tests need none of
+# them.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+dioxus = { version = "0.7.10", features = ["web"] }
+# HTTP to the bundled Prism server.
+gloo-net = "0.6"
+# The browser's clock, for the `updated_at` a save must carry.
+js-sys = "0.3"
 
 [features]
 # WASM-only deps (js-sys / web-sys) are pulled in by dioxus' web feature;
@@ -20,5 +39,15 @@ serde_json.workspace = true
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("web"))'] }
 
 # ---- how to run ----
-#   cargo test -p prism-graph            # pure-logic tests (no browser)
-#   trunk serve apps/graph/index.html    # the canvas, WASM build
+#   cargo test -p prism-graph              # canvas + generation tests (no browser)
+#   cargo check -p prism-graph --target wasm32-unknown-unknown
+#   trunk serve apps/graph/index.html     # the canvas, WASM build
+#
+# Note on this host: the default PATH resolves `cargo` to a distro build in
+# /usr/bin that has no wasm32 target. The rustup shims in ~/.cargo/bin do, so
+# a wasm build needs `export PATH="$HOME/.cargo/bin:$PATH"` first (that PATH
+# also carries `trunk` and `wasm-bindgen`).
+#
+# The graph *model* is tested in prism-core (it is shared with the Slint
+# canvas and the sync API); this crate tests the canvas interaction math and
+# the form-to-request mapping on the host, and holds the Dioxus surface.

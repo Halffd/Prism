@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Prism Node Studio</title>
+    <style>
+      /* The canvas is dark. Painting the page the same colour avoids the
+         flash of white between the document arriving and the wasm mounting.
+         Layout itself lives in the Dioxus surface, not here. */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: #0b0d14;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Build only the app binary: the crate also has an `rlib` (used by the
+         host-side unit tests), and trunk refuses to guess between two wasm
+         artifacts with the same base name. -->
+    <link data-trunk rel="rust" data-bin="prism-graph" />
+    <!-- trunk injects the wasm module script after this link. -->
+  </body>
+</html>
