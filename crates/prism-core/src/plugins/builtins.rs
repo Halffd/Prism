@@ -955,6 +955,7 @@ impl Plugin for Skills {
 }
 
 #[cfg(test)]
+
 mod tests {
     use super::*;
     use crate::plugins::tests::MemStorage;
@@ -1155,5 +1156,873 @@ mod tests {
         let list = p.run_command(&ctx, "list", "").unwrap();
         assert_eq!(list, vec!["  demo"]);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+#[test]
+fn notify_routes_only_enabled_events() {
+    let dir = tempdir("notify");
+    let p = Notify;
+    let storage = MemStorage::new();
+    let ctx = ctx_with(&storage, &dir);
+
+    // defaults: every event on, bell on.
+    let routes = Notify::route(&ctx, "stream.done", "ok");
+    assert_eq!(routes.unwrap(), vec![NotifyChannel::Bell]);
+
+    p.run_command(&ctx, "off", "stream.done").unwrap();
+    assert!(Notify::route(&ctx, "stream.done", "ok").unwrap().is_empty());
+
+    p.run_command(&ctx, "webhook", "https://example.com/hook").unwrap();
+    let routes = Notify::route(&ctx, "stream.done", "ok").unwrap();
+    assert!(routes.is_empty()); // event still off
+    assert_eq!(
+        Notify::route(&ctx, "agent.done", "ok").unwrap(),
+        vec![
+            NotifyChannel::Bell,
+            NotifyChannel::Webhook("https://example.com/hook".to_string()),
+        ]
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn notify_status_counts_active_events() {
+    let dir = tempdir("notify-status");
+    let p = Notify;
+    let storage = MemStorage::new();
+    let ctx = ctx_with(&storage, &dir);
+    assert_eq!(p.status(&ctx), "notify:4");
+    p.run_command(&ctx, "off", "stream.done").unwrap();
+    assert_eq!(p.status(&ctx), "notify:3");
+    p.run_command(&ctx, "off", "stream.error").unwrap();
+    assert_eq!(p.status(&ctx), "notify:2");
+    p.run_command(&ctx, "off", "agent.done").unwrap();
+    assert_eq!(p.status(&ctx), "notify:1");
+    p.run_command(&ctx, "off", "research.done").unwrap();
+    assert_eq!(p.status(&ctx), "notify:0");
+    // Bell still on, so the plugin is still delivering something.
+    p.run_command(&ctx, "bell", "off").unwrap();
+    assert_eq!(p.status(&ctx), "");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+
+#[test]
+fn memorydb_queries_and_groups_over_existing_store() {
+    let dir = tempdir("memorydb");
+    let storage = MemStorage::new();
+    let ctx = ctx_with(&storage, &dir);
+
+    // Write through the Memory plugin so both share one format.
+    let mem = Memory;
+    mem.run_command(&ctx, "save", "decision core use tcp").unwrap();
+    mem.run_command(&ctx, "save", "context ui tabs on left").unwrap();
+    mem.run_command(&ctx, "save", "todo core write docs").unwrap();
+
+    let entries = memory_entries(&ctx);
+    assert_eq!(entries.len(), 3);
+    assert_eq!(MemoryDb::scopes(&entries), vec![("core".to_string(), 2), ("ui".to_string(), 1)]);
+    // Ties are broken alphabetically (the map is a BTreeMap), so a
+    // kind's position here says nothing about write order.
+    assert_eq!(
+        MemoryDb::kinds(&entries),
+        vec![
+            ("context".to_string(), 1),
+            ("decision".to_string(), 1),
+            ("todo".to_string(), 1)
+        ]
+    );
+
+    let hits = MemoryDb::query_text(&entries, "core");
+    assert_eq!(hits.len(), 2);
+    assert!(MemoryDb::query_text(&entries, "nothing").is_empty());
+
+    assert_eq!(MemoryDb::recent(&entries, 2).len(), 2);
+    assert_eq!(MemoryDb::recent(&entries, 99).len(), 3);
+
+    let db = MemoryDb;
+    assert_eq!(db.status(&ctx), "notes:3");
+    let q = db.run_command(&ctx, "query", "tcp").unwrap();
+    assert!(q[0].contains("decision/core"));
+    let scopes = db.run_command(&ctx, "scopes", "").unwrap();
+    assert!(scopes[0].contains("core: 2"));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+
+#[test]
+fn plans_status_reads_existing_plan_files() {
+    let dir = tempdir("plans-status");
+    let storage = MemStorage::new();
+    let ctx = ctx_with(&storage, &dir);
+    let planning = Planning;
+    planning.run_command(&ctx, "plan", "alpha first feature work").unwrap();
+    planning.run_command(&ctx, "spec", "api-musts json shapes").unwrap();
+    planning.run_command(&ctx, "link", "alpha api-musts").unwrap();
+    planning.run_command(&ctx, "plan", "beta second feature work").unwrap();
+    planning.run_command(&ctx, "done", "beta").unwrap();
+    let rows = plan_rows(&ctx);
+    assert_eq!(rows.len(), 2);
+    let alpha = rows.iter().find(|r| r.name == "alpha").unwrap();
+    assert_eq!(alpha.status, "active");
+    assert_eq!(alpha.specs, 1);
+    let beta = rows.iter().find(|r| r.name == "beta").unwrap();
+    assert_eq!(beta.status, "done");
+    assert_eq!(beta.specs, 0);
+    assert_eq!(plan_counts(&rows), (1, 1, 2));
+    let ps = PlanningStatus;
+    assert_eq!(ps.status(&ctx), "plans:1/1");
+    assert!(ps.run_command(&ctx, "list", "").unwrap()[0].contains("alpha"));
+    assert!(ps.run_command(&ctx, "counts", "").unwrap()[0].contains("1 active"));
+    std::fs::remove_dir_all(&dir).ok();
+}
+#[test]
+fn perms_preset_save_show_delete_roundtrip() {
+    let dir = tempdir("perms");
+    let storage = MemStorage::new();
+    let ctx = ctx_with(&storage, &dir);
+    let p = Perms;
+    assert!(p.run_command(&ctx, "list", "").unwrap()[0].contains("no presets"));
+    p.run_command(&ctx, "save", "review read allow grep allow bash ask").unwrap();
+    assert_eq!(p.status(&ctx), "perms:1");
+    let shown = p.run_command(&ctx, "show", "review").unwrap().join("\n");
+    assert!(shown.contains("read = allow") && shown.contains("bash = ask"));
+    // A malformed level is rejected, and nothing is stored.
+    let bad = p.run_command(&ctx, "save", "bad read maybe").unwrap();
+    assert!(bad[0].contains("expected allow, ask or deny") || bad[0].contains("read:"));
+    assert!(!PermStore::load(&ctx).presets.contains_key("bad"));
+    p.run_command(&ctx, "del", "review").unwrap();
+    assert_eq!(p.status(&ctx), "");
+    std::fs::remove_dir_all(&dir).ok();
+}
+#[test]
+fn perms_apply_to_skips_tools_the_session_cannot_see() {
+    let dir = tempdir("perms-apply");
+    let storage = MemStorage::new();
+    let ctx = ctx_with(&storage, &dir);
+    Perms
+        .run_command(&ctx, "save", "review read allow bash deny read_file deny")
+        .unwrap();
+    let store = PermStore::load(&ctx);
+    // A session that advertises only these two tools.
+    let mut layer = crate::session::CapabilityLayer::for_mode(
+        crate::modes::Mode::Agent,
+        &["read".to_string(), "bash".to_string()],
+    );
+    let skipped = PermStore::apply_to(&store, "review", &mut layer);
+    assert_eq!(skipped, vec!["read_file".to_string()]);
+    assert_eq!(layer.permission_for("read"), crate::session::PermissionLevel::Allow);
+    assert_eq!(layer.permission_for("bash"), crate::session::PermissionLevel::Deny);
+    // An unknown preset reports itself rather than silently succeeding.
+    let skipped = PermStore::apply_to(&store, "nope", &mut layer);
+    assert!(skipped[0].contains("no preset 'nope'"));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+}
+
+// ---------------------------------------------------------------------------
+// notify — event notifications (terminal bell, desktop toast, webhook)
+// ---------------------------------------------------------------------------
+
+/// Which events fire a notification. Persisted as JSON at
+/// `<config>/plugins/notify/config.json`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct NotifyConfig {
+    /// `stream.done` — a generation finished.
+    stream_done: bool,
+    /// `stream.error` — a generation failed.
+    stream_error: bool,
+    /// `agent.done` — a background agent run finished.
+    agent_done: bool,
+    /// `research.done` — a web/deep/multi/council/debate run finished.
+    research_done: bool,
+    /// Terminal bell as the default channel (always available offline).
+    bell: bool,
+    /// Desktop notification via the host's notifier (opt-in: needs the
+    /// host to expose one, so the CLI asks the host, not this plugin).
+    desktop: bool,
+    /// Webhook URL for an HTTP POST carrying the event as JSON. Empty
+    /// disables it; the host owns the POST so core stays transport-free.
+    webhook: String,
+}
+
+impl Default for NotifyConfig {
+    fn default() -> Self {
+        NotifyConfig {
+            stream_done: true,
+            stream_error: true,
+            agent_done: true,
+            research_done: true,
+            bell: true,
+            desktop: false,
+            webhook: String::new(),
+        }
+    }
+}
+
+impl NotifyConfig {
+    fn load(ctx: &PluginContext) -> Self {
+        let Some(dir) = ctx.state_dir("notify") else {
+            return Self::default();
+        };
+        ctx.storage
+            .read_to_string(&dir.join("config.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default()
+    }
+
+    fn save(&self, ctx: &PluginContext) -> anyhow::Result<()> {
+        let Some(dir) = ctx.state_dir("notify") else {
+            anyhow::bail!("notify: no config dir");
+        };
+        ctx.storage.create_dir_all(&dir)?;
+        ctx.storage.write_atomic(
+            &dir.join("config.json"),
+            &serde_json::to_string_pretty(self)?,
+        )?;
+        Ok(())
+    }
+
+    /// Whether an event is enabled, by its stable id.
+    fn wants(&self, event: &str) -> bool {
+        match event {
+            "stream.done" => self.stream_done,
+            "stream.error" => self.stream_error,
+            "agent.done" => self.agent_done,
+            "research.done" => self.research_done,
+            _ => false,
+        }
+    }
+}
+
+/// Notifications plugin. Decides *whether* to notify and what the message
+/// says; the host owns delivery (bell, OS notification, webhook POST), so
+/// this plugin stays synchronous and transport-free.
+/// Short rendering for a channel's boolean state, used by the notify
+/// plugin's `channels` command.
+fn on_off(v: bool) -> &'static str {
+    if v { "on" } else { "off" }
+}
+
+pub struct Notify;
+
+/// The event a host reports to `Notify::on_event`.
+pub const NOTIFY_EVENTS: &[&str] = &["stream.done", "stream.error", "agent.done", "research.done"];
+
+/// Channel a host should use for one event.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotifyChannel {
+    /// Ring the terminal bell.
+    Bell,
+    /// Ask the host's OS notifier to post a toast.
+    Desktop,
+    /// POST the payload to the configured webhook.
+    Webhook(String),
+}
+
+impl Notify {
+    /// Decide how an event should be delivered. `Ok(())` when nothing is
+    /// enabled for it. The host maps each channel to its own delivery.
+    pub fn route(ctx: &PluginContext, event: &str, detail: &str) -> anyhow::Result<Vec<NotifyChannel>> {
+        let cfg = NotifyConfig::load(ctx);
+        if !cfg.wants(event) {
+            return Ok(Vec::new());
+        }
+        let _ = detail;
+        let mut out = Vec::new();
+        if cfg.bell {
+            out.push(NotifyChannel::Bell);
+        }
+        if cfg.desktop {
+            out.push(NotifyChannel::Desktop);
+        }
+        if !cfg.webhook.trim().is_empty() {
+            out.push(NotifyChannel::Webhook(cfg.webhook.trim().to_string()));
+        }
+        Ok(out)
+    }
+}
+
+impl Plugin for Notify {
+    fn id(&self) -> &'static str {
+        "notify"
+    }
+    fn describe(&self) -> &'static str {
+        "event notifications via bell, desktop toast or webhook"
+    }
+
+    fn commands(&self) -> Vec<CommandSpec> {
+        vec![
+            CommandSpec { name: "on", usage: "<event>", help: "enable an event" },
+            CommandSpec { name: "off", usage: "<event>", help: "disable an event" },
+            CommandSpec { name: "channels", usage: "", help: "show the delivery channels" },
+            CommandSpec { name: "bell", usage: "<on|off>", help: "toggle the terminal bell" },
+            CommandSpec { name: "desktop", usage: "<on|off>", help: "toggle the desktop toast" },
+            CommandSpec { name: "webhook", usage: "[url]", help: "set or clear the webhook URL" },
+        ]
+    }
+
+    fn run_command(&self, ctx: &PluginContext, command: &str, arg: &str) -> anyhow::Result<Vec<String>> {
+        let field = |e: &str| -> Option<fn(&mut NotifyConfig)> {
+            match e {
+                "stream.done" => Some(|c| c.stream_done = true),
+                "stream.error" => Some(|c| c.stream_error = true),
+                "agent.done" => Some(|c| c.agent_done = true),
+                "research.done" => Some(|c| c.research_done = true),
+                _ => None,
+            }
+        };
+        match command {
+            "on" | "off" => {
+                let mut cfg = NotifyConfig::load(ctx);
+                let event = arg.trim();
+                let Some(set) = field(event) else {
+                    return Ok(vec![format!(
+                        "notify: unknown event '{}' (options: {})",
+                        event,
+                        NOTIFY_EVENTS.join(", ")
+                    )]);
+                };
+                if command == "on" {
+                    set(&mut cfg);
+                } else {
+                    Self::clear_one(&mut cfg, event);
+                }
+                cfg.save(ctx)?;
+                Ok(vec![format!("notify: {} {}", event, command)])
+            }
+            "bell" | "desktop" => {
+                let mut cfg = NotifyConfig::load(ctx);
+                let on = matches!(arg.trim(), "on" | "true" | "");
+                if command == "bell" {
+                    cfg.bell = on;
+                } else {
+                    cfg.desktop = on;
+                }
+                cfg.save(ctx)?;
+                Ok(vec![format!("notify: {} {}", command, if on { "on" } else { "off" })])
+            }
+            "webhook" => {
+                let mut cfg = NotifyConfig::load(ctx);
+                cfg.webhook = arg.trim().to_string();
+                cfg.save(ctx)?;
+                Ok(vec![if cfg.webhook.is_empty() {
+                    "notify: webhook cleared".to_string()
+                } else {
+                    format!("notify: webhook -> {}", cfg.webhook)
+                }])
+            }
+            "channels" => {
+                let cfg = NotifyConfig::load(ctx);
+                let mut rows = vec![format!("notify: bell {}", on_off(cfg.bell))];
+                rows.push(format!("notify: desktop {}", on_off(cfg.desktop)));
+                let hook = if cfg.webhook.trim().is_empty() {
+                    "none".to_string()
+                } else {
+                    cfg.webhook.clone()
+                };
+                rows.push(format!("notify: webhook {hook}"));
+                for e in NOTIFY_EVENTS {
+                    rows.push(format!("notify: {} {}", e, on_off(cfg.wants(e))));
+                }
+                Ok(rows)
+            }
+            other => Err(anyhow::anyhow!("unknown notify command {other}")),
+        }
+    }
+
+    fn status(&self, ctx: &PluginContext) -> String {
+        let cfg = NotifyConfig::load(ctx);
+        let active: Vec<&str> = NOTIFY_EVENTS.iter().copied().filter(|e| cfg.wants(e)).collect();
+        if active.is_empty() && !cfg.bell && !cfg.desktop && cfg.webhook.trim().is_empty() {
+            return String::new();
+        }
+        format!("notify:{}", active.len())
+    }
+}
+
+impl Notify {
+    fn clear_one(cfg: &mut NotifyConfig, event: &str) {
+        match event {
+            "stream.done" => cfg.stream_done = false,
+            "stream.error" => cfg.stream_error = false,
+            "agent.done" => cfg.agent_done = false,
+            "research.done" => cfg.research_done = false,
+            _ => {}
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// memory-db — queries over the existing logfmt memory store
+// ---------------------------------------------------------------------------
+
+/// One indexed memory entry.
+#[derive(Debug, Clone)]
+pub struct MemoryEntry {
+    pub day: String,
+    pub ts: String,
+    pub kind: String,
+    pub scope: String,
+    pub content: String,
+}
+
+/// Read every logfmt note the [`Memory`] plugin has written, newest day
+/// first. Same files, same format — this is an index over them, not a
+/// second store, so `/memory.save` and this plugin can never disagree.
+pub fn memory_entries(ctx: &PluginContext) -> Vec<MemoryEntry> {
+    let Some(dir) = ctx.state_dir("memory") else {
+        return Vec::new();
+    };
+    let mut names: Vec<_> = ctx
+        .storage
+        .read_dir(&dir)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+        .filter(|n| n.ends_with(".logfmt"))
+        .collect();
+    names.sort();
+    names.reverse();
+    let mut out = Vec::new();
+    for name in names {
+        let day = name.trim_end_matches(".logfmt").to_string();
+        let Ok(text) = ctx.storage.read_to_string(&dir.join(&name)) else {
+            continue;
+        };
+        for line in text.lines() {
+            if let Some((ts, kind, scope, content)) = parse_memory_line(line) {
+                out.push(MemoryEntry {
+                    day: day.clone(),
+                    ts,
+                    kind,
+                    scope,
+                    content,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Structured queries the plugin's commands answer. Kept separate from
+/// [memory_entries] so each filter can be tested without the file layer.
+pub struct MemoryDb;
+
+impl MemoryDb {
+    /// Filter by free text (case-insensitive) across kind/scope/content.
+    pub fn query_text<'a>(entries: &'a [MemoryEntry], needle: &str) -> Vec<&'a MemoryEntry> {
+        let needle = needle.trim().to_lowercase();
+        if needle.is_empty() {
+            return Vec::new();
+        }
+        entries
+            .iter()
+            .filter(|e| {
+                e.kind.to_lowercase().contains(&needle)
+                    || e.scope.to_lowercase().contains(&needle)
+                    || e.content.to_lowercase().contains(&needle)
+            })
+            .collect()
+    }
+
+    /// Group by scope, largest group first.
+    pub fn scopes(entries: &[MemoryEntry]) -> Vec<(String, usize)> {
+        let mut counts = std::collections::BTreeMap::new();
+        for e in entries {
+            *counts.entry(e.scope.clone()).or_insert(0usize) += 1;
+        }
+        let mut rows: Vec<(String, usize)> = counts.into_iter().collect();
+        rows.sort_by(|a, b| b.1.cmp(&a.1));
+        rows
+    }
+
+    /// Group by kind, largest group first.
+    pub fn kinds(entries: &[MemoryEntry]) -> Vec<(String, usize)> {
+        let mut counts = std::collections::BTreeMap::new();
+        for e in entries {
+            *counts.entry(e.kind.clone()).or_insert(0usize) += 1;
+        }
+        let mut rows: Vec<(String, usize)> = counts.into_iter().collect();
+        rows.sort_by(|a, b| b.1.cmp(&a.1));
+        rows
+    }
+
+    /// The most recent `limit` entries, newest first.
+    pub fn recent(entries: &[MemoryEntry], limit: usize) -> Vec<&MemoryEntry> {
+        entries.iter().take(limit).collect()
+    }
+}
+
+impl Plugin for MemoryDb {
+    fn id(&self) -> &'static str {
+        "memorydb"
+    }
+    fn describe(&self) -> &'static str {
+        "query and group the core's memory notes"
+    }
+
+    fn commands(&self) -> Vec<CommandSpec> {
+        vec![
+            CommandSpec { name: "query", usage: "<text>", help: "search kind/scope/content" },
+            CommandSpec { name: "scopes", usage: "", help: "notes per scope, busiest first" },
+            CommandSpec { name: "kinds", usage: "", help: "notes per kind, busiest first" },
+            CommandSpec { name: "recent", usage: "[n]", help: "show the newest notes" },
+        ]
+    }
+
+    fn run_command(&self, ctx: &PluginContext, command: &str, arg: &str) -> anyhow::Result<Vec<String>> {
+        match command {
+            "query" | "scopes" | "kinds" | "recent" => {
+                let entries = memory_entries(ctx);
+                if entries.is_empty() {
+                    return Ok(vec![format!("memorydb: no notes yet (write one with /memory.save)")]);
+                }
+                let rows = match command {
+                    "query" => Self::query_text(&entries, arg)
+                        .iter()
+                        .map(|e| format!("[{}] {}/{}: {}", e.day, e.kind, e.scope, e.content))
+                        .collect::<Vec<_>>(),
+                    "scopes" => Self::scopes(&entries)
+                        .iter()
+                        .map(|(s, n)| format!("  {s}: {n}"))
+                        .collect::<Vec<_>>(),
+                    "kinds" => Self::kinds(&entries)
+                        .iter()
+                        .map(|(k, n)| format!("  {k}: {n}"))
+                        .collect::<Vec<_>>(),
+                    "recent" => {
+                        let limit = if arg.trim().is_empty() {
+                            5
+                        } else {
+                            arg.trim().parse::<usize>().unwrap_or(5).clamp(1, 50)
+                        };
+                        Self::recent(&entries, limit)
+                            .iter()
+                            .map(|e| format!("[{}] {}/{}: {}", e.day, e.kind, e.scope, e.content))
+                            .collect::<Vec<_>>()
+                    }
+                    _ => unreachable!(),
+                };
+                if rows.is_empty() {
+                    Ok(vec!["memorydb: no matches".to_string()])
+                } else {
+                    Ok(rows)
+                }
+            }
+            other => Err(anyhow::anyhow!("unknown memorydb command {other}")),
+        }
+    }
+
+    fn status(&self, ctx: &PluginContext) -> String {
+        let n = memory_entries(ctx).len();
+        if n > 0 {
+            format!("notes:{n}")
+        } else {
+            String::new()
+        }
+    }
+
+
+}
+
+// ---------------------------------------------------------------------------
+// planning-status — rollout view over the existing plan/spec files
+// ---------------------------------------------------------------------------
+
+/// One row of the rollout view.
+#[derive(Debug, Clone)]
+pub struct PlanRow {
+    pub name: String,
+    pub status: String,
+    pub specs: usize,
+}
+
+/// Read every plan the [`Planning`] plugin wrote and summarise it. Same
+/// files, same format — a view over them, not a second store.
+pub fn plan_rows(ctx: &PluginContext) -> Vec<PlanRow> {
+    let Some(dir) = ctx.state_dir("planning").map(|d| d.join("plans")) else {
+        return Vec::new();
+    };
+    let mut names: Vec<_> = ctx
+        .storage
+        .read_dir(&dir)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+        .filter(|n| n.ends_with(".md"))
+        .collect();
+    names.sort();
+    let mut out = Vec::new();
+    for name in names {
+        let Ok(text) = ctx.storage.read_to_string(&dir.join(&name)) else {
+            continue;
+        };
+        let status = text
+            .lines()
+            .find_map(|l| l.strip_prefix("plan status:"))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|| "active".to_string());
+        let specs = text
+            .split_once("<!-- SPECS_START -->")
+            .and_then(|(_, rest)| rest.split_once("<!-- SPECS_END -->"))
+            .map(|(mid, _)| {
+                mid.lines()
+                    .map(|l| l.trim())
+                    .filter(|l| l.starts_with("- "))
+                    .count()
+            })
+            .unwrap_or(0);
+        out.push(PlanRow {
+            name: name.trim_end_matches(".md").to_string(),
+            status,
+            specs,
+        });
+    }
+    out
+}
+
+/// Counts for the status line: `active/done/total`.
+pub fn plan_counts(rows: &[PlanRow]) -> (usize, usize, usize) {
+    let done = rows.iter().filter(|r| r.status == "done").count();
+    (rows.len() - done, done, rows.len())
+}
+
+/// Rollout view over the plans and specs the [`Planning`] plugin wrote.
+pub struct PlanningStatus;
+
+impl Plugin for PlanningStatus {
+    fn id(&self) -> &'static str {
+        "plans"
+    }
+    fn describe(&self) -> &'static str {
+        "rollout view over plans and their linked specs"
+    }
+
+    fn commands(&self) -> Vec<CommandSpec> {
+        vec![
+            CommandSpec { name: "list", usage: "", help: "every plan with status and spec count" },
+            CommandSpec { name: "counts", usage: "", help: "active/done/total" },
+        ]
+    }
+
+    fn run_command(&self, ctx: &PluginContext, command: &str, _arg: &str) -> anyhow::Result<Vec<String>> {
+        match command {
+            "list" => {
+                let rows = plan_rows(ctx);
+                if rows.is_empty() {
+                    return Ok(vec!["plans: none yet (create one with /planning.plan)".into()]);
+                }
+                Ok(rows
+                    .iter()
+                    .map(|r| format!("  {:<18} {:<8} {} spec(s)", r.name, r.status, r.specs))
+                    .collect())
+            }
+            "counts" => {
+                let (active, done, total) = plan_counts(&plan_rows(ctx));
+                Ok(vec![format!("plans: {active} active · {done} done · {total} total")])
+            }
+            other => Err(anyhow::anyhow!("unknown plans command {other}")),
+        }
+    }
+
+    fn status(&self, ctx: &PluginContext) -> String {
+        let (active, done, _) = plan_counts(&plan_rows(ctx));
+        if active + done == 0 {
+            String::new()
+        } else {
+            format!("plans:{}/{}", active, done)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// perms — presets over the session's existing permission policy
+// ---------------------------------------------------------------------------
+
+/// A named set of per-tool overrides, stored as JSON at
+/// `<config>/plugins/perms/presets.json`. A preset is applied to the live
+/// [`CapabilityLayer`] by the host, which owns the policy; this plugin
+/// owns the stored presets.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct PermStore {
+    /// preset name -> (tool -> allow|ask|deny).
+    #[serde(default)]
+    pub presets: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+}
+
+impl PermStore {
+    fn load(ctx: &PluginContext) -> Self {
+        let Some(dir) = ctx.state_dir("perms") else {
+            return Self::default();
+        };
+        ctx.storage
+            .read_to_string(&dir.join("presets.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default()
+    }
+
+    fn save(&self, ctx: &PluginContext) -> anyhow::Result<()> {
+        let Some(dir) = ctx.state_dir("perms") else {
+            anyhow::bail!("perms: no config dir");
+        };
+        ctx.storage.create_dir_all(&dir)?;
+        ctx.storage.write_atomic(
+            &dir.join("presets.json"),
+            &serde_json::to_string_pretty(self)?,
+        )?;
+        Ok(())
+    }
+
+    /// The normalized form for one tool's level, or an error message.
+    pub fn normalize_level(level: &str) -> Result<String, String> {
+        match level.trim().to_lowercase().as_str() {
+            "allow" => Ok("allow".to_string()),
+            "ask" => Ok("ask".to_string()),
+            "deny" => Ok("deny".to_string()),
+            other => Err(format!("'{other}' (expected allow, ask or deny)")),
+        }
+    }
+
+    /// Apply a preset onto the live capability layer. Returns the tools the
+    /// session could not take (not advertised), so the caller can say so;
+    /// a preset for an unseen tool is never silently dropped by the layer.
+    pub fn apply_to(store: &PermStore, name: &str, layer: &mut crate::session::CapabilityLayer) -> Vec<String> {
+        let Some(entries) = store.presets.get(name) else {
+            return vec![format!("no preset '{name}'")];
+        };
+        let mut skipped = Vec::new();
+        for (tool, raw) in entries {
+            let level = match Self::normalize_level(raw) {
+                Ok(l) => l,
+                Err(e) => {
+                    skipped.push(format!("{tool} has a bad level: {e}"));
+                    continue;
+                }
+            };
+            let resolved = match level.as_str() {
+                "allow" => crate::session::PermissionLevel::Allow,
+                "ask" => crate::session::PermissionLevel::Ask,
+                _ => crate::session::PermissionLevel::Deny,
+            };
+            if !layer.set_permission(tool, resolved) {
+                skipped.push(tool.clone());
+            }
+        }
+        skipped
+    }
+}
+
+/// Named permission presets stored as JSON, applied onto the live
+/// [`crate::session::CapabilityLayer`] by the host.
+pub struct Perms;
+
+impl Plugin for Perms {
+    fn id(&self) -> &'static str {
+        "perms"
+    }
+    fn describe(&self) -> &'static str {
+        "named permission presets for the session's tool policy"
+    }
+
+    fn commands(&self) -> Vec<CommandSpec> {
+        vec![
+            CommandSpec { name: "list", usage: "", help: "list stored presets" },
+            CommandSpec { name: "save", usage: "<name> <tool> <allow|ask|deny> [more...]", help: "record a preset" },
+            CommandSpec { name: "show", usage: "<name>", help: "show one preset" },
+            CommandSpec { name: "del", usage: "<name>", help: "delete a preset" },
+        ]
+    }
+
+    fn run_command(&self, ctx: &PluginContext, command: &str, arg: &str) -> anyhow::Result<Vec<String>> {
+        let mut store = PermStore::load(ctx);
+        match command {
+            "list" => {
+                if store.presets.is_empty() {
+                    return Ok(vec!["perms: no presets (add one with /perms.save)".into()]);
+                }
+                Ok(store
+                    .presets
+                    .iter()
+                    .map(|(name, tools)| {
+                        let rows: Vec<String> =
+                            tools.iter().map(|(t, l)| format!("{t}={l}")).collect();
+                        format!("  {name}: {}", rows.join(" "))
+                    })
+                    .collect())
+            }
+            "save" => {
+                // save <name> <tool> <level> [<tool> <level> ...]
+                let mut parts = arg.split_whitespace();
+                let Some(name) = parts.next() else {
+                    return Ok(vec!["usage: /perms.save <name> <tool> <allow|ask|deny> [more...]".into()]);
+                };
+                let name = name.to_string();
+                let rest: Vec<&str> = parts.collect();
+                if rest.is_empty() {
+                    store.presets.remove(&name);
+                    store.save(ctx)?;
+                    return Ok(vec![format!("perms: cleared '{name}'")]);
+                }
+                let mut tools = std::collections::BTreeMap::new();
+                let mut errs = Vec::new();
+                let mut it = rest.chunks(2);
+                for pair in &mut it {
+                    if pair.len() < 2 {
+                        errs.push(format!(
+                            "warning: '{pair:?}' needs both a tool and a level"
+                        ));
+                        continue;
+                    }
+                    match PermStore::normalize_level(pair[1]) {
+                        Ok(level) => {
+                            tools.insert(pair[0].to_string(), level);
+                        }
+                        Err(e) => errs.push(format!("{}: {}", pair[0], e)),
+                    }
+                }
+                if !errs.is_empty() {
+                    return Ok(errs);
+                }
+                store.presets.insert(name.clone(), tools);
+                store.save(ctx)?;
+                Ok(vec![format!("perms: saved '{name}'")])
+            }
+            "show" => {
+                let name = arg.trim();
+                let Some(tools) = store.presets.get(name) else {
+                    return Ok(vec![format!("perms: no preset '{name}'")]);
+                };
+                if tools.is_empty() {
+                    return Ok(vec![format!("perms: '{name}' is empty")]);
+                }
+                let rows: Vec<String> =
+                    tools.iter().map(|(t, l)| format!("  {t} = {l}")).collect();
+                let mut out = vec![format!("perms: '{name}'")];
+                out.extend(rows);
+                Ok(out)
+            }
+            "del" => {
+                let name = arg.trim();
+                if store.presets.remove(name).is_none() {
+                    return Ok(vec![format!("perms: no preset '{name}'")]);
+                }
+                store.save(ctx)?;
+                Ok(vec![format!("perms: deleted '{name}'")])
+            }
+            other => Err(anyhow::anyhow!("unknown perms command {other}")),
+        }
+    }
+
+    fn status(&self, ctx: &PluginContext) -> String {
+        let n = PermStore::load(ctx).presets.len();
+        if n > 0 {
+            format!("perms:{n}")
+        } else {
+            String::new()
+        }
     }
 }

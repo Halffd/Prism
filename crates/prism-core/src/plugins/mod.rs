@@ -151,6 +151,10 @@ impl Registry {
         reg.register(Arc::new(builtins::Usage));
         reg.register(Arc::new(builtins::TableFormat));
         reg.register(Arc::new(builtins::Skills));
+        reg.register(Arc::new(builtins::Notify));
+        reg.register(Arc::new(builtins::MemoryDb));
+        reg.register(Arc::new(builtins::PlanningStatus));
+        reg.register(Arc::new(builtins::Perms));
         reg
     }
 
