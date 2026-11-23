@@ -12,16 +12,9 @@
 //! `PORT_ROW_H`, `PORT_START`) come from the model, so a wire lands on
 //! the socket the markup actually drew.
 
-use prism_core::graph::{
-    Graph, GraphNode, NodeDef, NodeValues, Wire, HEADER_H, NODE_WIDTH, PORT_ROW_H, PORT_START,
-};
+use prism_core::graph::{Graph, GraphNode, NodeDef, NodeValues, Wire, HEADER_H, NODE_WIDTH};
 use prism_core::graph_nodes::node_def;
 
-/// Height of one knob row inside a node body. Purely presentation, but it
-/// has to agree with the markup for hit-testing to be honest.
-pub const KNOB_ROW_H: f64 = 26.0;
-/// Breathing room below the last knob.
-pub const NODE_BODY_PAD: f64 = 8.0;
 /// How close (in canvas units) a click must land to grab a socket.
 pub const PORT_HIT_SLACK: f64 = 8.0;
 /// How close (in canvas units) a click must land to select a wire.
@@ -80,22 +73,9 @@ impl View {
     }
 }
 
-/// How tall a node of this kind draws, so clicks below its box miss.
-pub fn node_height(def: &NodeDef) -> f64 {
-    let port_rows = def.inputs.len().max(def.outputs.len()) as f64;
-    // Ports start at PORT_START; a node with none starts its knobs there.
-    let ports = if port_rows == 0.0 {
-        0.0
-    } else {
-        PORT_START + port_rows * PORT_ROW_H
-    };
-    let knobs = def.knobs.len() as f64 * KNOB_ROW_H;
-    HEADER_H + ports + knobs + NODE_BODY_PAD * 2.0
-}
-
 /// A node's box in canvas coordinates.
 pub fn node_bounds(node: &prism_core::graph::GraphNode, def: &NodeDef) -> (f64, f64, f64, f64) {
-    (node.x, node.y, node.x + NODE_WIDTH, node.y + node_height(def))
+    (node.x, node.y, node.x + NODE_WIDTH, node.y + prism_core::graph::node_height(def))
 }
 
 /// The topmost node under a canvas point, or `None` for empty canvas.
@@ -335,6 +315,7 @@ pub fn new_node(id: u64, kind: &str, x: f64, y: f64) -> Option<GraphNode> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use prism_core::graph::{node_height, wire_bezier_at, PORT_ROW_H, PORT_START};
     use prism_core::graph_factory::make_node;
 
     fn graph_with(parts: &[(u64, &str, f64, f64)]) -> Graph {
@@ -450,7 +431,7 @@ mod tests {
     fn a_wire_is_hit_along_its_curve_and_not_off_it() {
         let graph = wired_graph();
         let (from, to) = wire_endpoints(&graph, &graph.wires[0]).expect("wired");
-        let mid = prism_core::graph::wire_bezier_at(from, to, 0.5);
+        let mid = wire_bezier_at(from, to, 0.5);
 
         assert_eq!(hit_wire(&graph, mid.0, mid.1), Some(0));
 

@@ -317,6 +317,29 @@ pub const HEADER_H: f64 = 30.0;
 pub const PORT_ROW_H: f64 = 24.0;
 pub const PORT_START: f64 = HEADER_H + 8.0;
 pub const PORT_DOT: f64 = 11.0;
+/// Height of one knob row inside a node body. Presentation, but every
+/// surface draws the same row height, which is what makes a node's box
+/// (and therefore its hit area) agree.
+pub const KNOB_ROW_H: f64 = 26.0;
+/// Breathing room below the last knob.
+pub const NODE_BODY_PAD: f64 = 8.0;
+
+/// How tall a node of this kind draws.
+///
+/// Both canvases need this — to lay the box out and to know where a click
+/// stops hitting it — so it lives beside `port_position` rather than in
+/// either surface's markup.
+pub fn node_height(def: &NodeDef) -> f64 {
+    let port_rows = def.inputs.len().max(def.outputs.len()) as f64;
+    // Ports start at PORT_START; a node with none starts its knobs there.
+    let ports = if port_rows == 0.0 {
+        0.0
+    } else {
+        PORT_START + port_rows * PORT_ROW_H
+    };
+    let knobs = def.knobs.len() as f64 * KNOB_ROW_H;
+    HEADER_H + ports + knobs + NODE_BODY_PAD * 2.0
+}
 
 /// Where a port's socket sits, relative to its node's top-left. Inputs
 /// sit on the left edge, outputs on the right.
