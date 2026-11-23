@@ -240,6 +240,101 @@ fn parse_media_request(json: &str) -> Result<MediaRequest, String> {
     parse_req::<MediaRequest>(json)
 }
 
+// ---------------------------------------------------------------------------
+// Shared canvas graph — the document every host reads and writes
+// ---------------------------------------------------------------------------
+
+/// The node graph's palette: kinds, ports and knobs, straight from the
+/// core so a browser renders the same definitions the desktop does.
+#[wasm_bindgen]
+pub fn graph_node_defs() -> String {
+    let nodes: Vec<serde_json::Value> = prism_core::graph_nodes::NODE_DEFS
+        .iter()
+        .map(|def| {
+            let port = |p: &prism_core::graph::Port| {
+                serde_json::json!({
+                    "id": p.id,
+                    "label": p.label,
+                    "kind": format!("{:?}", p.kind).to_lowercase(),
+                    "output": p.output,
+                })
+            };
+            serde_json::json!({
+                "kind": def.kind,
+                "title": def.title,
+                "family": def.family.as_str(),
+                "inputs": def.inputs.iter().map(port).collect::<Vec<_>>(),
+                "outputs": def.outputs.iter().map(port).collect::<Vec<_>>(),
+                "knobs": def.knobs.iter().map(|k| serde_json::json!({
+                    "id": k.id,
+                    "label": k.label,
+                    "control": k.control,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    serde_json::json!({ "nodes": nodes }).to_string()
+}
+
+/// A starting drawing, for a host with nothing stored yet.
+#[wasm_bindgen]
+pub fn graph_starter() -> String {
+    let doc = prism_core::graph_store::GraphDocument::new(
+        prism_core::graph_factory::starter_graph(),
+        now_millis(),
+    );
+    doc.to_json()
+}
+
+/// Flatten a graph document into the request a host would send. Returns
+/// the `{"Ok":...}` / `{"Err":...}` envelope the JS bridge unwraps, so a
+/// host fails as a value rather than an exception.
+#[wasm_bindgen]
+pub fn graph_to_request(doc_json: &str) -> String {
+    let parsed: Result<prism_core::graph::Graph, String> =
+        parse_req(doc_json);
+    result_json(&parsed.and_then(|graph| {
+        prism_core::graph_request::to_form(&graph, "native")
+            .map(|form| serde_json::to_value(form).unwrap_or(serde_json::Value::Null))
+            .map_err(|e| e.to_string())
+    }))
+}
+
+/// Whether a document is renderable, and why not when it is not.
+#[wasm_bindgen]
+pub fn graph_problems(doc_json: &str) -> String {
+    let parsed: Option<prism_core::graph_store::GraphDocument> = parse_req(doc_json).ok();
+    let found = parsed
+        .as_ref()
+        .map(|doc| {
+            prism_core::graph_store::problems(doc)
+                .iter()
+                .map(|p| p.to_string())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    serde_json::json!({ "problems": found }).to_string()
+}
+
+/// Merge a document that arrived over the API into the local one.
+#[wasm_bindgen]
+pub fn graph_merge(local_json: &str, incoming_json: &str) -> String {
+    let local: Result<prism_core::graph_store::GraphDocument, String> = parse_req(local_json);
+    let incoming: Result<prism_core::graph_store::GraphDocument, String> = parse_req(incoming_json);
+    result_json(&(match (local, incoming) {
+        (Ok(local), Ok(incoming)) => Ok(prism_core::graph_store::merge(&local, &incoming)),
+        _ => Err("both documents must be Prism graph documents".to_string()),
+    }))
+}
+
+/// Epoch milliseconds, shared with the media default stamps.
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 /// Default local-SD knobs, so hosts do not duplicate core constants.
 #[wasm_bindgen]
 pub fn media_defaults() -> String {

@@ -182,3 +182,93 @@ fn providers_and_defaults_are_sane() {
     assert_eq!(defaults["provider"], "openai");
     assert_eq!(defaults["max_tokens"], 2048);
 }
+
+// ---------------------------------------------------------------------------
+// Shared canvas graph bindings
+// ---------------------------------------------------------------------------
+
+#[test]
+fn graph_node_defs_match_the_core() {
+    let defs: Value = serde_json::from_str(&prism_wasm::graph_node_defs()).unwrap();
+    let nodes = defs["nodes"].as_array().expect("a node list");
+    assert_eq!(nodes.len(), 6);
+    for kind in ["checkpoint", "lora", "prompt", "sampler", "latent", "seed"] {
+        assert!(
+            nodes.iter().any(|n| n["kind"] == kind),
+            "the palette offers {kind}"
+        );
+    }
+    let sampler = nodes.iter().find(|n| n["kind"] == "sampler").unwrap();
+    assert_eq!(sampler["title"], "KSampler");
+    assert_eq!(sampler["inputs"].as_array().unwrap().len(), 4);
+    assert_eq!(sampler["outputs"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn graph_starter_and_flatten_agree() {
+    // A document straight from the core, described in Rust rather than
+    // by hand-edited JSON: the binding is exercised against a real graph.
+    use prism_core::graph::Graph;
+    use prism_core::graph_factory::make_node;
+
+    let mut graph = Graph::default();
+    graph.nodes.push(make_node(1, "checkpoint", 0.0, 0.0).unwrap());
+    graph.nodes.push(make_node(2, "prompt", 0.0, 200.0).unwrap());
+    graph.nodes.push(make_node(3, "latent", 0.0, 400.0).unwrap());
+    graph.nodes.push(make_node(4, "sampler", 300.0, 200.0).unwrap());
+    graph.connect(prism_core::graph::Wire::new(1, "model", 4, "model"));
+    graph.connect(prism_core::graph::Wire::new(2, "conditioning", 4, "conditioning"));
+    graph.connect(prism_core::graph::Wire::new(3, "latent", 4, "latent"));
+    graph
+        .node_mut(2)
+        .unwrap()
+        .values
+        .set_text("prompt", "a lighthouse in fog");
+    graph.node_mut(3).unwrap().values.set_number("width", 768.0);
+
+    let doc = serde_json::to_string(&graph).unwrap();
+    let form: Value = serde_json::from_str(&prism_wasm::graph_to_request(&doc)).unwrap();
+    assert_eq!(form["Ok"]["prompt"], "a lighthouse in fog");
+    assert_eq!(form["Ok"]["provider"], "native");
+    assert_eq!(form["Ok"]["width"], "768");
+    assert_eq!(form["Ok"]["height"], "512");
+
+    // A blank prompt is a value, not a panic.
+    graph.node_mut(2).unwrap().values.set_text("prompt", "  ");
+    let blank = serde_json::to_string(&graph).unwrap();
+    let failed: Value = serde_json::from_str(&prism_wasm::graph_to_request(&blank)).unwrap();
+    assert!(failed["Err"].is_string());
+
+    // Garbage in, value out.
+    let bad: Value = serde_json::from_str(&prism_wasm::graph_to_request("not json")).unwrap();
+    assert!(bad["Err"].is_string());
+
+    // The starter document is valid and parsable.
+    let starter = prism_wasm::graph_starter();
+    let parsed: Value = serde_json::from_str(&starter).unwrap();
+    assert_eq!(parsed["app"], "prism");
+    assert_eq!(parsed["graph"]["nodes"].as_array().unwrap().len(), 6);
+    let problems: Value = serde_json::from_str(&prism_wasm::graph_problems(&starter)).unwrap();
+    assert_eq!(problems["problems"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn graph_merge_prefers_the_newer_document() {
+    let base = prism_wasm::graph_starter();
+    let mut newer: Value = serde_json::from_str(&base).unwrap();
+    newer["updated_at"] = serde_json::json!(9_000_000_000_000u64);
+    let mut nodes = newer["graph"]["nodes"].as_array().unwrap().clone();
+    let prompt = nodes.iter_mut().find(|n| n["kind"] == "prompt").unwrap();
+    prompt["values"]["text"] = serde_json::json!([["prompt", "the newer prompt"]]);
+    newer["graph"]["nodes"] = serde_json::Value::Array(nodes);
+    let newer_body = serde_json::to_string(&newer).unwrap();
+
+    let merged: Value =
+        serde_json::from_str(&prism_wasm::graph_merge(&base, &newer_body)).unwrap();
+    assert_eq!(merged["Ok"]["updated_at"], 9_000_000_000_000u64);
+
+    // The older document cannot roll the newer one back.
+    let reverted: Value =
+        serde_json::from_str(&prism_wasm::graph_merge(&newer_body, &base)).unwrap();
+    assert_eq!(reverted["Ok"]["updated_at"], 9_000_000_000_000u64);
+}

@@ -38,6 +38,12 @@ export interface WasmCoreModule {
   media_comfyui_image_from_history(body: string): string;
   media_default_base_url(provider: string): string;
   media_is_async_provider(provider: string): boolean;
+  // The shared canvas graph: the same document every Prism surface edits.
+  graph_node_defs(): string;
+  graph_starter(): string;
+  graph_to_request(docJson: string): string;
+  graph_problems(docJson: string): string;
+  graph_merge(localJson: string, incomingJson: string): string;
   parse_api_response(body: string): string;
   parse_models_response(body: string): string;
   strip_thinking(content: string): string;
@@ -304,8 +310,92 @@ export interface MediaDefaults {
   providers: Record<string, string>;
 }
 
+// What `graph_to_request` produces: the same field names as the panel
+// form (`apps/web/src/studio/media.ts`), with "blank means none".
+export interface GraphRequest {
+  provider: string;
+  checkpoint: string;
+  vae: string;
+  clip_skip: string;
+  loras: { name: string; weight: string }[];
+  prompt: string;
+  negative_prompt: string;
+  sampler: string;
+  scheduler: string;
+  steps: string;
+  cfg: string;
+  denoise: string;
+  width: string;
+  height: string;
+  batch: string;
+  seed: string;
+}
+
 export function mediaDefaults(core: WasmCore): MediaDefaults {
   return JSON.parse(core.media_defaults()) as MediaDefaults;
+}
+
+// ---- the shared canvas graph ----------------------------------------------
+
+/** One port on a node: what it carries and which side it sits on. */
+export interface GraphPort {
+  id: string;
+  label: string;
+  kind: 'model' | 'conditioning' | 'sampler' | 'latent' | 'seed';
+  output: boolean;
+}
+
+/** One Knob a node exposes. */
+export interface GraphKnob {
+  id: string;
+  label: string;
+  /** "text" | "number" | "enum" | "percent" */
+  control: string;
+}
+
+/** A node definition: what the palette draws before any state. */
+export interface GraphNodeDef {
+  kind: string;
+  title: string;
+  family: 'model' | 'prompt' | 'sampler' | 'latent' | 'seed';
+  inputs: GraphPort[];
+  outputs: GraphPort[];
+  knobs: GraphKnob[];
+}
+
+export interface GraphNodeDefs {
+  nodes: GraphNodeDef[];
+}
+
+/** Nodes, ports and knobs, straight from the core. */
+export function graphNodeDefs(core: WasmCore): GraphNodeDefs {
+  return JSON.parse(core.graph_node_defs()) as GraphNodeDefs;
+}
+
+/** A fresh starting drawing, for a host with nothing stored yet. */
+export function graphStarter(core: WasmCore): string {
+  return core.graph_starter();
+}
+
+/** Flatten a graph document into the request a host would send. A graph
+ *  that cannot be generated from fails with the core's reason. */
+export function graphToRequest(core: WasmCore, docJson: string): GraphRequest {
+  return unwrapCoreResult<GraphRequest>(core.graph_to_request(docJson));
+}
+
+/** Every reason a document cannot be rendered. Empty means valid. */
+export function graphProblems(core: WasmCore, docJson: string): string[] {
+  const parsed = JSON.parse(core.graph_problems(docJson)) as { problems: string[] };
+  return parsed.problems;
+}
+
+/** Merge a document that arrived over the API into the local one. */
+export function graphMerge(
+  core: WasmCore,
+  localJson: string,
+  incomingJson: string,
+): string {
+  return unwrapCoreResult<string>(core.graph_merge(localJson, incomingJson));
 }
 
 export function buildA1111Body(core: WasmCore, req: MediaRequestInput): JsonBody {

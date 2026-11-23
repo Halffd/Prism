@@ -47,10 +47,16 @@ pub struct ServerConfig {
     /// Prompt wrapper: `auto`, `chatml`, `llama3`, `llama2`, `mistral`,
     /// `zephyr`, `deepseek`, or `plain`.
     pub llm_format: Option<String>,
+    /// Root holding the shared graph document (`graph.json`). The node
+    /// graph every surface edits, served over `/v1/graph`.
+    pub graph_root: Option<std::path::PathBuf>,
 }
 
 impl ServerConfig {
     /// Build from `PRISM_SD_*` / `PRISM_LLM_*` environment variables when present.
+    /// `PRISM_GRAPH_ROOT` overrides where the shared graph document is
+    /// stored; without it the server falls back to `./prism-data/graph`,
+    /// which keeps a checkout usable with no configuration at all.
     pub fn from_env() -> Self {
         let clean = |name: &str| {
             std::env::var(name)
@@ -58,12 +64,16 @@ impl ServerConfig {
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
         };
+        let graph_root = clean("PRISM_GRAPH_ROOT")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(default_graph_root);
         Self {
             sd_model: clean("PRISM_SD_MODEL"),
             sd_version: clean("PRISM_SD_VERSION"),
             llm_model: clean("PRISM_LLM_MODEL"),
             llm_tokenizer: clean("PRISM_LLM_TOKENIZER"),
             llm_format: clean("PRISM_LLM_FORMAT"),
+            graph_root: Some(graph_root),
         }
     }
 
@@ -288,6 +298,10 @@ pub fn handle_http_with(method: &str, path: &str, body: &[u8], config: &ServerCo
         ),
         ("GET", "/v1/models") => json_response(200, models_json(config)),
         ("GET", "/api/tags") => json_response(200, ollama_tags_json(config)),
+        // The shared canvas: one graph document every Prism surface edits.
+        ("GET", "/v1/graph") => graph_get(config),
+        ("PUT", "/v1/graph") => graph_put(body, config),
+        ("GET", "/v1/graph/format") => graph_format(config),
         ("POST", "/v1/chat/completions") => openai_chat(body, config),
         ("POST", "/api/chat") => ollama_chat(body, config),
         ("GET", "/sdapi/v1/sd-models") => {
@@ -344,6 +358,98 @@ fn json_response(status: u16, body: String) -> HttpResponse {
         content_type: "application/json",
         body,
     }
+}
+
+// ---------------------------------------------------------------------------
+// Shared graph API — the canvas every Prism surface edits
+// ---------------------------------------------------------------------------
+
+/// `GET /v1/graph` — the shared canvas document. Every app opens this,
+/// edits locally, and PUTs the result, so a drawing made in Slint shows
+/// up in the web app and the CLI without either one knowing about the
+/// other.
+/// Where the shared graph document is stored when nothing is configured:
+/// a `prism-data` dir beside the working directory. Explicitly a
+/// fallback, not the recommended setup — `PRISM_GRAPH_ROOT` is.
+fn default_graph_root() -> std::path::PathBuf {
+    std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join("prism-data")
+        .join("graph")
+}
+
+fn graph_get(config: &ServerConfig) -> HttpResponse {
+    let Some(root) = config.graph_root.as_deref() else {
+        return error_response(404, "graph storage is not configured");
+    };
+    let now = now_ms();
+    // The stored `updated_at` is returned untouched: a read must not make
+    // the server look newer than the copy a client already holds, or the
+    // client's next write would look stale and be discarded.
+    let doc = prism_core::graph_store::load(&prism_core::storage::FsStorage, root, now);
+    json_response(200, doc.to_json())
+}
+
+/// `PUT /v1/graph` — merge a document written by another app, then
+/// persist the result so the next reader sees the combined drawing.
+fn graph_put(body: &[u8], config: &ServerConfig) -> HttpResponse {
+    let Some(root) = config.graph_root.as_deref() else {
+        return error_response(404, "graph storage is not configured");
+    };
+    let text = match std::str::from_utf8(body) {
+        Ok(text) => text,
+        Err(_) => return error_response(400, "graph body must be UTF-8 JSON"),
+    };
+    let Some(incoming) = prism_core::graph_store::GraphDocument::from_json(text) else {
+        return error_response(400, "not a Prism graph document");
+    };
+    let storage = prism_core::storage::FsStorage;
+    let now = now_ms();
+    let local = prism_core::graph_store::load(&storage, root, now);
+    match prism_core::graph_store::apply_and_save(&storage, root, &local, &incoming, now) {
+        Ok(merged) => json_response(200, merged.to_json()),
+        Err(e) => error_response(500, &format!("could not save graph: {e}")),
+    }
+}
+
+/// `GET /v1/graph/format` — the graph's field vocabulary, so a host can
+/// render a palette without hardcoding the core's node list.
+fn graph_format(config: &ServerConfig) -> HttpResponse {
+    let _ = config;
+    let nodes: Vec<serde_json::Value> = prism_core::graph_nodes::NODE_DEFS
+        .iter()
+        .map(|def| {
+            let ports = |p: &prism_core::graph::Port| {
+                serde_json::json!({
+                    "id": p.id,
+                    "label": p.label,
+                    "kind": format!("{:?}", p.kind).to_lowercase(),
+                    "output": p.output,
+                })
+            };
+            serde_json::json!({
+                "kind": def.kind,
+                "title": def.title,
+                "family": def.family.as_str(),
+                "inputs": def.inputs.iter().map(ports).collect::<Vec<_>>(),
+                "outputs": def.outputs.iter().map(ports).collect::<Vec<_>>(),
+                "knobs": def.knobs.iter().map(|k| serde_json::json!({
+                    "id": k.id,
+                    "label": k.label,
+                    "control": k.control,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    json_response(200, serde_json::json!({ "nodes": nodes }).to_string())
+}
+
+/// Epoch milliseconds, for `updated_at` stamps.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 fn sse_response(body: String) -> HttpResponse {
@@ -1071,6 +1177,77 @@ pub const IN_PROCESS_IMAGE_PROVIDER: &str = NATIVE_ID;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_graph_api_serves_and_accepts_a_shared_document() {
+        let root = std::env::temp_dir().join("prism-native-graph-test");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let config = ServerConfig {
+            graph_root: Some(root.clone()),
+            ..ServerConfig::default()
+        };
+
+        // GET before any write yields the starter drawing.
+        let response = handle_http_with("GET", "/v1/graph", b"", &config);
+        assert_eq!(response.status, 200);
+        let doc = prism_core::graph_store::GraphDocument::from_json(&response.body)
+            .expect("a graph document comes back");
+        assert!(prism_core::graph_store::is_valid(&doc));
+        let original_nodes = doc.graph.nodes.len();
+
+        // PUT a document that adds a node; the reply keeps it.
+        let mut edited = doc.clone();
+        let extra = prism_core::graph_factory::make_node(4242, "seed", 40.0, 40.0).unwrap();
+        edited.graph.nodes.push(extra.clone());
+        let body = edited.to_json().into_bytes();
+        let response = handle_http_with("PUT", "/v1/graph", &body, &config);
+        assert_eq!(response.status, 200);
+        let saved = prism_core::graph_store::GraphDocument::from_json(&response.body).unwrap();
+        assert_eq!(saved.graph.nodes.len(), original_nodes + 1);
+        assert!(saved.graph.node(4242).is_some());
+
+        // A later GET sees the persisted merge, not the starter.
+        let response = handle_http_with("GET", "/v1/graph", b"", &config);
+        let reloaded = prism_core::graph_store::GraphDocument::from_json(&response.body).unwrap();
+        assert!(reloaded.graph.node(4242).is_some());
+
+        // Garbage is refused with a 400, and the stored document is intact.
+        let response = handle_http_with("PUT", "/v1/graph", b"not json", &config);
+        assert_eq!(response.status, 400);
+        let response = handle_http_with("GET", "/v1/graph", b"", &config);
+        let intact = prism_core::graph_store::GraphDocument::from_json(&response.body).unwrap();
+        assert!(intact.graph.node(4242).is_some());
+
+        // A non-Prism document is refused too.
+        let response = handle_http_with("PUT", "/v1/graph", br#"{"app":"other"}"#, &config);
+        assert_eq!(response.status, 400);
+
+        // The palette description carries every node, its ports and knobs.
+        let response = handle_http_with("GET", "/v1/graph/format", b"", &config);
+        assert_eq!(response.status, 200);
+        let value: serde_json::Value = serde_json::from_str(&response.body).unwrap();
+        let nodes = value["nodes"].as_array().expect("a node list");
+        assert_eq!(nodes.len(), 6);
+        let sampler = nodes
+            .iter()
+            .find(|n| n["kind"] == "sampler")
+            .expect("the sampler definition");
+        assert_eq!(sampler["title"], "KSampler");
+        assert_eq!(sampler["inputs"].as_array().unwrap().len(), 4);
+        assert_eq!(sampler["outputs"].as_array().unwrap().len(), 1);
+        assert!(sampler["knobs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|k| k["id"] == "cfg"));
+
+        // Without a configured root the routes decline rather than panic.
+        let bare = handle_http_with("GET", "/v1/graph", b"", &ServerConfig::default());
+        assert_eq!(bare.status, 404);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn txt2img_returns_a_png_data_payload() {

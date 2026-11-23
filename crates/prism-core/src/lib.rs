@@ -26,6 +26,15 @@
 
 pub mod agent;
 pub mod cards;
+pub mod graph;
+pub mod graph_factory;
+pub mod graph_nodes;
+pub mod graph_request;
+pub mod graph_store;
+#[cfg(test)]
+mod graph_store_tests;
+#[cfg(test)]
+mod graph_tests;
 #[cfg(feature = "candle-llm")]
 pub mod candle_llm;
 #[cfg(feature = "candle-sd")]
