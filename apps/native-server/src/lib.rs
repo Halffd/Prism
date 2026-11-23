@@ -66,7 +66,7 @@ impl ServerConfig {
         };
         let graph_root = clean("PRISM_GRAPH_ROOT")
             .map(std::path::PathBuf::from)
-            .unwrap_or_else(default_graph_root);
+            .unwrap_or_else(prism_core::graph_store::default_graph_root);
         Self {
             sd_model: clean("PRISM_SD_MODEL"),
             sd_version: clean("PRISM_SD_VERSION"),
@@ -368,16 +368,6 @@ fn json_response(status: u16, body: String) -> HttpResponse {
 /// edits locally, and PUTs the result, so a drawing made in Slint shows
 /// up in the web app and the CLI without either one knowing about the
 /// other.
-/// Where the shared graph document is stored when nothing is configured:
-/// a `prism-data` dir beside the working directory. Explicitly a
-/// fallback, not the recommended setup — `PRISM_GRAPH_ROOT` is.
-fn default_graph_root() -> std::path::PathBuf {
-    std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join("prism-data")
-        .join("graph")
-}
-
 fn graph_get(config: &ServerConfig) -> HttpResponse {
     let Some(root) = config.graph_root.as_deref() else {
         return error_response(404, "graph storage is not configured");

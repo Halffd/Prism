@@ -253,6 +253,27 @@ pub fn graph_path(root: &Path) -> PathBuf {
     root.join(GRAPH_FILE_NAME)
 }
 
+/// Where the shared graph document is stored.
+///
+/// `PRISM_GRAPH_ROOT` wins when it is set; otherwise a `prism-data` dir
+/// beside the working directory, which keeps a checkout usable with no
+/// configuration at all. Explicitly a fallback, not the recommended setup.
+///
+/// One definition, so the native server that serves the document and the
+/// native surfaces that read it cannot disagree about where it lives.
+pub fn default_graph_root() -> PathBuf {
+    if let Ok(root) = std::env::var("PRISM_GRAPH_ROOT") {
+        let trimmed = root.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("prism-data")
+        .join("graph")
+}
+
 /// Load the shared graph. A missing file, or one that no longer parses,
 /// yields the starter drawing rather than a panic: a fresh install and a
 /// corrupted one both deserve a usable canvas.

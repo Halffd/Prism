@@ -446,3 +446,162 @@ fn the_tables_the_palette_offers_are_complete_and_sane() {
     let seed = node_def("seed").unwrap();
     assert_eq!(seed.outputs[0].kind, PortKind::Seed);
 }
+/// The form-to-request mapping is the seam every surface crosses, so its
+/// tests live beside the mapper in `graph_request`, not in one host.
+#[cfg(test)]
+mod mapping_tests {
+    use super::*;
+    use crate::graph_factory::make_node;
+    use crate::graph_request::{to_form, to_media_request, GraphForm, LoraForm};
+    use crate::media::NATIVE_ID;
+
+    /// A fully wired canvas: LoRA -> Checkpoint -> Sampler, with a Prompt
+    /// and an Empty Latent, and all knobs filled in.
+    fn wired_form() -> GraphForm {
+        let mut graph = crate::graph::Graph::default();
+        graph.nodes.push(make_node(1, "lora", 0.0, 0.0).unwrap());
+        graph.nodes.push(make_node(2, "checkpoint", 0.0, 200.0).unwrap());
+        graph.nodes.push(make_node(3, "prompt", 0.0, 400.0).unwrap());
+        graph.nodes.push(make_node(4, "latent", 0.0, 600.0).unwrap());
+        graph.nodes.push(make_node(5, "sampler", 400.0, 200.0).unwrap());
+        graph.connect(crate::graph::Wire::new(1, "loras", 2, "loras"));
+        graph.connect(crate::graph::Wire::new(2, "model", 5, "model"));
+        graph.connect(crate::graph::Wire::new(3, "conditioning", 5, "conditioning"));
+        graph.connect(crate::graph::Wire::new(4, "latent", 5, "latent"));
+
+        graph.node_mut(1).unwrap().values.loras.push(
+            crate::graph::LoraEntry {
+                name: "detail.pt".into(),
+                weight: "0.6".into(),
+            },
+        );
+        graph.node_mut(2).unwrap().values.set_text("checkpoint", "sd15.safetensors");
+        graph.node_mut(2).unwrap().values.set_number("clip_skip", 2.0);
+        graph.node_mut(3).unwrap().values.set_text("prompt", "a lighthouse in fog");
+        graph.node_mut(4).unwrap().values.set_number("width", 768.0);
+        graph.node_mut(4).unwrap().values.set_number("height", 512.0);
+        graph.node_mut(5).unwrap().values.set_enum("sampler", "dpmpp_2m");
+        graph.node_mut(5).unwrap().values.set_number("cfg", 9.5);
+        graph.node_mut(5).unwrap().values.set_number("denoise", 0.85);
+
+        crate::graph_request::to_form(&graph, NATIVE_ID).expect("a wired graph flattens")
+    }
+
+    #[test]
+    fn a_flattened_form_maps_onto_the_core_request() {
+        let form = wired_form();
+        let request = to_media_request(&form, "http://127.0.0.1:7861/").expect("maps");
+
+        assert_eq!(request.provider, "native");
+        assert_eq!(request.prompt, "a lighthouse in fog");
+        assert_eq!(request.model.as_deref(), Some("sd15.safetensors"));
+        assert_eq!(request.width, Some(768));
+        assert_eq!(request.height, Some(512));
+        assert_eq!(request.clip_skip, Some(2));
+        assert_eq!(request.steps, Some(20));
+        assert_eq!(request.batch, Some(1));
+        // A fractional CFG survives the mapping: this is where a naive
+        // integer cast would quietly turn 9.5 into 9.
+        assert_eq!(request.cfg, Some(9.5));
+        assert_eq!(request.denoise, Some(0.85));
+        assert_eq!(request.sampler.as_deref(), Some("dpmpp_2m"));
+        assert_eq!(request.loras.len(), 1);
+        assert_eq!(request.loras[0].name, "detail.pt");
+        assert_eq!(request.loras[0].weight, 0.6);
+    }
+
+    #[test]
+    fn a_blank_seed_is_left_for_the_core_to_resolve() {
+        let form = wired_form();
+        assert!(form.seed.trim().is_empty());
+        let request = to_media_request(&form, "").expect("maps");
+        // The canvas does not invent a seed: the native renderer derives
+        // one, and A1111 sends -1.
+        assert_eq!(request.seed, None);
+    }
+
+    #[test]
+    fn blank_fields_become_none_rather_than_empty_strings() {
+        let mut form = wired_form();
+        form.checkpoint = "  ".into();
+        form.vae = String::new();
+        form.negative_prompt = String::new();
+        let request = to_media_request(&form, "").expect("maps");
+        assert_eq!(request.model, None);
+        assert_eq!(request.vae, None);
+        assert_eq!(request.negative_prompt, None);
+    }
+
+    #[test]
+    fn a_blank_size_is_allowed_but_a_nonsense_one_is_not() {
+        // Blank: the core falls back to the aspect ratio.
+        let mut form = wired_form();
+        form.width = String::new();
+        form.height = "   ".into();
+        let request = to_media_request(&form, "").expect("maps");
+        assert_eq!(request.width, None);
+
+        // Nonsense: an error, not a silent zero.
+        form.height = "tall".into();
+        let error = to_media_request(&form, "").expect_err("a bad size");
+        assert!(error.contains("Height"), "{error}");
+    }
+
+    #[test]
+    fn a_malformed_cfg_is_reported_rather_than_silently_dropped() {
+        let mut form = wired_form();
+        form.cfg = "high".into();
+        let error = to_media_request(&form, "").expect_err("a bad cfg");
+        assert!(error.contains("CFG"), "{error}");
+        // And a legitimate fractional cfg still works.
+        form.cfg = "7.5".into();
+        assert_eq!(to_media_request(&form, "").unwrap().cfg, Some(7.5));
+    }
+
+    #[test]
+    fn a_lora_weight_defaults_to_the_trained_strength() {
+        let mut form = wired_form();
+        form.loras = vec![
+            crate::graph_request::LoraForm {
+                name: "styled.pt".into(),
+                weight: String::new(),
+            },
+            crate::graph_request::LoraForm {
+                name: " ".into(),
+                weight: "0.8".into(),
+            },
+        ];
+        let request = to_media_request(&form, "").expect("maps");
+        // The named LoRA keeps the core's default; the nameless one is
+        // dropped because a LoRA with no name cannot be loaded.
+        assert_eq!(request.loras.len(), 1);
+        assert_eq!(request.loras[0].name, "styled.pt");
+        assert_eq!(request.loras[0].weight, 1.0);
+    }
+
+    #[test]
+    fn the_native_body_builds_from_the_mapped_request() {
+        // The mapping has to reach a body the core can actually send; a
+        // field set that parses but produces an empty body would pass the
+        // shape tests above and still generate nothing.
+        let form = wired_form();
+        let request = to_media_request(&form, "").expect("maps");
+        let body = crate::media::a1111_txt2img_body(&request);
+        assert_eq!(
+            body["prompt"], "a lighthouse in fog <lora:detail.pt:0.6>",
+            "A1111 has no LoRA column, so the core folds the rows into the prompt \
+             as <lora> tags — the canvas must not re-state that rule"
+        );
+        assert_eq!(body["width"], 768);
+        assert_eq!(body["cfg_scale"], 9.5);
+        // A blank seed reaches the wire as A1111's "random".
+        assert_eq!(body["seed"], -1);
+
+        // The core's own accessors agree with the shape the canvas sent:
+        // the fractional CFG survives, and the size comes back as set.
+        assert_eq!(crate::media::sd_cfg(&request), 9.5);
+        assert_eq!(crate::media::sd_steps(&request), 20);
+        assert_eq!(crate::media::sd_size(&request), (768, 512));
+        assert_eq!(crate::media::sd_sampler(&request), "dpmpp_2m");
+    }
+}

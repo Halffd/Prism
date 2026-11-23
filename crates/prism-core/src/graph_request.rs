@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use super::graph::Graph;
 use super::graph_nodes::node_def;
+use super::media::{LoraSpec, MediaRequest};
 
 /// One LoRA row as the host expects it (name plus weight as typed).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -315,4 +316,105 @@ pub fn seed_locked(graph: &Graph) -> bool {
         .text("seed_locked")
         .map(|v| v == "locked")
         .unwrap_or(false)
+}
+// ---------------------------------------------------------------------------
+// Mapping a flattened form onto the core's request
+// ---------------------------------------------------------------------------
+
+/// Trim a form string to `None` when it is blank, matching the host's
+/// "blank means none" convention.
+fn text_or_none(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+fn parse_f64(value: &str) -> Option<f64> {
+    value.trim().parse::<f64>().ok().filter(|v| v.is_finite())
+}
+
+fn parse_u32(value: &str) -> Option<u32> {
+    value.trim().parse::<u32>().ok()
+}
+
+/// Parse an optional whole number. Blank is `Ok(None)`; a non-number is an
+/// error naming the knob, so the user is told which field to fix.
+fn required_u32(raw: &str, label: &str) -> Result<Option<u32>, String> {
+    if raw.trim().is_empty() {
+        return Ok(None);
+    }
+    parse_u32(raw).map(Some).ok_or_else(|| format!("{label} is not a whole number: {raw:?}"))
+}
+
+/// Same, for the decimal knobs (CFG's 0.1 steps, denoise strength).
+fn required_f64(raw: &str, label: &str) -> Result<Option<f64>, String> {
+    if raw.trim().is_empty() {
+        return Ok(None);
+    }
+    parse_f64(raw).map(Some).ok_or_else(|| format!("{label} is not a number: {raw:?}"))
+}
+
+/// Map a flattened form onto the core's request shape.
+///
+/// A blank seed becomes `None` and the core decides: the native renderer
+/// derives one deterministically from the prompt and the clock, and A1111
+/// sends `-1` for "random". Restating that rule here would let the canvas
+/// and the panel disagree about what an empty seed means.
+///
+/// A malformed number is an error rather than a silent zero: a user who
+/// typed "abc" into CFG should be told, not handed a guidance scale of 0.
+pub fn to_media_request(form: &GraphForm, base_url: &str) -> Result<MediaRequest, String> {
+    let mut request = MediaRequest {
+        provider: form.provider.clone(),
+        base_url: base_url.trim().to_string(),
+        prompt: form.prompt.clone(),
+        negative_prompt: text_or_none(&form.negative_prompt),
+        model: text_or_none(&form.checkpoint),
+        vae: text_or_none(&form.vae),
+        ..Default::default()
+    };
+
+    request.clip_skip = required_u32(&form.clip_skip, "CLIP skip")?;
+    request.steps = required_u32(&form.steps, "Steps")?;
+    request.batch = required_u32(&form.batch, "Batch")?;
+    request.cfg = required_f64(&form.cfg, "CFG")?;
+    request.denoise = required_f64(&form.denoise, "Denoise")?;
+
+    // A blank size is `None`, and the core falls back to the aspect ratio
+    // the Latent node owns. A non-blank nonsense size is still an error.
+    request.width = required_u32(&form.width, "Width")?;
+    request.height = required_u32(&form.height, "Height")?;
+
+    if !form.sampler.trim().is_empty() {
+        request.sampler = Some(form.sampler.trim().to_string());
+    }
+    if !form.scheduler.trim().is_empty() {
+        request.scheduler = Some(form.scheduler.trim().to_string());
+    }
+
+    for lora in &form.loras {
+        let name = lora.name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        // A blank weight is the adapter's trained strength, which is 1.0.
+        let weight = if lora.weight.trim().is_empty() {
+            1.0
+        } else {
+            match parse_f64(&lora.weight) {
+                Some(value) => value,
+                None => {
+                    return Err(format!(
+                        "the weight for LoRA {name:?} is not a number: {:?}",
+                        lora.weight
+                    ))
+                }
+            }
+        };
+        request.loras.push(LoraSpec {
+            name: name.to_string(),
+            weight,
+        });
+    }
+
+    Ok(request)
 }

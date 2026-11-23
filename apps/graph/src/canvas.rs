@@ -151,23 +151,11 @@ fn distance_to_segment(point: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
     ((point.0 - nearest.0).powi(2) + (point.1 - nearest.1).powi(2)).sqrt()
 }
 
-/// The endpoints a wire draws between, or `None` when either endpoint is
-/// missing (a deleted node leaves no dangling cable).
-pub fn wire_endpoints(graph: &Graph, wire: &Wire) -> Option<((f64, f64), (f64, f64))> {
-    let from_node = graph.node(wire.from_node)?;
-    let from_def = node_def(&from_node.kind)?;
-    let from = prism_core::graph::port_position(from_node, from_def, &wire.from_port)?;
-    let to_node = graph.node(wire.to_node)?;
-    let to_def = node_def(&to_node.kind)?;
-    let to = prism_core::graph::port_position(to_node, to_def, &wire.to_port)?;
-    Some((from, to))
-}
-
 /// The wire under a canvas point, for click-to-delete. Reverse order so
 /// the topmost crossing wins.
 pub fn hit_wire(graph: &Graph, x: f64, y: f64) -> Option<usize> {
     for index in (0..graph.wires.len()).rev() {
-        let Some((from, to)) = wire_endpoints(graph, &graph.wires[index]) else {
+        let Some((from, to)) = prism_core::graph::wire_endpoints(graph, &graph.wires[index]) else {
             continue;
         };
         if wire_distance(from, to, (x, y)) <= WIRE_HIT_SLACK {
@@ -430,7 +418,7 @@ mod tests {
     #[test]
     fn a_wire_is_hit_along_its_curve_and_not_off_it() {
         let graph = wired_graph();
-        let (from, to) = wire_endpoints(&graph, &graph.wires[0]).expect("wired");
+        let (from, to) = prism_core::graph::wire_endpoints(&graph, &graph.wires[0]).expect("wired");
         let mid = wire_bezier_at(from, to, 0.5);
 
         assert_eq!(hit_wire(&graph, mid.0, mid.1), Some(0));
@@ -455,7 +443,7 @@ mod tests {
         // be hit either.
         graph.wires.push(Wire::new(1, "model", 99, "model"));
         let dangling = graph.wires.len() - 1;
-        assert!(wire_endpoints(&graph, &graph.wires[dangling]).is_none());
+        assert!(prism_core::graph::wire_endpoints(&graph, &graph.wires[dangling]).is_none());
         assert_eq!(hit_wire(&graph, 300.0, 50.0), Some(0), "the live wire still hits");
 
         // Deleting a node takes its wires with it, so the normal path

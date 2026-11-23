@@ -24,8 +24,10 @@ pub use prism_core::graph_store;
 /// a canvas that are otherwise only verifiable by clicking in a browser.
 pub mod canvas;
 
-/// Turning a flattened canvas into images: the pure form→request mapping
-/// is host-testable, and only the `fetch` calls are wasm-only.
+/// Driving a flattened canvas into images. Web-only: the mapping it needs
+/// is the core's `graph_request::to_media_request`, and everything else
+/// here is `fetch`.
+#[cfg(target_arch = "wasm32")]
 pub mod generate;
 
 /// The API transport: one shared canvas across every Prism surface.

@@ -218,7 +218,7 @@ fn canvas_layers(
             svg {
                 style: "position: absolute; left: 0; top: 0; overflow: visible; width: 1px; height: 1px;",
                 for wire in snapshot.wires.iter() {
-                    if let Some((from, to)) = canvas::wire_endpoints(&snapshot, wire) {
+                    if let Some((from, to)) = prism_core::graph::wire_endpoints(&snapshot, wire) {
                         path {
                             key: "wire-{wire.from_node}-{wire.from_port}-{wire.to_node}-{wire.to_port}",
                             d: "{prism_core::graph::wire_path(from, to)}",

@@ -6,7 +6,8 @@ use super::graph::{
 };
 use super::graph_factory::{make_node, starter_graph};
 use super::graph_store::{
-    apply_and_save, graph_path, is_valid, load, merge, problems, save, GraphDocument, GraphProblem,
+    apply_and_save, default_graph_root, graph_path, is_valid, load, merge, problems, save,
+    GraphDocument, GraphProblem,
 };
 use super::storage::{FsStorage, Storage};
 use std::fs;
@@ -17,6 +18,24 @@ fn tmp_dir(name: &str) -> std::path::PathBuf {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+#[test]
+fn the_default_graph_root_honours_the_environment() {
+    // Asserts whichever branch is live, so a host (or CI) that configures
+    // PRISM_GRAPH_ROOT is not pushed down the fallback path by this test.
+    match std::env::var("PRISM_GRAPH_ROOT") {
+        Ok(raw) if !raw.trim().is_empty() => {
+            assert_eq!(default_graph_root(), std::path::PathBuf::from(raw.trim()));
+        }
+        _ => {
+            let root = default_graph_root();
+            assert!(
+                root.ends_with("prism-data/graph"),
+                "{root:?} should be the checkout-local fallback"
+            );
+        }
+    }
 }
 
 fn doc_with(graph: Graph, updated_at: u64) -> GraphDocument {

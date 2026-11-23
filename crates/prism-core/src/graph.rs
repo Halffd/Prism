@@ -364,6 +364,20 @@ pub fn port_position(
     Some((x, y))
 }
 
+/// The endpoints a wire draws between, or `None` when either is missing.
+///
+/// A hand-edited or half-synced document can carry a wire whose node was
+/// deleted. There is nothing to draw, and nothing to hit.
+pub fn wire_endpoints(graph: &Graph, wire: &Wire) -> Option<((f64, f64), (f64, f64))> {
+    let from_node = graph.node(wire.from_node)?;
+    let from_def = node_def(&from_node.kind)?;
+    let from = port_position(from_node, from_def, &wire.from_port)?;
+    let to_node = graph.node(wire.to_node)?;
+    let to_def = node_def(&to_node.kind)?;
+    let to = port_position(to_node, to_def, &wire.to_port)?;
+    Some((from, to))
+}
+
 /// The bezier a wire follows: start, two control points, end.
 ///
 /// Shared by every surface so the Dioxus canvas's SVG `d` string, the Slint
