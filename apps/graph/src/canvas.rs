@@ -143,24 +143,6 @@ pub fn hit_port(graph: &Graph, x: f64, y: f64) -> Option<PortHit> {
     None
 }
 
-/// The cubic bezier through two socket points, matching `wire_path`'s
-/// control points so hit-testing follows the drawn curve, not a chord.
-fn wire_control(from: (f64, f64), to: (f64, f64)) -> ((f64, f64), (f64, f64)) {
-    let dx = (to.0 - from.0).abs();
-    let bend = (dx * 0.5).max(40.0);
-    ((from.0 + bend, from.1), (to.0 - bend, to.1))
-}
-
-/// A point on the wire's curve at parameter `t` (0 = source socket).
-fn wire_point(from: (f64, f64), to: (f64, f64), t: f64) -> (f64, f64) {
-    let (c1, c2) = wire_control(from, to);
-    let u = 1.0 - t;
-    (
-        u * u * u * from.0 + 3.0 * u * u * t * c1.0 + 3.0 * u * t * t * c2.0 + t * t * t * to.0,
-        u * u * u * from.1 + 3.0 * u * u * t * c1.1 + 3.0 * u * t * t * c2.1 + t * t * t * to.1,
-    )
-}
-
 /// Distance from a canvas point to the wire's curve, approximated by
 /// sampling the bezier. Good enough to tell a click on a wire from a
 /// click near one, which is all a canvas needs.
@@ -169,7 +151,7 @@ fn wire_distance(from: (f64, f64), to: (f64, f64), at: (f64, f64)) -> f64 {
     let mut previous = from;
     for step in 1..=WIRE_SEGMENTS {
         let t = step as f64 / WIRE_SEGMENTS as f64;
-        let current = wire_point(from, to, t);
+        let current = prism_core::graph::wire_bezier_at(from, to, t);
         best = best.min(distance_to_segment(at, previous, current));
         previous = current;
     }
@@ -468,7 +450,7 @@ mod tests {
     fn a_wire_is_hit_along_its_curve_and_not_off_it() {
         let graph = wired_graph();
         let (from, to) = wire_endpoints(&graph, &graph.wires[0]).expect("wired");
-        let mid = wire_point(from, to, 0.5);
+        let mid = prism_core::graph::wire_bezier_at(from, to, 0.5);
 
         assert_eq!(hit_wire(&graph, mid.0, mid.1), Some(0));
 

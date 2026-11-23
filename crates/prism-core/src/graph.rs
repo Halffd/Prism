@@ -341,17 +341,39 @@ pub fn port_position(
     Some((x, y))
 }
 
-/// A cubic bezier through two socket points, in the flat `SVG` path
-/// syntax Dioxus renders for wires. The control points extend
-/// horizontally by half the horizontal gap (at least 40px) so the curve
-/// reads as a cable rather than a hairpin.
-pub fn wire_path(from: (f64, f64), to: (f64, f64)) -> String {
+/// The bezier a wire follows: start, two control points, end.
+///
+/// Shared by every surface so the Dioxus canvas's SVG `d` string, the Slint
+/// canvas's sampled polyline and the hit-testing curve are the same curve.
+/// The control points extend horizontally by half the horizontal gap (at
+/// least 40px) so the wire reads as a cable rather than a hairpin.
+pub fn wire_bezier(from: (f64, f64), to: (f64, f64)) -> ((f64, f64), (f64, f64), (f64, f64), (f64, f64)) {
     let dx = (to.0 - from.0).abs();
     let bend = (dx * 0.5).max(40.0);
     let c1 = (from.0 + bend, from.1);
     let c2 = (to.0 - bend, to.1);
+    (from, c1, c2, to)
+}
+
+/// A point on a wire's curve at parameter `t` (0 = source socket).
+///
+/// A Slint canvas cannot build a `Path` from data, so it draws the wire as
+/// a polyline sampled through here — which is also what hit-testing walks.
+pub fn wire_bezier_at(from: (f64, f64), to: (f64, f64), t: f64) -> (f64, f64) {
+    let (p0, c1, c2, p3) = wire_bezier(from, to);
+    let u = 1.0 - t;
+    (
+        u * u * u * p0.0 + 3.0 * u * u * t * c1.0 + 3.0 * u * t * t * c2.0 + t * t * t * p3.0,
+        u * u * u * p0.1 + 3.0 * u * u * t * c1.1 + 3.0 * u * t * t * c2.1 + t * t * t * p3.1,
+    )
+}
+
+/// A cubic bezier through two socket points, in the flat `SVG` path syntax
+/// Dioxus renders for wires.
+pub fn wire_path(from: (f64, f64), to: (f64, f64)) -> String {
+    let (p0, c1, c2, p3) = wire_bezier(from, to);
     format!(
         "M {:.1} {:.1} C {:.1} {:.1}, {:.1} {:.1}, {:.1} {:.1}",
-        from.0, from.1, c1.0, c1.1, c2.0, c2.1, to.0, to.1
+        p0.0, p0.1, c1.0, c1.1, c2.0, c2.1, p3.0, p3.1
     )
 }

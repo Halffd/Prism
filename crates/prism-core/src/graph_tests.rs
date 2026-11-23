@@ -1,10 +1,10 @@
 //! Unit tests for the graph model and the flatten step — no browser, no
 //! UI framework, no Stable Diffusion rules.
-//! Dioxus, no Stable Diffusion rules.
 
 use super::graph_factory::{default_values, make_node, starter_graph, ASPECT_PRESETS, SCHEDULERS, SAMPLERS};
 use super::graph::{
-    port_position, wire_path, Graph, GraphNode, LoraEntry, NodeValues, PortKind, Wire, NODE_WIDTH,
+    port_position, wire_bezier, wire_bezier_at, wire_path, Graph, GraphNode, LoraEntry, NodeValues,
+    PortKind, Wire, NODE_WIDTH,
 };
 use super::graph_nodes::{node_def, NODE_DEFS};
 use super::graph_request::{seed_locked, to_form, GraphError};
@@ -118,6 +118,58 @@ fn wire_path_is_a_cubic_through_both_sockets() {
     // Control points sit between the endpoints horizontally.
     assert!(path.contains("60.0 20.0"), "{path}");
     assert!(path.contains("60.0 80.0"), "{path}");
+}
+
+#[test]
+fn the_bezier_control_points_bend_horizontally_toward_the_gap() {
+    // Every surface draws from these four points — the Dioxus canvas's SVG
+    // string, the Slint canvas's sampled polyline, and hit-testing. One
+    // definition means they cannot draw different wires.
+    let (start, c1, c2, end) = wire_bezier((10.0, 20.0), (110.0, 80.0));
+    assert_eq!(start, (10.0, 20.0));
+    assert_eq!(end, (110.0, 80.0));
+    // Half the horizontal gap (100 / 2 = 50), leaving each socket flat.
+    assert_eq!(c1, (60.0, 20.0));
+    assert_eq!(c2, (60.0, 80.0));
+}
+
+#[test]
+fn a_narrow_gap_still_gets_a_usable_bend() {
+    // Under 80px of gap, half the gap would be a hairpin, so the bend
+    // floors at 40px — the reason a short wire still reads as a cable.
+    let from = (100.0, 50.0);
+    let to = (140.0, 50.0);
+    let (start, c1, _, _) = wire_bezier(from, to);
+    assert_eq!(c1.0 - start.0, 40.0);
+    assert_eq!(c1.1, start.1, "the control point leaves horizontally");
+}
+
+#[test]
+fn the_sampled_curve_starts_and_ends_on_the_sockets() {
+    // A polyline is not exact, but its first and last samples must be, or a
+    // wire visibly detaches from the socket it came from.
+    let from = (10.0, 20.0);
+    let to = (110.0, 80.0);
+    assert_eq!(wire_bezier_at(from, to, 0.0), from);
+    assert_eq!(wire_bezier_at(from, to, 1.0), to);
+
+    // The midpoint sits exactly on the chord here, because each control
+    // point is level with its own socket — that is worth stating, since it
+    // is the one place a chord and this curve agree. A quarter of the way
+    // in, the curve has already dipped below the straight line, which is
+    // what makes a wire read as a cable rather than a chord.
+    let mid = wire_bezier_at(from, to, 0.5);
+    assert_eq!(mid, (60.0, 50.0));
+    let quarter = wire_bezier_at(from, to, 0.25);
+    assert_ne!(quarter, (35.0, 35.0));
+    assert!(quarter.1 < 35.0, "the curve dips below the chord: {quarter:?}");
+
+    // The SVG path and the sampled curve agree: the string's control points
+    // are the ones the sampler walks.
+    let path = wire_path(from, to);
+    assert!(path.starts_with("M 10.0 20.0"), "{path}");
+    assert!(path.contains("60.0 20.0"), "{path}");
+    assert!(path.ends_with("110.0 80.0"), "{path}");
 }
 
 #[test]
