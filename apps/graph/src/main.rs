@@ -1,11 +1,13 @@
-#![cfg(target_arch = "wasm32")]
-
 //! The browser entry point `trunk` builds.
 //!
 //! The crate is web-only: the model, the canvas math and the generation
 //! mapping are all compiled and tested on the host, and only this binary and
-//! `app` itself require a browser. Gating the whole file on `wasm32` keeps
-//! `cargo check -p prism-graph` on a desktop from trying to link them.
+//! `app` itself require a browser.
+//!
+//! The host never compiles this file: the manifest gives the bin
+//! `required-features = ["web"]`, and a `#![cfg]` cannot do that job — it
+//! would strip `main` from the crate root and turn a plain `cargo check`
+//! into `E0601: main function not found`.
 
 /// Mount the canvas.
 fn main() {

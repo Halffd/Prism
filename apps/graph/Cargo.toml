@@ -32,8 +32,17 @@ gloo-net = "0.6"
 js-sys = "0.3"
 
 [features]
-# WASM-only deps (js-sys / web-sys) are pulled in by dioxus' web feature;
-# nothing here needs a separate gate.
+# One gate for the browser surface. `dioxus/web` is a target dependency,
+# so enabling this feature only resolves on wasm32 — which is exactly the
+# cockpit wanted: `cargo build` on a desktop skips the bin, and
+# `trunk serve apps/graph/index.html` (which builds with wasm32) gets it.
+web = ["dioxus/web"]
+
+# The browser entry point Cargo builds only for wasm.
+[[bin]]
+name = "prism-graph"
+path = "src/main.rs"
+required-features = ["web"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("web"))'] }
