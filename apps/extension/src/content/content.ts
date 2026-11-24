@@ -4,6 +4,7 @@ import type {
   PopupDisplayMode,
   ContentRequest,
 } from '@prism/shared-types';
+import { configureCoreWeb } from '@prism/ai-core';
 import {
   createIframe,
   createShadowHost,
@@ -34,6 +35,24 @@ import type {
 // the extension UI and answers page-level context requests; subframes keep
 // the editable/shortcut handling because editors often live inside iframes.
 const isTopFrame = window.top === window;
+
+// The wasm core's default pkg specifier is relative ("./wasm-pkg-web/
+// prism_wasm.js"), which in a classic content script resolves against
+// the host *page's* URL — not the extension's own origin — so the
+// dynamic import never finds the package. Firefox for Android is where
+// this surfaced: the extension origin was never consulted, so the wasm
+// glue was simply absent and any agent/console call failed with an
+// unimplemented wasm entry point. Point it at the extension origin.
+//
+// `chrome.runtime.getURL` exists only inside an extension (jest and the
+// web app have no `chrome.runtime`), so the guarded call leaves the
+// default relative path in place for those hosts.
+try {
+  configureCoreWeb(chrome.runtime.getURL('wasm-pkg-web/prism_wasm.js'));
+} catch {
+  // Not running as an extension (junit harness, the web app): the
+  // default relative path stays correct.
+}
 
 // Default settings
 let currentDisplayMode: PopupDisplayMode = 'popup';

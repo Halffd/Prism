@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
-import { cpSync, readFileSync } from 'fs';
+import { cpSync, rmSync, readFileSync } from 'fs';
 
 // Workspace aliases come straight from tsconfig.base.json — one source of
 // truth, no nx plugin. The nx tsconfig-paths plugin walked every linked git
@@ -60,16 +60,27 @@ export default defineConfig({
         // './wasm-pkg-web/' relative to itself. SW usage is
         // request/response only (sendMessage relay); no stream state
         // ever lives in the service worker.
+        //
+        // Copy into a staging dir first so the source's `.gitignore`
+        // (which exists to keep the generated pkg out of git) is never
+        // shipped — a browser package must not carry build-system
+        // meta-files, and one stray `*` rule confused the Android
+        // package's own file scan.
+        const staging = resolve(__dirname, '../../dist/.wasm-pkg-stage');
+        rmSync(staging, { recursive: true, force: true });
         cpSync(
           resolve(__dirname, '../../libs/ai-core/src/wasm-pkg-web'),
-          resolve(__dirname, '../../dist/apps/extension/assets/wasm-pkg-web'),
+          staging,
           { recursive: true },
         );
-        cpSync(
-          resolve(__dirname, '../../libs/ai-core/src/wasm-pkg-web'),
-          resolve(__dirname, '../../dist/apps/extension/wasm-pkg-web'),
-          { recursive: true },
-        );
+        rmSync(resolve(staging, '.gitignore'), { force: true });
+        cpSync(staging, resolve(__dirname, '../../dist/apps/extension/assets/wasm-pkg-web'), {
+          recursive: true,
+        });
+        cpSync(staging, resolve(__dirname, '../../dist/apps/extension/wasm-pkg-web'), {
+          recursive: true,
+        });
+        rmSync(staging, { recursive: true, force: true });
       },
     },
     {

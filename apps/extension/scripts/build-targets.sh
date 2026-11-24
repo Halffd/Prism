@@ -91,7 +91,13 @@ for target in "${TARGETS[@]}"; do
   echo "Packaging $target ..."
   stage "$target"
   emit_manifest "$target"
-  (cd "$OUT_DIR" && zip -qr "prism-extension-$target.zip" "$target")
+  # Zip the *contents* of the staged dir, not the dir itself: a nested
+  # top-level folder ("firefox/manifest.json") is a corrupt add-on to
+  # every browser — Firefox reports "This addon could not be installed
+  # because it appears to be corrupt" and Chrome's unpacked-load path
+  # fails to find the manifest. `zip -r . .` prefixes entries with ./
+  # so they land at the archive root.
+  (cd "$OUT_DIR/$target" && zip -qr "$OUT_DIR/prism-extension-$target.zip" .)
   echo "  -> $OUT_DIR/prism-extension-$target.zip"
 done
 

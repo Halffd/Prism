@@ -354,6 +354,44 @@ function agent_subagent_clamp_tools(name, advertised) {
 exports.agent_subagent_clamp_tools = agent_subagent_clamp_tools;
 
 /**
+ * Forced-model resolution for one subagent — the daemon's documented
+ * order: the spec's `forced_model`, then the session host model, then
+ * the provider default. Returns `{model, tier: subagent_forced|session|
+ * provider_default}` or JSON error when nothing resolves.
+ * @param {string} name
+ * @param {string} session_model
+ * @param {string | null} [provider_default]
+ * @returns {string}
+ */
+function agent_subagent_resolve_model(name, session_model, provider_default) {
+    let deferred4_0;
+    let deferred4_1;
+    try {
+        let ptr0, len0, ptr1, len1, ptr2, len2;
+        try {
+            ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            len0 = WASM_VECTOR_LEN;
+            ptr1 = passStringToWasm0(session_model, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            len1 = WASM_VECTOR_LEN;
+            ptr2 = isLikeNone(provider_default) ? 0 : passStringToWasm0(provider_default, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            len2 = WASM_VECTOR_LEN;
+        } catch (e) {
+            if (ptr2) { wasm.__wbindgen_free(ptr2, len2 * 1, 1); }
+            if (ptr1) { wasm.__wbindgen_free(ptr1, len1 * 1, 1); }
+            if (ptr0) { wasm.__wbindgen_free(ptr0, len0 * 1, 1); }
+            throw e;
+        }
+        const ret = wasm.agent_subagent_resolve_model(ptr0, len0, ptr1, len1, ptr2, len2);
+        deferred4_0 = ret[0];
+        deferred4_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    }
+}
+exports.agent_subagent_resolve_model = agent_subagent_resolve_model;
+
+/**
  * List the shipped subagent registry (names + tool allowlists). The
  * surfaces use it to advertise `task_*` tools.
  * @returns {string}
@@ -466,6 +504,80 @@ function apply_thinking(messages_json) {
 exports.apply_thinking = apply_thinking;
 
 /**
+ * Build a backup envelope from conversations.
+ *
+ * Input: JSON `{"conversations": [...], "now_ms": n?}`.
+ * Returns JSON `{"Ok": <BackupEnvelope>}` / `{"Err": message}`.
+ * @param {string} req_json
+ * @returns {string}
+ */
+function backup_export(req_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(req_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.backup_export(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.backup_export = backup_export;
+
+/**
+ * Import a backup file into an existing conversation list.
+ *
+ * Input: JSON `{"raw": "<file text>", "existing": [<Conversation>...],
+ * "mode": "replace" | "merge"}`. Returns the merged list plus the
+ * outcome.
+ * @param {string} req_json
+ * @returns {string}
+ */
+function backup_import(req_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(req_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.backup_import(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.backup_import = backup_import;
+
+/**
+ * Parse a backup file.
+ *
+ * Returns JSON `{"Ok": [<Conversation>...]}` on success, or
+ * `{"Err": {"Corrupt": {"reason": "..."}}}` /
+ * `{"Err": {"Unsupported": {"version": n}}}` on failure.
+ * @param {string} raw
+ * @returns {string}
+ */
+function backup_parse(raw) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(raw, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.backup_parse(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.backup_parse = backup_parse;
+
+/**
  * Build the prism-api `/api/chat` POST body.
  * Input: JSON `ApiChatRequest`. Returns `{"Ok": body}` / `{"Err": ...}`.
  * @param {string} req_json
@@ -558,6 +670,30 @@ function build_stream_body(req_json) {
 exports.build_stream_body = build_stream_body;
 
 /**
+ * Trim context items to fit a token budget.
+ *
+ * Input: JSON `{"items": [<ContextItem>...], "max_tokens": n}`.
+ * Returns JSON `{"Ok": [<ContextItem>...]}` / `{"Err": message}`.
+ * @param {string} req_json
+ * @returns {string}
+ */
+function context_apply_budget(req_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(req_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.context_apply_budget(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.context_apply_budget = context_apply_budget;
+
+/**
  * Default settings as JSON.
  * @returns {string}
  */
@@ -615,6 +751,19 @@ function empty_lore_scan() {
 exports.empty_lore_scan = empty_lore_scan;
 
 /**
+ * Estimate the token cost of a string.
+ * @param {string} text
+ * @returns {number}
+ */
+function estimate_tokens(text) {
+    const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.estimate_tokens(ptr0, len0);
+    return ret >>> 0;
+}
+exports.estimate_tokens = estimate_tokens;
+
+/**
  * Expand SillyTavern macros in a template.
  * Input: JSON `[template, MacroContext]`. Returns the expanded string.
  * @param {string} template
@@ -645,6 +794,118 @@ function expand_macros(template, context_json) {
     }
 }
 exports.expand_macros = expand_macros;
+
+/**
+ * Merge a document that arrived over the API into the local one.
+ * @param {string} local_json
+ * @param {string} incoming_json
+ * @returns {string}
+ */
+function graph_merge(local_json, incoming_json) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        let ptr0, len0, ptr1, len1;
+        try {
+            ptr0 = passStringToWasm0(local_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            len0 = WASM_VECTOR_LEN;
+            ptr1 = passStringToWasm0(incoming_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            len1 = WASM_VECTOR_LEN;
+        } catch (e) {
+            if (ptr1) { wasm.__wbindgen_free(ptr1, len1 * 1, 1); }
+            if (ptr0) { wasm.__wbindgen_free(ptr0, len0 * 1, 1); }
+            throw e;
+        }
+        const ret = wasm.graph_merge(ptr0, len0, ptr1, len1);
+        deferred3_0 = ret[0];
+        deferred3_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+exports.graph_merge = graph_merge;
+
+/**
+ * The node graph's palette: kinds, ports and knobs, straight from the
+ * core so a browser renders the same definitions the desktop does.
+ * @returns {string}
+ */
+function graph_node_defs() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.graph_node_defs();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+exports.graph_node_defs = graph_node_defs;
+
+/**
+ * Whether a document is renderable, and why not when it is not.
+ * @param {string} doc_json
+ * @returns {string}
+ */
+function graph_problems(doc_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(doc_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.graph_problems(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.graph_problems = graph_problems;
+
+/**
+ * A starting drawing, for a host with nothing stored yet.
+ * @returns {string}
+ */
+function graph_starter() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.graph_starter();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+exports.graph_starter = graph_starter;
+
+/**
+ * Flatten a graph document into the request a host would send. Returns
+ * the `{"Ok":...}` / `{"Err":...}` envelope the JS bridge unwraps, so a
+ * host fails as a value rather than an exception.
+ * @param {string} doc_json
+ * @returns {string}
+ */
+function graph_to_request(doc_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(doc_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.graph_to_request(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.graph_to_request = graph_to_request;
 
 /**
  * Position labels for UI dropdowns: JSON array of
@@ -1129,6 +1390,148 @@ function scan_lore(chat_text, history_json, book_json) {
     }
 }
 exports.scan_lore = scan_lore;
+
+/**
+ * Search messages across conversations.
+ *
+ * Input: JSON `{"conversations": [<Conversation>...], "query": <SearchQuery>}`.
+ * Returns JSON `{"Ok": [<SearchHit>...]}` / `{"Err": message}`.
+ * @param {string} req_json
+ * @returns {string}
+ */
+function search_messages(req_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(req_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.search_messages(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.search_messages = search_messages;
+
+/**
+ * Replace one message's content, keeping the rest of the transcript.
+ * @param {string} req_json
+ * @returns {string}
+ */
+function session_edit_message(req_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(req_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.session_edit_message(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.session_edit_message = session_edit_message;
+
+/**
+ * Fork a conversation at `at_index` into a new branch.
+ *
+ * Input: JSON `{"conversation": <Conversation>, "at_index": n,
+ * "new_id": "..."}`. The new id and the timestamp are supplied by the
+ * host so the result is deterministic and testable.
+ *
+ * Returns JSON `{"Ok": <forked Conversation>}` /
+ * `{"Err": message}`.
+ * @param {string} req_json
+ * @returns {string}
+ */
+function session_fork_branch(req_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(req_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.session_fork_branch(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.session_fork_branch = session_fork_branch;
+
+/**
+ * Overwrite one message and drop the stale tail after it.
+ *
+ * Input: JSON `{"conversation": <Conversation>, "at_index": n,
+ * "content": "...", "now_ms": n?}`. The conversation is mutated and
+ * returned in full.
+ * @param {string} req_json
+ * @returns {string}
+ */
+function session_overwrite_at(req_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(req_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.session_overwrite_at(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.session_overwrite_at = session_overwrite_at;
+
+/**
+ * Set a message's read flag. Returns the conversation.
+ * @param {string} req_json
+ * @returns {string}
+ */
+function session_set_message_read(req_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(req_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.session_set_message_read(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.session_set_message_read = session_set_message_read;
+
+/**
+ * Add or remove a tag on one message. Returns the conversation.
+ *
+ * `remove: true` removes the tag instead of adding it.
+ * @param {string} req_json
+ * @returns {string}
+ */
+function session_set_message_tag(req_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(req_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.session_set_message_tag(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.session_set_message_tag = session_set_message_tag;
 
 /**
  * Strip `<thinking>` blocks. Returns `[cleaned_content, reasoning_or_null]`.

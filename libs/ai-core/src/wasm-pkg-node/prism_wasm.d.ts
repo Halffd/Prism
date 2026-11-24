@@ -88,6 +88,14 @@ export function agent_sandbox_policy_check(policy_json: string): string;
 export function agent_subagent_clamp_tools(name: string, advertised: string[]): string;
 
 /**
+ * Forced-model resolution for one subagent — the daemon's documented
+ * order: the spec's `forced_model`, then the session host model, then
+ * the provider default. Returns `{model, tier: subagent_forced|session|
+ * provider_default}` or JSON error when nothing resolves.
+ */
+export function agent_subagent_resolve_model(name: string, session_model: string, provider_default?: string | null): string;
+
+/**
  * List the shipped subagent registry (names + tool allowlists). The
  * surfaces use it to advertise `task_*` tools.
  */
@@ -123,6 +131,32 @@ export function agent_tool_repair(raw_input: string): string;
 export function apply_thinking(messages_json: string): string;
 
 /**
+ * Build a backup envelope from conversations.
+ *
+ * Input: JSON `{"conversations": [...], "now_ms": n?}`.
+ * Returns JSON `{"Ok": <BackupEnvelope>}` / `{"Err": message}`.
+ */
+export function backup_export(req_json: string): string;
+
+/**
+ * Import a backup file into an existing conversation list.
+ *
+ * Input: JSON `{"raw": "<file text>", "existing": [<Conversation>...],
+ * "mode": "replace" | "merge"}`. Returns the merged list plus the
+ * outcome.
+ */
+export function backup_import(req_json: string): string;
+
+/**
+ * Parse a backup file.
+ *
+ * Returns JSON `{"Ok": [<Conversation>...]}` on success, or
+ * `{"Err": {"Corrupt": {"reason": "..."}}}` /
+ * `{"Err": {"Unsupported": {"version": n}}}` on failure.
+ */
+export function backup_parse(raw: string): string;
+
+/**
  * Build the prism-api `/api/chat` POST body.
  * Input: JSON `ApiChatRequest`. Returns `{"Ok": body}` / `{"Err": ...}`.
  */
@@ -151,6 +185,14 @@ export function build_prompt(request_json: string): string;
 export function build_stream_body(req_json: string): string;
 
 /**
+ * Trim context items to fit a token budget.
+ *
+ * Input: JSON `{"items": [<ContextItem>...], "max_tokens": n}`.
+ * Returns JSON `{"Ok": [<ContextItem>...]}` / `{"Err": message}`.
+ */
+export function context_apply_budget(req_json: string): string;
+
+/**
  * Default settings as JSON.
  */
 export function default_settings_json(): string;
@@ -166,10 +208,43 @@ export function derive_title(messages_json: string): string;
 export function empty_lore_scan(): string;
 
 /**
+ * Estimate the token cost of a string.
+ */
+export function estimate_tokens(text: string): number;
+
+/**
  * Expand SillyTavern macros in a template.
  * Input: JSON `[template, MacroContext]`. Returns the expanded string.
  */
 export function expand_macros(template: string, context_json: string): string;
+
+/**
+ * Merge a document that arrived over the API into the local one.
+ */
+export function graph_merge(local_json: string, incoming_json: string): string;
+
+/**
+ * The node graph's palette: kinds, ports and knobs, straight from the
+ * core so a browser renders the same definitions the desktop does.
+ */
+export function graph_node_defs(): string;
+
+/**
+ * Whether a document is renderable, and why not when it is not.
+ */
+export function graph_problems(doc_json: string): string;
+
+/**
+ * A starting drawing, for a host with nothing stored yet.
+ */
+export function graph_starter(): string;
+
+/**
+ * Flatten a graph document into the request a host would send. Returns
+ * the `{"Ok":...}` / `{"Err":...}` envelope the JS bridge unwraps, so a
+ * host fails as a value rather than an exception.
+ */
+export function graph_to_request(doc_json: string): string;
 
 /**
  * Position labels for UI dropdowns: JSON array of
@@ -287,6 +362,52 @@ export function providers_json(): string;
  * Returns JSON `LoreScan`.
  */
 export function scan_lore(chat_text: string, history_json: string, book_json: string): string;
+
+/**
+ * Search messages across conversations.
+ *
+ * Input: JSON `{"conversations": [<Conversation>...], "query": <SearchQuery>}`.
+ * Returns JSON `{"Ok": [<SearchHit>...]}` / `{"Err": message}`.
+ */
+export function search_messages(req_json: string): string;
+
+/**
+ * Replace one message's content, keeping the rest of the transcript.
+ */
+export function session_edit_message(req_json: string): string;
+
+/**
+ * Fork a conversation at `at_index` into a new branch.
+ *
+ * Input: JSON `{"conversation": <Conversation>, "at_index": n,
+ * "new_id": "..."}`. The new id and the timestamp are supplied by the
+ * host so the result is deterministic and testable.
+ *
+ * Returns JSON `{"Ok": <forked Conversation>}` /
+ * `{"Err": message}`.
+ */
+export function session_fork_branch(req_json: string): string;
+
+/**
+ * Overwrite one message and drop the stale tail after it.
+ *
+ * Input: JSON `{"conversation": <Conversation>, "at_index": n,
+ * "content": "...", "now_ms": n?}`. The conversation is mutated and
+ * returned in full.
+ */
+export function session_overwrite_at(req_json: string): string;
+
+/**
+ * Set a message's read flag. Returns the conversation.
+ */
+export function session_set_message_read(req_json: string): string;
+
+/**
+ * Add or remove a tag on one message. Returns the conversation.
+ *
+ * `remove: true` removes the tag instead of adding it.
+ */
+export function session_set_message_tag(req_json: string): string;
 
 /**
  * Strip `<thinking>` blocks. Returns `[cleaned_content, reasoning_or_null]`.
