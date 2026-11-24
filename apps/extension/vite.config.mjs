@@ -1,7 +1,40 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
-import { cpSync, rmSync, readFileSync } from 'fs';
+import {
+  cpSync,
+  rmSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from 'fs';
+
+// Replace every raw Unicode noncharacter in a subtree's JS with its
+// \uXXXX escape. Valid only inside a string or template literal, which is
+// where minified code always keeps a noncharacter — it is not an
+// identifier or keyword, so a raw occurrence cannot be anything but a
+// value. A file is only rewritten when it actually contains one, so a
+// clean build never touches a file.
+async function escapeNoncharacters(root) {
+  const bad = /[\ufffe\uffff\ufffd]/g;
+  const walk = async (dir) => {
+    for (const entry of readdirSync(dir)) {
+      const path = resolve(dir, entry);
+      const isDir = statSync(path).isDirectory();
+      if (isDir) {
+        await walk(path);
+        continue;
+      }
+      if (!entry.endsWith('.js')) continue;
+      const text = readFileSync(path, 'utf8');
+      if (!bad.test(text)) continue;
+      bad.lastIndex = 0;
+      writeFileSync(path, text.replace(bad, (c) => `\\u${c.codePointAt(0).toString(16).padStart(4, '0')}`), 'utf8');
+    }
+  };
+  await walk(root);
+}
 
 // Workspace aliases come straight from tsconfig.base.json — one source of
 // truth, no nx plugin. The nx tsconfig-paths plugin walked every linked git
@@ -49,6 +82,25 @@ export default defineConfig({
       // No-op: the aliases are applied via resolve.alias below. This
       // entry exists to keep the plugin list self-describing after the
       // nx tsconfig-paths plugin was removed.
+    },
+    {
+      // Chromium's extension content-script loader is stricter than V8
+      // about one thing: a Unicode *noncharacter* (U+FFFE, U+FFFF,
+      // U+FFFD) byte sequence is perfectly valid UTF-8 and V8 parses it
+      // fine, but the loader rejects the whole file with "It isn't
+      // UTF-8 encoded". Minifiers keep such characters as raw bytes —
+      // esbuild ignores `build.charset` for the code it emits itself,
+      // so that option cannot be relied on.
+      //
+      // Rewrite every emitted JS after both passes: the main build (this
+      // pass) and the content script's separate Rollup pass, whose output
+      // is produced by a plugin below and is therefore also caught here.
+      name: 'ascii-escape-noncharacters',
+      async closeBundle() {
+        await escapeNoncharacters(
+          resolve(__dirname, '../../dist/apps/extension'),
+        );
+      },
     },
     {
       // The wasm core's browser pkg must sit next to the chunk that

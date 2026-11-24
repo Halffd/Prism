@@ -91,6 +91,23 @@ for target in "${TARGETS[@]}"; do
   echo "Packaging $target ..."
   stage "$target"
   emit_manifest "$target"
+  # A raw Unicode noncharacter is valid UTF-8 and V8 accepts it, but
+  # Chromium's extension loader rejects the file: "Could not load file
+  # 'content.js' for content script. It isn't UTF-8 encoded." Vite's own
+  # pass escapes these (see vite.config.mjs), and this is the gate that
+  # keeps a future dependency from re-introducing them.
+  python3 - "$OUT_DIR/$target" << 'PY' || exit 1
+import os, sys
+NONCHARS = ('\ufffe', '\uffff', '\ufffd')
+for root, _dirs, files in os.walk(sys.argv[1]):
+    for f in files:
+        if not f.endswith('.js'):
+            continue
+        text = open(os.path.join(root, f), encoding='utf-8').read()
+        for c in NONCHARS:
+            if c in text:
+                sys.exit(f'{os.path.join(root, f)}: raw noncharacter U+{ord(c):04X}')
+PY
   # Zip the *contents* of the staged dir, not the dir itself: a nested
   # top-level folder ("firefox/manifest.json") is a corrupt add-on to
   # every browser — Firefox reports "This addon could not be installed
