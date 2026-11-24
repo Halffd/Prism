@@ -486,6 +486,211 @@ pub fn build_api_chat_body(req_json: &str) -> String {
     )
 }
 
+// ---------------------------------------------------------------------------
+// Media — the same decoder-first contract as chat: the core builds every
+// wire body and parses every response, while the JS host drives fetch.
+// ---------------------------------------------------------------------------
+
+use prism_core::media::{self, MediaRequest};
+
+fn parse_media_request(json: &str) -> Result<MediaRequest, String> {
+    parse_req::<MediaRequest>(json)
+}
+
+// ---------------------------------------------------------------------------
+// Shared canvas graph — the document every host reads and writes
+// ---------------------------------------------------------------------------
+
+/// The node graph's palette: kinds, ports and knobs, straight from the
+/// core so a browser renders the same definitions the desktop does.
+#[wasm_bindgen]
+pub fn graph_node_defs() -> String {
+    let nodes: Vec<serde_json::Value> = prism_core::graph_nodes::NODE_DEFS
+        .iter()
+        .map(|def| {
+            let port = |p: &prism_core::graph::Port| {
+                serde_json::json!({
+                    "id": p.id,
+                    "label": p.label,
+                    "kind": format!("{:?}", p.kind).to_lowercase(),
+                    "output": p.output,
+                })
+            };
+            serde_json::json!({
+                "kind": def.kind,
+                "title": def.title,
+                "family": def.family.as_str(),
+                "inputs": def.inputs.iter().map(port).collect::<Vec<_>>(),
+                "outputs": def.outputs.iter().map(port).collect::<Vec<_>>(),
+                "knobs": def.knobs.iter().map(|k| serde_json::json!({
+                    "id": k.id,
+                    "label": k.label,
+                    "control": k.control,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    serde_json::json!({ "nodes": nodes }).to_string()
+}
+
+/// A starting drawing, for a host with nothing stored yet.
+#[wasm_bindgen]
+pub fn graph_starter() -> String {
+    let doc = prism_core::graph_store::GraphDocument::new(
+        prism_core::graph_factory::starter_graph(),
+        now_millis(),
+    );
+    doc.to_json()
+}
+
+/// Flatten a graph document into the request a host would send. Returns
+/// the `{"Ok":...}` / `{"Err":...}` envelope the JS bridge unwraps, so a
+/// host fails as a value rather than an exception.
+#[wasm_bindgen]
+pub fn graph_to_request(doc_json: &str) -> String {
+    let parsed: Result<prism_core::graph::Graph, String> =
+        parse_req(doc_json);
+    result_json(&parsed.and_then(|graph| {
+        prism_core::graph_request::to_form(&graph, "native")
+            .map(|form| serde_json::to_value(form).unwrap_or(serde_json::Value::Null))
+            .map_err(|e| e.to_string())
+    }))
+}
+
+/// Whether a document is renderable, and why not when it is not.
+#[wasm_bindgen]
+pub fn graph_problems(doc_json: &str) -> String {
+    let parsed: Option<prism_core::graph_store::GraphDocument> = parse_req(doc_json).ok();
+    let found = parsed
+        .as_ref()
+        .map(|doc| {
+            prism_core::graph_store::problems(doc)
+                .iter()
+                .map(|p| p.to_string())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    serde_json::json!({ "problems": found }).to_string()
+}
+
+/// Merge a document that arrived over the API into the local one.
+#[wasm_bindgen]
+pub fn graph_merge(local_json: &str, incoming_json: &str) -> String {
+    let local: Result<prism_core::graph_store::GraphDocument, String> = parse_req(local_json);
+    let incoming: Result<prism_core::graph_store::GraphDocument, String> = parse_req(incoming_json);
+    result_json(&(match (local, incoming) {
+        (Ok(local), Ok(incoming)) => Ok(prism_core::graph_store::merge(&local, &incoming)),
+        _ => Err("both documents must be Prism graph documents".to_string()),
+    }))
+}
+
+/// Epoch milliseconds, shared with the media default stamps.
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Default local-SD knobs, so hosts do not duplicate core constants.
+#[wasm_bindgen]
+pub fn media_defaults() -> String {
+    let (width, height) = media::a1111_size(Some("1:1"));
+    serde_json::json!({
+        "steps": media::LOCAL_SD_STEPS,
+        "cfg": media::LOCAL_SD_CFG,
+        "sampler": media::DEFAULT_SAMPLER,
+        "scheduler": media::DEFAULT_SCHEDULER,
+        "maxBatch": media::MAX_BATCH,
+        "width": width,
+        "height": height,
+        "providers": {
+            "a1111": media::A1111_ID,
+            "comfyui": media::COMFYUI_ID,
+            "native": media::NATIVE_ID,
+            "candle": media::CANDLE_ID,
+        },
+    })
+    .to_string()
+}
+
+/// Build the A1111 `/sdapi/v1/txt2img` body from a JSON `MediaRequest`.
+#[wasm_bindgen]
+pub fn media_a1111_body(req_json: &str) -> String {
+    result_json(&parse_media_request(req_json).map(|req| media::a1111_txt2img_body(&req)))
+}
+
+/// Build the A1111 `/sdapi/v1/img2img` body from a JSON `MediaRequest`.
+#[wasm_bindgen]
+pub fn media_a1111_img2img_body(req_json: &str) -> String {
+    result_json(&parse_media_request(req_json).map(|req| media::a1111_img2img_body(&req)))
+}
+
+/// Build a ComfyUI API-format workflow graph. `checkpoint` is the filename
+/// discovered from `/object_info`; the core fills in every other node.
+#[wasm_bindgen]
+pub fn media_comfyui_workflow(req_json: &str, checkpoint: &str) -> String {
+    result_json(
+        &parse_media_request(req_json)
+            .map(|req| media::comfyui_workflow_body(&req, checkpoint)),
+    )
+}
+
+/// Render an image through the deterministic in-process preview engine.
+/// Returns a PNG `data:` URL so no host-side image encoding is needed.
+#[wasm_bindgen]
+pub fn media_native_png_data_url(req_json: &str) -> String {
+    result_json(
+        &parse_media_request(req_json)
+            .and_then(|req| prism_core::native_sd::png_data_url(&req)),
+    )
+}
+
+/// Extract the first generated image from an A1111 JSON response.
+#[wasm_bindgen]
+pub fn media_parse_a1111_image(body: &str) -> String {
+    result_json(&media::parse_a1111_image(body))
+}
+
+/// Every image in an A1111 response, in batch order.
+#[wasm_bindgen]
+pub fn media_parse_a1111_images(body: &str) -> String {
+    result_json(&media::a1111_images(body))
+}
+
+/// Extract a ready URL from a provider's JSON response.
+#[wasm_bindgen]
+pub fn media_parse_media_url(body: &str) -> String {
+    result_json(&media::parse_media_url(body))
+}
+
+/// Extract a polling task id from a provider's JSON response.
+#[wasm_bindgen]
+pub fn media_parse_task_id(body: &str) -> String {
+    result_json(&media::parse_task_id(body))
+}
+
+/// ComfyUI history entry: `[filename, subfolder, type]`.
+#[wasm_bindgen]
+pub fn media_comfyui_output_from_history(body: &str) -> String {
+    result_json(&media::comfyui_output_from_history(body))
+}
+
+#[wasm_bindgen]
+pub fn media_comfyui_image_from_history(body: &str) -> String {
+    result_json(&media::comfyui_image_from_history(body))
+}
+
+#[wasm_bindgen]
+pub fn media_default_base_url(provider: &str) -> String {
+    media::default_base_url(provider).to_string()
+}
+
+#[wasm_bindgen]
+pub fn media_is_async_provider(provider: &str) -> bool {
+    media::is_async_provider(provider)
+}
+
 // ---- agent loop (extension system) ------------------------------------
 
 use prism_core::agent::{

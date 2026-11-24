@@ -10,6 +10,10 @@
 //!   wire fixtures in `contracts/fixtures/` must decode identically on
 //!   every target.
 //! - `providers`: the OpenAI-compatible provider table.
+//! - `native_llm` / `native_sd`: deterministic, in-process preview engines
+//!   for chat and images (no model weights, no sockets).
+//! - `candle_llm` / `candle_sd`: feature-gated real neural inference from
+//!   local GGUF/SD weights (no network, no Python).
 //! - `thinking`: `<thinking>` scratchpad handling.
 //! - `settings` / `conversations`: state models plus storage-trait
 //!   backed persistence (atomic writes, default-on-corrupt).
@@ -23,6 +27,19 @@
 pub mod agent;
 pub mod backup;
 pub mod cards;
+pub mod graph;
+pub mod graph_factory;
+pub mod graph_nodes;
+pub mod graph_request;
+pub mod graph_store;
+#[cfg(test)]
+mod graph_store_tests;
+#[cfg(test)]
+mod graph_tests;
+#[cfg(feature = "candle-llm")]
+pub mod candle_llm;
+#[cfg(feature = "candle-sd")]
+pub mod candle_sd;
 pub mod catalog;
 pub mod client;
 pub mod commands;
@@ -37,7 +54,8 @@ pub mod mcp;
 pub mod media;
 pub mod memory_graph;
 pub mod modes;
-#[cfg(feature = "native-transport")]
+pub mod native_llm;
+pub mod native_sd;
 pub mod native_tools;
 pub mod plugins;
 pub mod prompt_history;

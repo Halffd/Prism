@@ -560,7 +560,7 @@ export async function savePromptShortcut(
   // Also sync to chrome.storage.local for content script access (if in extension context)
   // Only execute if chrome is defined (in browser extension environment)
   if (typeof globalThis !== 'undefined' && 'chrome' in globalThis) {
-    const chromeGlobal = globalThis.chrome as any;
+    const chromeGlobal = (globalThis as Record<string, unknown>).chrome as any;
     if (chromeGlobal && chromeGlobal.storage && chromeGlobal.storage.local) {
       try {
         const result = await chromeGlobal.storage.local.get([
@@ -608,7 +608,7 @@ export async function getPromptShortcuts(
   // Also try to get from chrome.storage.local (for content script access)
   // Only execute if chrome is defined (in browser extension environment)
   if (typeof globalThis !== 'undefined' && 'chrome' in globalThis) {
-    const chromeGlobal = globalThis.chrome as any;
+    const chromeGlobal = (globalThis as Record<string, unknown>).chrome as any;
     if (chromeGlobal && chromeGlobal.storage && chromeGlobal.storage.local) {
       try {
         const result = await chromeGlobal.storage.local.get([
@@ -661,7 +661,7 @@ export async function deletePromptShortcut(promptId: string): Promise<void> {
   // Also sync to chrome.storage.local for content script access (if in extension context)
   // Only execute if chrome is defined (in browser extension environment)
   if (typeof globalThis !== 'undefined' && 'chrome' in globalThis) {
-    const chromeGlobal = globalThis.chrome as any;
+    const chromeGlobal = (globalThis as Record<string, unknown>).chrome as any;
     if (chromeGlobal && chromeGlobal.storage && chromeGlobal.storage.local) {
       try {
         const result = await chromeGlobal.storage.local.get([

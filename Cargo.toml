@@ -1,6 +1,16 @@
 [workspace]
 resolver = "2"
-members = ["crates/prism-core", "crates/prism-wasm", "apps/slint", "apps/cli"]
+default-members = ["crates/prism-core", "crates/prism-wasm", "apps/slint", "apps/cli", "apps/native-server"]
+members = [
+    "crates/prism-core",
+    "crates/prism-wasm",
+    "apps/slint",
+    "apps/cli",
+    "apps/native-server",
+    # The canvas node-graph studio (Dioxus/WASM). Web-only: it is built by
+    # trunk from apps/graph, never part of a desktop/native binary.
+    "apps/graph",
+]
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

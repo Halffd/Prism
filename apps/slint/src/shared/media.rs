@@ -19,11 +19,13 @@ pub const MEDIA_KINDS: &[(&str, MediaKind)] = &[
     ("3D model", MediaKind::Model),
 ];
 
-/// Providers per capability, in panel order.
+/// Providers per capability, in panel order. `a1111` and `comfyui`
+/// are local installs (default `127.0.0.1:7860` / `:8188`) and need no
+/// API key.
 pub const MEDIA_PROVIDERS: &[(&str, &[&str])] = &[
-    ("Image", &["stability"]),
-    ("Inpaint", &["stability"]),
-    ("Video", &["runway", "kling", "luma"]),
+    ("Image", &["stability", "a1111", "comfyui"]),
+    ("Inpaint", &["stability", "a1111", "comfyui"]),
+    ("Video", &["runway", "kling", "luma", "comfyui"]),
     ("3D model", &["meshy", "tripo"]),
 ];
 
@@ -78,12 +80,18 @@ impl MediaState {
         providers.get(self.provider_idx).copied().unwrap_or("")
     }
 
-    /// Whether the selected capability takes a source image.
+    /// Whether the selected provider takes a source image.
+    ///
+    /// Most video providers animate an image, but ComfyUI's built-in
+    /// AnimateDiff graph is text-to-video. Inpainting always needs a
+    /// source image (and a mask).
     pub fn needs_image(&self) -> bool {
-        matches!(
-            self.kind(),
-            MediaKind::Inpaint | MediaKind::Video | MediaKind::Model
-        )
+match self.kind() {
+            MediaKind::Image => false,
+            MediaKind::Inpaint => true,
+            MediaKind::Video => self.provider() != prism_core::media::COMFYUI_ID,
+            MediaKind::Model => true,
+        }
     }
 
     /// Whether the selected capability takes a mask image.
@@ -125,7 +133,13 @@ pub fn parse_opt_u64(text: &str) -> Option<u64> {
 /// provider-specific `<PROVIDER>_API_KEY` variable. An empty key is
 /// passed through: local providers do not need one.
 pub fn media_api_key(provider: &str) -> String {
-    let specific = format!("{}_API_KEY", provider.to_uppercase().replace('-', "_"));
+if provider == prism_core::media::A1111_ID || provider == prism_core::media::COMFYUI_ID {
+        return String::new();
+    }
+    let specific = format!(
+        "{}_API_KEY",
+        provider.to_uppercase().replace('-', "_")
+    );
     if let Ok(v) = std::env::var(&specific) {
         if !v.trim().is_empty() {
             return v.trim().to_string();
@@ -137,7 +151,8 @@ pub fn media_api_key(provider: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Build the request for the current panel state.
+/// Build the request for the current panel state. `base_url` overrides
+/// the provider default (for local installs on a non-default port).
 pub fn build_request(
     media: &MediaState,
     prompt: &str,
@@ -149,10 +164,12 @@ pub fn build_request(
     duration: &str,
     seed: &str,
     format: &str,
+    base_url: &str,
 ) -> MediaRequest {
     MediaRequest {
         provider: media.provider().to_string(),
-        base_url: default_base_url(media.provider()).to_string(),
+        base_url: non_empty(base_url)
+            .unwrap_or_else(|| default_base_url(media.provider()).to_string()),
         api_key: media_api_key(media.provider()),
         prompt: prompt.trim().to_string(),
         negative_prompt: non_empty(negative_prompt),
@@ -163,6 +180,7 @@ pub fn build_request(
         duration: parse_opt_u32(duration),
         seed: parse_opt_u64(seed),
         format: non_empty(format),
+        ..Default::default()
     }
 }
 
@@ -209,9 +227,11 @@ pub fn select_provider(ui: &AppWindow, state: &Rc<RefCell<State>>, provider_idx:
         .max(1);
     st.media.provider_idx = provider_idx.clamp(0, max as i32 - 1) as usize;
     let provider = st.media.provider();
+    let needs_image = st.media.needs_image();
     drop(st);
     ui.set_media_provider_idx(provider_idx);
     ui.set_media_provider(provider.into());
+    ui.set_media_needs_image(needs_image);
 }
 
 /// Start a media request from the panel's current field values.
@@ -238,6 +258,7 @@ pub fn generate(ui: &AppWindow, state: &Rc<RefCell<State>>) {
         &ui.get_media_duration(),
         &ui.get_media_seed(),
         &ui.get_media_format(),
+        &ui.get_media_base_url(),
     );
     if req.prompt.is_empty() && req.image.is_none() {
         drop(st);
@@ -354,6 +375,32 @@ mod tests {
     }
 
     #[test]
+    fn comfyui_video_is_text_to_video() {
+        let media = MediaState {
+            kind_idx: 2,
+            provider_idx: 3,
+            ..MediaState::default()
+        };
+        assert_eq!(media.provider(), "comfyui");
+        assert_eq!(media.kind(), MediaKind::Video);
+        assert!(!media.needs_image());
+        assert!(!media.needs_mask());
+    }
+
+    #[test]
+    fn comfyui_inpainting_still_asks_for_the_source_and_mask() {
+        let media = MediaState {
+            kind_idx: 1,
+            provider_idx: 2,
+            ..MediaState::default()
+        };
+        assert_eq!(media.provider(), "comfyui");
+        assert_eq!(media.kind(), MediaKind::Inpaint);
+        assert!(media.needs_image());
+        assert!(media.needs_mask());
+    }
+
+    #[test]
     fn switching_capability_resets_the_provider_to_the_first_one() {
         let media = MediaState {
             kind_idx: 2,
@@ -366,7 +413,19 @@ mod tests {
     #[test]
     fn empty_fields_are_left_unset() {
         let media = MediaState::default();
-        let req = build_request(&media, "  a cat  ", "   ", "", "", "", "", "", "", "");
+let req = build_request(
+            &media,
+            "  a cat  ",
+            "   ",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        );
         assert_eq!(req.prompt, "a cat");
         assert_eq!(req.negative_prompt, None);
         assert_eq!(req.model, None);
@@ -376,6 +435,32 @@ mod tests {
         assert_eq!(req.duration, None);
         assert_eq!(req.seed, None);
         assert_eq!(req.format, None);
+    }
+
+    #[test]
+    fn an_explicit_base_url_overrides_the_provider_default() {
+        let media = MediaState {
+            kind_idx: 0,
+            ..MediaState::default()
+        };
+        let req = build_request(&media, "a cat", "", "", "", "", "", "", "", "", "http://192.168.1.5:7860");
+        assert_eq!(req.base_url, "http://192.168.1.5:7860");
+        let default = build_request(&media, "a cat", "", "", "", "", "", "", "", "", "");
+        assert_eq!(default.base_url, prism_core::media::default_base_url("stability"));
+    }
+
+    #[test]
+    fn local_providers_need_no_api_key_even_when_env_is_set() {
+        // The short-circuit must not read the environment at all.
+        let media = MediaState {
+            kind_idx: 0,
+            provider_idx: 1,
+            ..MediaState::default()
+        };
+        assert_eq!(media.provider(), "a1111");
+        let req = build_request(&media, "a cat", "", "", "", "", "", "", "", "", "");
+        assert_eq!(req.api_key, "");
+        assert_eq!(req.base_url, "http://127.0.0.1:7860");
     }
 
     #[test]
@@ -393,7 +478,7 @@ mod tests {
             kind_idx: 2,
             ..MediaState::default()
         };
-        let req = build_request(&media, "a cat", "", "", "", "", "", "", "", "");
+        let req = build_request(&media, "a cat", "", "", "", "", "", "", "", "", "");
         assert_eq!(req.provider, "runway");
         assert_eq!(req.base_url, default_base_url("runway"));
     }

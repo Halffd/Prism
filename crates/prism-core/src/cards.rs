@@ -502,9 +502,66 @@ mod tests {
             scenario: "Aboard the reactor deck".into(),
             first_mes: "*Aria looks up* Need something?".into(),
             mes_example: "<START>\n{{user}}: Hi\n{{char}}: *waves*".into(),
-            alternate_greetings: vec!["*Aria is already welding*".into()],
+            post_history_instructions: "Stay in character as {{char}}.".into(),
+            alternate_greetings: vec!["*Aria is already welding*".into(), "Another greeting".into()],
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn card_expands_macros_for_every_macro_field() {
+        let c = card();
+        let persona = Persona {
+            name: "Sam".into(),
+            description: "a pilot".into(),
+        };
+        let ctx = MacroContext::from_card(&c, &persona);
+        assert_eq!(ctx.char, "Aria");
+        assert_eq!(ctx.user, "Sam");
+        assert_eq!(ctx.persona, "Sam: a pilot");
+        let out = expand_macros(
+            "{{char}} | {{user}} | {{description}} | {{personality}} | {{scenario}} | {{persona}} | {{first_mes}} | {{unknown}}",
+            &ctx,
+        );
+        assert_eq!(
+            out,
+            "Aria | Sam | A starship engineer. | witty, cautious | Aboard the reactor deck | Sam: a pilot | *Aria looks up* Need something? | {{unknown}}"
+        );
+    }
+
+    #[test]
+    fn card_round_trips_all_export_fields() {
+        let c = card();
+        let json = serde_json::to_string(&c).unwrap();
+        let back = parse_card(&json).unwrap();
+        assert_eq!(back, c);
+        // The V1/V2 shared fields are all present on a top-level parse.
+        assert_eq!(back.first_mes, "*Aria looks up* Need something?");
+        assert_eq!(back.alternate_greetings.len(), 2);
+        assert_eq!(back.alternate_greetings[0], "*Aria is already welding*");
+    }
+
+    #[test]
+    fn card_drives_full_prompt_assembly() {
+        let c = card();
+        let persona = Persona {
+            name: "Sam".into(),
+            description: "a pilot".into(),
+        };
+        let msgs = build_messages(&c, &persona, &[], &LoreScan::default(), "Hi", None);
+        // Description block: description, personality, scenario.
+        assert!(msgs
+            .iter()
+            .any(|m| m.content == "A starship engineer.\nwitty, cautious\nAboard the reactor deck"));
+        // Example dialogue is macro-expanded for both card and user.
+        assert!(msgs.iter().any(|m| m.content
+            .contains("Sam: Hi")
+            && m.content.contains("Aria: *waves*")));
+        // Post-history instructions keep the late-system placement.
+        assert_eq!(msgs.last().unwrap().content, "Hi");
+        assert!(msgs
+            .iter()
+            .any(|m| m.content == "Stay in character as Aria."));
     }
 
     #[test]

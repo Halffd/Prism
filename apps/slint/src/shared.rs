@@ -2,7 +2,9 @@
 
 slint::include_modules!();
 
+pub mod image;
 pub mod media;
+pub mod studio;
 
 // Re-export all public types and functions from dependencies
 #[cfg(feature = "agent")]
@@ -190,6 +192,10 @@ pub struct State {
     pub queue_processing: bool,
     /// Media capability panel state.
     pub media: crate::shared::media::MediaState,
+    /// Video studio surface state (simulated renders + workspace grid).
+    pub studio: crate::shared::studio::StudioState,
+    /// Image studio surface state (native/A1111/ComfyUI generation).
+    pub image: crate::shared::image::ImageState,
     /// Surface mode: 0 = Chat, 1 = Agent, 2 = IDE (editor + agent
     /// sidebar). The composer's
     /// routing follows it (`on_send` observes `ui.get_ui_mode()`).
@@ -255,6 +261,8 @@ impl State {
             prompt_queue: Vec::new(),
             queue_processing: false,
             media: crate::shared::media::MediaState::default(),
+            studio: crate::shared::studio::StudioState::default(),
+            image: crate::shared::image::ImageState::default(),
             ui_mode: 0,
             workspace: None,
             open_rel: None,
@@ -989,7 +997,7 @@ fn composer_hint(mode: usize) -> &'static str {
 
 /// Switch the surface mode and sync the dependent UI bits.
 pub fn set_mode(ui: &AppWindow, state: &Rc<RefCell<State>>, mode: usize) {
-    let mode = mode.min(2);
+    let mode = mode.min(4);
     state.borrow_mut().ui_mode = mode;
     ui.set_ui_mode(mode as i32);
     ui.set_composer_hint(composer_hint(mode).into());
@@ -1906,6 +1914,8 @@ pub fn palette_execute(
         "ide.mode.chat" => set_mode(ui, state, 0),
         "ide.mode.agent" => set_mode(ui, state, 1),
         "ide.mode.agent_sidebar" => set_mode(ui, state, 2),
+        "ide.mode.studio" => set_mode(ui, state, 3),
+        "ide.mode.image" => set_mode(ui, state, 4),
         "ide.workspace.open" => open_workspace(ui, state, query.trim()),
         "ide.workspace.refresh" => refresh_tree(ui, state),
         "ide.workspace.save" => save_editor(ui, state),
@@ -2790,6 +2800,8 @@ pub fn run_ui() {
         ui.set_media_provider(st.media.provider().into());
         ui.set_media_needs_image(st.media.needs_image());
         ui.set_media_needs_mask(st.media.needs_mask());
+        crate::shared::studio::init(&ui, &state);
+        crate::shared::image::init(&ui, &state);
         ui.set_ui_mode(st.ui_mode as i32);
         ui.set_composer_hint(composer_hint(st.ui_mode).into());
         refresh_chats(&ui, &state);
@@ -3863,6 +3875,153 @@ pub fn run_ui() {
             media::poll(&ui, &state_c);
         });
     }
+    // ---- studio callbacks ----
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_studio_select_model(move |i| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            studio::select_model(&ui, &state_c, i);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_studio_quantity_step(move |d| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            studio::quantity_step(&ui, &state_c, d);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_studio_generate(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            studio::generate(&ui, &state_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_studio_aspect_selected(move |i| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            studio::select_aspect(&ui, &state_c, i);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_studio_res_selected(move |i| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            studio::select_res(&ui, &state_c, i);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_studio_dur_selected(move |i| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            studio::select_dur(&ui, &state_c, i);
+        });
+    }
+    // ---- image studio callbacks ----
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_image_provider_selected(move |i| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            image::select_provider(&ui, &state_c, i);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_image_sampler_selected(move |i| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            image::select_sampler(&ui, &state_c, i);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_image_scheduler_selected(move |i| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            image::select_scheduler(&ui, &state_c, i);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_image_generate(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            image::generate(&ui, &state_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_image_seed_random(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            image::seed_random(&ui, &state_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_image_seed_lock_toggle(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            image::seed_lock_toggle(&ui, &state_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        ui.on_image_aspect_selected(move |ratio| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            image::aspect_selected(&ui, &ratio);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        ui.on_image_batch_step(move |d| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            image::batch_step(&ui, d);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        ui.on_image_clip_step(move |d| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            image::clip_step(&ui, d);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_image_lora_add(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            image::lora_add(&ui, &state_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_image_lora_remove(move |i| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            image::lora_remove(&ui, &state_c, i);
+        });
+    }
+    {
+        let state_c = state.clone();
+        ui.on_image_lora_name_edited(move |i, text| {
+            image::lora_name_edited(&state_c, i, &text);
+        });
+    }
+    {
+        let state_c = state.clone();
+        ui.on_image_lora_weight_edited(move |i, text| {
+            image::lora_weight_edited(&state_c, i, &text);
+        });
+    }
 
     // ---- event pump ----
     let timer = slint::Timer::default();
@@ -3881,6 +4040,8 @@ pub fn run_ui() {
                 drain_agent(&ui, &state_c, &lines_c);
                 drain_research(&ui, &state_c);
                 media::drain(&ui, &state_c);
+                studio::drain(&ui, &state_c);
+                image::drain(&ui, &state_c);
             },
         );
     }

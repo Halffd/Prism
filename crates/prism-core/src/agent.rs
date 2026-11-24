@@ -213,6 +213,76 @@ pub struct AgentResult {
     pub error: Option<String>,
 }
 
+/// How many identical thought + tool-call pairs count as a loop.
+pub const REPETITION_LIMIT: usize = 3;
+
+/// Detects a model stuck emitting the same thought and tool call.
+///
+/// The fingerprint is the exact `(thought, action, action_input)` triple:
+/// no normalization, because a model that changes one character is no
+/// longer provably stuck. When the streak reaches [`REPETITION_LIMIT`],
+/// the loop stops before executing the repeated call. Surfaces should
+/// treat the resulting error as "compact the context or restart the
+/// run" rather than silently spending more model calls.
+#[derive(Debug, Clone)]
+pub struct RepetitionGuard {
+    limit: usize,
+    last: Option<(String, String, String)>,
+    streak: usize,
+}
+
+impl Default for RepetitionGuard {
+    fn default() -> Self {
+        Self::new(REPETITION_LIMIT)
+    }
+}
+
+impl RepetitionGuard {
+    /// Build a guard with a custom limit. A limit of 0 is treated as 1.
+    pub fn new(limit: usize) -> Self {
+        Self {
+            limit: limit.max(1),
+            last: None,
+            streak: 0,
+        }
+    }
+
+    /// Record one tool call. Returns `true` when the streak hits the limit.
+    pub fn observe(&mut self, thought: &str, action: &str, action_input: &str) -> bool {
+        let current = (
+            thought.to_string(),
+            action.to_string(),
+            action_input.to_string(),
+        );
+        if self.last.as_ref() == Some(&current) {
+            self.streak += 1;
+        } else {
+            self.last = Some(current);
+            self.streak = 1;
+        }
+        self.streak >= self.limit
+    }
+
+    /// A non-tool reply (progress update, final answer) breaks the streak.
+    pub fn reset(&mut self) {
+        self.last = None;
+        self.streak = 0;
+    }
+
+    /// Current identical-call streak length, mainly for diagnostics/tests.
+    pub fn streak(&self) -> usize {
+        self.streak
+    }
+
+    /// Graceful-stop message carried in `AgentResult.error`.
+    pub fn error_message(&self) -> String {
+        format!(
+            "Repetition detected: identical thought and tool call repeated {} times in a row; compact the context or restart the run.",
+            self.streak.min(self.limit)
+        )
+    }
+}
+
 const REACT_SYSTEM: &str = r#"You are an autonomous agent. Given a task, think step by step.
 
 For each step, respond with EXACTLY this JSON format:
@@ -342,6 +412,7 @@ fn run_react(
     // error classification, applied to every call before it reaches a
     // handler.
     let advertised = crate::toolgate::AdvertisedTools::from_registry(registry);
+    let mut repetition = RepetitionGuard::default();
 
     for _ in 0..max_steps {
         let raw = match step_fn(&system, &history) {
@@ -386,6 +457,26 @@ fn run_react(
                 steps,
                 completed: true,
                 error: None,
+            };
+        }
+
+        // Stop before a third identical call reaches a tool or the model
+        // again. The model call for this turn already happened; executing
+        // it would only burn another tool invocation and another turn.
+        if repetition.observe(&decision.thought, &decision.action, &decision.action_input) {
+            let message = repetition.error_message();
+            steps.push(AgentStep {
+                thought: decision.thought.clone(),
+                action: "Repetition Detector".into(),
+                action_input: format!("{}: {}", decision.action, decision.action_input),
+                observation: message.clone(),
+                phase: "react".into(),
+            });
+            return AgentResult {
+                answer: String::new(),
+                steps,
+                completed: false,
+                error: Some(message),
             };
         }
 
@@ -541,6 +632,7 @@ fn run_plan_and_execute(
     let system = PLAN_SYSTEM.replace("{tools}", &registry.descriptions());
     let mut steps: Vec<AgentStep> = Vec::new();
     let mut used = 0usize;
+    let mut repetition = RepetitionGuard::default();
     let mut spend = || -> bool {
         used += 1;
         used <= max_steps
@@ -618,6 +710,7 @@ fn run_plan_and_execute(
             };
             let Some(decision) = parse_decision(&raw) else {
                 // Non-JSON: this step's whole reply is its result.
+                repetition.reset();
                 steps.push(AgentStep {
                     thought: format!("step {}/{}", idx + 1, plan.len()),
                     action: "Step".into(),
@@ -630,6 +723,7 @@ fn run_plan_and_execute(
                 continue;
             };
             if decision.action == "Final Answer" {
+                repetition.reset();
                 steps.push(AgentStep {
                     thought: decision.thought.clone(),
                     action: "Step".into(),
@@ -640,6 +734,22 @@ fn run_plan_and_execute(
                 observations.push(decision.action_input.clone());
                 step_done = true;
                 continue;
+            }
+            if repetition.observe(&decision.thought, &decision.action, &decision.action_input) {
+                let message = repetition.error_message();
+                steps.push(AgentStep {
+                    thought: decision.thought.clone(),
+                    action: "Repetition Detector".into(),
+                    action_input: format!("{}: {}", decision.action, decision.action_input),
+                    observation: message.clone(),
+                    phase: "execute".into(),
+                });
+                return AgentResult {
+                    answer: String::new(),
+                    steps,
+                    completed: false,
+                    error: Some(message),
+                };
             }
             let observation = registry.execute(&decision.action, &decision.action_input, ask);
             steps.push(AgentStep {
@@ -830,9 +940,13 @@ mod tests {
     fn plan_and_execute_respects_max_steps() {
         let reg = ToolRegistry::new();
         reg.register(Arc::new(EchoTool));
+        // Distinct inputs keep the max-steps test from being a repetition
+        // test; the guard has its own test below.
         let responses: Vec<String> = vec![
             "Plan: 1. loop forever".into(),
-            r#"{"thought":"again","action":"echo","action_input":"x"}"#.into(),
+            r#"{"thought":"again","action":"echo","action_input":"x0"}"#.into(),
+            r#"{"thought":"again","action":"echo","action_input":"x1"}"#.into(),
+            r#"{"thought":"again","action":"echo","action_input":"x2"}"#.into(),
         ];
         let idx = std::cell::Cell::new(0usize);
         let mut step = |_sys: &str, _hist: &[StepMessage]| -> Result<String, String> {
@@ -849,7 +963,11 @@ mod tests {
             AgentStrategy::PlanAndExecute,
         );
         assert!(!r.completed);
-        assert!(r.error.as_deref().unwrap().contains("maximum steps"));
+        assert!(
+            r.error.as_deref().unwrap().contains("maximum steps"),
+            "{:?}",
+            r.error
+        );
     }
 
     #[test]
@@ -871,11 +989,16 @@ mod tests {
     fn max_steps_stops_with_error() {
         let reg = ToolRegistry::new();
         reg.register(Arc::new(EchoTool));
-        let responses: Vec<String> = std::iter::repeat(
-            r#"{"thought":"again","action":"echo","action_input":"x"}"#.to_string(),
-        )
-        .take(5)
-        .collect();
+// Alternate the input so this exercises max_steps, not the
+        // repetition detector (repeated identical calls stop earlier).
+        let responses: Vec<String> = (0..5)
+            .map(|i| {
+                format!(
+                    r#"{{"thought":"again","action":"echo","action_input":"x{}"}}"#,
+                    i % 2
+                )
+            })
+            .collect();
         let idx = std::cell::Cell::new(0usize);
         let mut step = |_sys: &str, _hist: &[StepMessage]| -> Result<String, String> {
             let i = idx.get();
@@ -886,6 +1009,68 @@ mod tests {
         assert!(!r.completed);
         assert!(r.error.as_deref().unwrap().contains("maximum steps"));
         assert_eq!(r.steps.len(), 3);
+    }
+
+    #[test]
+    fn repetition_detector_stops_third_identical_call() {
+        let reg = ToolRegistry::new();
+        reg.register(Arc::new(EchoTool));
+        let call = r#"{"thought":"try again","action":"echo","action_input":"x"}"#;
+        let responses = [call, call, call, call];
+        let mut step = script_step(&responses);
+        let r = run_agent("task", &mut step, &reg, 8, &|_, _| true);
+        assert!(!r.completed);
+        let error = r.error.as_deref().unwrap();
+        assert!(error.contains("Repetition detected"), "{error}");
+        assert!(error.contains("3 times"), "{error}");
+        // Two calls ran; the third is replaced by the detector step.
+        assert_eq!(
+            r.steps.iter().filter(|s| s.action == "echo").count(),
+            2
+        );
+        assert_eq!(r.steps.last().unwrap().action, "Repetition Detector");
+    }
+
+    #[test]
+    fn repetition_detector_resets_when_call_changes() {
+        let reg = ToolRegistry::new();
+        reg.register(Arc::new(EchoTool));
+        let mut step = script_step(&[
+            r#"{"thought":"same","action":"echo","action_input":"x"}"#,
+            r#"{"thought":"same","action":"echo","action_input":"x"}"#,
+            r#"{"thought":"different","action":"echo","action_input":"y"}"#,
+            r#"{"thought":"different","action":"echo","action_input":"y"}"#,
+            r#"{"thought":"done","action":"Final Answer","action_input":"42"}"#,
+        ]);
+        let r = run_agent("task", &mut step, &reg, 5, &|_, _| true);
+        assert!(r.completed, "err={:?}", r.error);
+        assert_eq!(r.answer, "42");
+        assert_eq!(r.steps.iter().filter(|s| s.action == "echo").count(), 4);
+    }
+
+    #[test]
+    fn plan_and_execute_detects_repetition_across_steps() {
+        let reg = ToolRegistry::new();
+        reg.register(Arc::new(EchoTool));
+        let call = r#"{"thought":"keep going","action":"echo","action_input":"x"}"#;
+        let responses = [
+            "Plan: 1. gather\n2. gather again\n3. still gathering",
+            call,
+            call,
+            call,
+        ];
+        let mut step = script_step(&responses);
+        let r = run_with_strategy(
+            "spin",
+            &mut step,
+            &reg,
+            10,
+            &|_, _| true,
+            AgentStrategy::PlanAndExecute,
+        );
+        assert!(!r.completed);
+        assert!(r.error.as_deref().unwrap().contains("Repetition detected"));
+        assert_eq!(r.steps.last().unwrap().phase, "execute");
     }
 
     #[test]

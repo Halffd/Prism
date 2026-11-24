@@ -3,8 +3,9 @@
 //! All direct providers are reached through an OpenAI-compatible
 //! `/chat/completions` endpoint so one streaming client covers them:
 //! OpenAI natively, Gemini via its OpenAI-compat layer, Qwen via
-//! DashScope compatible-mode, local llama.cpp/KoboldCpp/SGLang/Ollama
-//! servers, and DeepSeek/Groq/OpenRouter/Mistral cloud APIs.
+//! DashScope compatible-mode, the bundled Prism Native server plus local
+//! llama.cpp/KoboldCpp/SGLang/Ollama servers, and
+//! DeepSeek/Groq/OpenRouter/Mistral cloud APIs.
 //!
 //! Claude is intentionally absent: its native API is not
 //! OpenAI-compatible and would need a separate client.
@@ -139,6 +140,15 @@ pub const PROVIDERS: &[ProviderDef] = &[
         env: &["PERPLEXITY_API_KEY"],
     },
     ProviderDef {
+        id: "local",
+        label: "Prism Native (local)",
+        // The bundled Rust server: chat on /v1, images on /sdapi/v1.
+        base_url: "http://127.0.0.1:7861/v1",
+        default_model: crate::native_llm::MODEL_ID,
+        needs_key: false,
+        env: &[],
+    },
+    ProviderDef {
         id: "ollama",
         label: "Ollama (local)",
         base_url: "http://localhost:11434/v1",
@@ -228,6 +238,15 @@ mod tests {
         assert_eq!(p.needs_key, false);
         assert_eq!(p.default_model, "llama3.2");
         assert!(find("nope").is_none());
+    }
+
+    #[test]
+    fn bundled_local_provider_is_selectable() {
+        let p = find("local").expect("bundled local provider exists");
+        assert_eq!(p.base_url, "http://127.0.0.1:7861/v1");
+        assert_eq!(p.default_model, crate::native_llm::MODEL_ID);
+        assert!(!p.needs_key);
+        assert!(p.env.is_empty());
     }
 
     #[test]
@@ -357,7 +376,9 @@ mod tests {
     #[test]
     fn local_providers_do_not_need_keys() {
         for p in PROVIDERS {
-            if p.base_url.contains("localhost") {
+            let is_local = p.base_url.starts_with("http://localhost")
+                || p.base_url.starts_with("http://127.0.0.1");
+            if is_local {
                 assert!(!p.needs_key, "{} is local and must not need a key", p.id);
             } else {
                 assert!(p.needs_key, "{} is remote and must need a key", p.id);

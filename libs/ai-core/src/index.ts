@@ -24,6 +24,26 @@ export interface WasmCoreModule {
   build_stream_body(reqJson: string): string;
   build_ollama_body(reqJson: string): string;
   build_api_chat_body(reqJson: string): string;
+  // Media / Image Studio: same JSON-string contract as chat.
+  media_defaults(): string;
+  media_a1111_body(reqJson: string): string;
+  media_a1111_img2img_body(reqJson: string): string;
+  media_comfyui_workflow(reqJson: string, checkpoint: string): string;
+  media_native_png_data_url(reqJson: string): string;
+  media_parse_a1111_image(body: string): string;
+  media_parse_a1111_images(body: string): string;
+  media_parse_media_url(body: string): string;
+  media_parse_task_id(body: string): string;
+  media_comfyui_output_from_history(body: string): string;
+  media_comfyui_image_from_history(body: string): string;
+  media_default_base_url(provider: string): string;
+  media_is_async_provider(provider: string): boolean;
+  // The shared canvas graph: the same document every Prism surface edits.
+  graph_node_defs(): string;
+  graph_starter(): string;
+  graph_to_request(docJson: string): string;
+  graph_problems(docJson: string): string;
+  graph_merge(localJson: string, incomingJson: string): string;
   parse_api_response(body: string): string;
   parse_models_response(body: string): string;
   strip_thinking(content: string): string;
@@ -144,16 +164,28 @@ export function loadCoreNode(): WasmCore {
   );
 }
 
+/** Location of the browser wasm glue. Hosts that serve the pkg from a
+ *  static-asset path (e.g. Next.js `/wasm-pkg-web/`) call
+ *  {@link configureCoreWeb} before the first {@link loadCore}. */
+let webPkgUrl = './wasm-pkg-web/prism_wasm.js';
+
+/** Point browser hosts at a different web pkg location and reset the
+ *  cached core, so the next {@link loadCore} uses the new URL. */
+export function configureCoreWeb(url: string): void {
+  webPkgUrl = url;
+  corePromise = null;
+}
+
 /** The web pkg for browser hosts. The wasm is fetched relative to the
  *  pkg's own URL, so the pkg directory must sit next to the chunk that
- *  imports it (the extension build copies it into the bundle). */
+ *  imports it (the extension build copies it into the bundle; the web
+ *  app serves it from `public/wasm-pkg-web`). */
 async function loadCoreWeb(): Promise<WasmCore> {
-  // @ts-ignore — wasm-pack web glue (node16 resolution limitation)
+  // @ts-ignore — wasm-bindgen web glue (node16 resolution limitation)
   // Variable path: bundlers (esbuild/vite) must not try to resolve the
   // browser pkg inside node builds.
-  const webPkg = './wasm-pkg-web/prism_wasm.js';
   const web = (await import(
-    /* webpackIgnore: true */ /* @vite-ignore */ webPkg
+    /* webpackIgnore: true */ /* @vite-ignore */ webPkgUrl
   )) as unknown as { default: () => Promise<unknown> };
   await web.default();
   return web as unknown as WasmCore;
@@ -245,6 +277,212 @@ export function buildApiChatBody(core: WasmCore, req: ApiRequestInput): JsonBody
   return unwrapCoreResult<JsonBody>(
     core.build_api_chat_body(JSON.stringify(req)),
   );
+}
+
+// ---- media (Image Studio) -------------------------------------------------
+
+export interface LoraSpecInput {
+  name: string;
+  weight: number;
+}
+
+/** Mirrors `prism_core::media::MediaRequest`. Missing fields use the core's
+ *  defaults, so hosts never have to duplicate SD constants or wire rules. */
+export interface MediaRequestInput {
+  provider: string;
+  base_url?: string;
+  api_key?: string;
+  prompt: string;
+  negative_prompt?: string | null;
+  model?: string | null;
+  image?: string | null;
+  mask?: string | null;
+  aspect_ratio?: string | null;
+  duration?: number | null;
+  seed?: number | null;
+  format?: string | null;
+  steps?: number | null;
+  cfg?: number | null;
+  sampler?: string | null;
+  scheduler?: string | null;
+  denoise?: number | null;
+  batch?: number | null;
+  width?: number | null;
+  height?: number | null;
+  vae?: string | null;
+  clip_skip?: number | null;
+  loras?: LoraSpecInput[];
+}
+
+export interface MediaDefaults {
+  steps: number;
+  cfg: number;
+  sampler: string;
+  scheduler: string;
+  maxBatch: number;
+  width: number;
+  height: number;
+  providers: Record<string, string>;
+}
+
+// What `graph_to_request` produces: the same field names as the panel
+// form (`apps/web/src/studio/media.ts`), with "blank means none".
+export interface GraphRequest {
+  provider: string;
+  checkpoint: string;
+  vae: string;
+  clip_skip: string;
+  loras: { name: string; weight: string }[];
+  prompt: string;
+  negative_prompt: string;
+  sampler: string;
+  scheduler: string;
+  steps: string;
+  cfg: string;
+  denoise: string;
+  width: string;
+  height: string;
+  batch: string;
+  seed: string;
+}
+
+export function mediaDefaults(core: WasmCore): MediaDefaults {
+  return JSON.parse(core.media_defaults()) as MediaDefaults;
+}
+
+// ---- the shared canvas graph ----------------------------------------------
+
+/** One port on a node: what it carries and which side it sits on. */
+export interface GraphPort {
+  id: string;
+  label: string;
+  kind: 'model' | 'conditioning' | 'sampler' | 'latent' | 'seed';
+  output: boolean;
+}
+
+/** One Knob a node exposes. */
+export interface GraphKnob {
+  id: string;
+  label: string;
+  /** "text" | "number" | "enum" | "percent" */
+  control: string;
+}
+
+/** A node definition: what the palette draws before any state. */
+export interface GraphNodeDef {
+  kind: string;
+  title: string;
+  family: 'model' | 'prompt' | 'sampler' | 'latent' | 'seed';
+  inputs: GraphPort[];
+  outputs: GraphPort[];
+  knobs: GraphKnob[];
+}
+
+export interface GraphNodeDefs {
+  nodes: GraphNodeDef[];
+}
+
+/** Nodes, ports and knobs, straight from the core. */
+export function graphNodeDefs(core: WasmCore): GraphNodeDefs {
+  return JSON.parse(core.graph_node_defs()) as GraphNodeDefs;
+}
+
+/** A fresh starting drawing, for a host with nothing stored yet. */
+export function graphStarter(core: WasmCore): string {
+  return core.graph_starter();
+}
+
+/** Flatten a graph document into the request a host would send. A graph
+ *  that cannot be generated from fails with the core's reason. */
+export function graphToRequest(core: WasmCore, docJson: string): GraphRequest {
+  return unwrapCoreResult<GraphRequest>(core.graph_to_request(docJson));
+}
+
+/** Every reason a document cannot be rendered. Empty means valid. */
+export function graphProblems(core: WasmCore, docJson: string): string[] {
+  const parsed = JSON.parse(core.graph_problems(docJson)) as { problems: string[] };
+  return parsed.problems;
+}
+
+/** Merge a document that arrived over the API into the local one. */
+export function graphMerge(
+  core: WasmCore,
+  localJson: string,
+  incomingJson: string,
+): string {
+  return unwrapCoreResult<string>(core.graph_merge(localJson, incomingJson));
+}
+
+export function buildA1111Body(core: WasmCore, req: MediaRequestInput): JsonBody {
+  return unwrapCoreResult<JsonBody>(core.media_a1111_body(JSON.stringify(req)));
+}
+
+export function buildA1111Img2ImgBody(
+  core: WasmCore,
+  req: MediaRequestInput,
+): JsonBody {
+  return unwrapCoreResult<JsonBody>(
+    core.media_a1111_img2img_body(JSON.stringify(req)),
+  );
+}
+
+export function buildComfyUiWorkflow(
+  core: WasmCore,
+  req: MediaRequestInput,
+  checkpoint: string,
+): JsonBody {
+  return unwrapCoreResult<JsonBody>(
+    core.media_comfyui_workflow(JSON.stringify(req), checkpoint),
+  );
+}
+
+/** Deterministic in-process preview render; returns a PNG data URL. */
+export function renderNativeImage(core: WasmCore, req: MediaRequestInput): string {
+  return unwrapCoreResult<string>(
+    core.media_native_png_data_url(JSON.stringify(req)),
+  );
+}
+
+export function parseA1111Image(core: WasmCore, body: string): string {
+  return unwrapCoreResult<string>(core.media_parse_a1111_image(body));
+}
+
+export function parseA1111Images(core: WasmCore, body: string): string[] {
+  return unwrapCoreResult<string[]>(core.media_parse_a1111_images(body));
+}
+
+export function parseMediaUrl(core: WasmCore, body: string): string {
+  return unwrapCoreResult<string>(core.media_parse_media_url(body));
+}
+
+export function parseTaskId(core: WasmCore, body: string): string {
+  return unwrapCoreResult<string>(core.media_parse_task_id(body));
+}
+
+export function comfyUiOutputFromHistory(
+  core: WasmCore,
+  body: string,
+): [string, string, string] {
+  return unwrapCoreResult<[string, string, string]>(
+    core.media_comfyui_output_from_history(body),
+  );
+}
+
+export function comfyUiImageFromHistory(
+  core: WasmCore,
+  body: string,
+): [string, string, string] {
+  return unwrapCoreResult<[string, string, string]>(
+    core.media_comfyui_image_from_history(body),
+  );
+}
+
+export function mediaDefaultBaseUrl(core: WasmCore, provider: string): string {
+  return core.media_default_base_url(provider);
+}
+
+export function isAsyncProvider(core: WasmCore, provider: string): boolean {
+  return core.media_is_async_provider(provider);
 }
 
 // ---- decoders -------------------------------------------------------------
