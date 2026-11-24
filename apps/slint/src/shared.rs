@@ -2,6 +2,7 @@
 
 slint::include_modules!();
 
+pub mod graph;
 pub mod image;
 pub mod media;
 pub mod studio;
@@ -196,6 +197,9 @@ pub struct State {
     pub studio: crate::shared::studio::StudioState,
     /// Image studio surface state (native/A1111/ComfyUI generation).
     pub image: crate::shared::image::ImageState,
+    /// Canvas node-graph surface state (the same drawing the Dioxus
+    /// studio and the shared document carry).
+    pub canvas: crate::shared::graph::CanvasState,
     /// Surface mode: 0 = Chat, 1 = Agent, 2 = IDE (editor + agent
     /// sidebar). The composer's
     /// routing follows it (`on_send` observes `ui.get_ui_mode()`).
@@ -263,6 +267,7 @@ impl State {
             media: crate::shared::media::MediaState::default(),
             studio: crate::shared::studio::StudioState::default(),
             image: crate::shared::image::ImageState::default(),
+            canvas: crate::shared::graph::CanvasState::default(),
             ui_mode: 0,
             workspace: None,
             open_rel: None,
@@ -991,13 +996,17 @@ fn composer_hint(mode: usize) -> &'static str {
     match mode {
         1 => "Describe an agent task… (Enter to run)",
         2 => "Ask the agent about the workspace… (Enter to run)",
+        // The canvas draws rather than chats, so the composer is not the
+        // primary input there.
+        5 => "The canvas is open — press Generate…",
         _ => "Type a message… (Enter to send, ↑/↓ history)",
     }
 }
 
 /// Switch the surface mode and sync the dependent UI bits.
 pub fn set_mode(ui: &AppWindow, state: &Rc<RefCell<State>>, mode: usize) {
-    let mode = mode.min(4);
+    // 0 Chat, 1 Agent, 2 IDE, 3 Studio, 4 Image, 5 Canvas.
+    let mode = mode.min(5);
     state.borrow_mut().ui_mode = mode;
     ui.set_ui_mode(mode as i32);
     ui.set_composer_hint(composer_hint(mode).into());
@@ -2802,6 +2811,7 @@ pub fn run_ui() {
         ui.set_media_needs_mask(st.media.needs_mask());
         crate::shared::studio::init(&ui, &state);
         crate::shared::image::init(&ui, &state);
+        crate::shared::graph::init(&ui, &state);
         ui.set_ui_mode(st.ui_mode as i32);
         ui.set_composer_hint(composer_hint(st.ui_mode).into());
         refresh_chats(&ui, &state);
@@ -4023,6 +4033,120 @@ pub fn run_ui() {
         });
     }
 
+    // ---- canvas callbacks ----
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_canvas_pointer(move |kind, x, y| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            graph::pointer(&ui, &state_c, kind, x, y);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_canvas_zoom_at(move |x, y, delta| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            graph::zoom(&ui, &state_c, x, y, delta);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_canvas_add_node(move |kind| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            graph::add_node(&ui, &state_c, kind.as_str());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_canvas_knob_edited(move |knob, value| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            graph::knob_edited(&ui, &state_c, knob.as_str(), value.as_str());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_canvas_aspect(move |ratio| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            graph::aspect_selected(&ui, &state_c, ratio.as_str());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_canvas_lora_edited(move |index, name, weight| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            graph::lora_edited(&ui, &state_c, index, name.as_str(), weight.as_str());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_canvas_lora_add(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            graph::lora_add(&ui, &state_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_canvas_lora_remove(move |index| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            graph::lora_remove(&ui, &state_c, index);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_canvas_seed_roll(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            graph::seed_roll(&ui, &state_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_canvas_seed_lock_toggle(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            graph::seed_lock_toggle(&ui, &state_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_canvas_delete_selected(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            graph::delete_selected(&ui, &state_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_canvas_backend(move |label| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            graph::select_backend(&ui, &state_c, label.as_str());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_canvas_generate(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            graph::generate(&ui, &state_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_canvas_save(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            graph::save(&ui, &state_c);
+        });
+    }
+
     // ---- event pump ----
     let timer = slint::Timer::default();
     {
@@ -4042,6 +4166,7 @@ pub fn run_ui() {
                 media::drain(&ui, &state_c);
                 studio::drain(&ui, &state_c);
                 image::drain(&ui, &state_c);
+                graph::drain(&ui, &state_c);
             },
         );
     }

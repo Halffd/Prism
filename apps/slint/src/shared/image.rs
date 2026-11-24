@@ -792,6 +792,16 @@ fn refresh_results(ui: &AppWindow, state: &Rc<RefCell<State>>) {
     ))));
 }
 
+/// One finished image as a UI row. Public so the canvas surface can share
+/// the same decoding path rather than growing its own.
+pub fn tile_for_canvas(tile: &ImageTile) -> crate::shared::ImageTileUi {
+    crate::shared::ImageTileUi {
+        image: tile_image(tile),
+        label: tile.label.as_str().into(),
+        url: tile.url.as_str().into(),
+    }
+}
+
 fn tile_image(tile: &ImageTile) -> slint::Image {
     if !tile.rgba.is_empty() {
         if let Ok(image) = rgba_image(&tile.rgba, tile.width, tile.height) {

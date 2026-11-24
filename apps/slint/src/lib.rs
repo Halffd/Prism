@@ -117,8 +117,103 @@ mod headless_tests {
         assert_eq!(ui.get_image_clip_skip(), 12);
     }
 
-    #[test]
-    fn the_image_studio_renders_native_tiles_headless() {
+// ---- canvas node graph -----------------------------------------------------
+
+#[test]
+fn the_canvas_renders_the_shared_document_as_screen_rows() {
+    i_slint_backend_testing::init_no_event_loop();
+    let ui = AppWindow::new().expect("AppWindow must build headless");
+    let state = Rc::new(RefCell::new(crate::shared::State::new()));
+    crate::shared::graph::init(&ui, &state);
+
+    // The palette is the core's own table, not a hand-written list.
+    assert_eq!(ui.get_canvas_palette().row_count(), 6);
+    // The starter drawing is on the canvas; the pre-wired pipeline draws
+    // wires, so the segment model is not empty.
+    assert_eq!(ui.get_canvas_nodes().row_count(), 6);
+    assert!(
+        ui.get_canvas_ink().row_count() > 0,
+        "the starter graph's wires should be drawn"
+    );
+    // Nothing is selected yet, so the inspector is empty.
+    assert!(!ui.get_canvas_has_selection());
+    assert_eq!(ui.get_canvas_knobs().row_count(), 0);
+    assert!(ui.get_canvas_status().contains("shared canvas"));
+    // The zoom label is a percentage a person can read.
+    assert_eq!(ui.get_canvas_zoom(), "100%");
+}
+
+#[test]
+fn the_palette_adds_a_node_and_selects_it() {
+    i_slint_backend_testing::init_no_event_loop();
+    let ui = AppWindow::new().expect("AppWindow must build headless");
+    let state = Rc::new(RefCell::new(crate::shared::State::new()));
+    crate::shared::graph::init(&ui, &state);
+
+    crate::shared::graph::add_node(&ui, &state, "seed");
+    assert_eq!(ui.get_canvas_nodes().row_count(), 7);
+    assert!(ui.get_canvas_has_selection());
+    // The seed node's knobs appear in the inspector.
+    assert!(ui.get_canvas_knobs().row_count() > 0);
+
+    // An unknown kind is reported rather than silently dropped.
+    let before = ui.get_canvas_nodes().row_count();
+    crate::shared::graph::add_node(&ui, &state, "nonsense");
+    assert_eq!(ui.get_canvas_nodes().row_count(), before);
+    assert!(ui.get_canvas_status().contains("Unknown node"));
+}
+
+#[test]
+fn a_click_on_the_canvas_cuts_the_wire_beneath_it() {
+    i_slint_backend_testing::init_no_event_loop();
+    let ui = AppWindow::new().expect("AppWindow must build headless");
+    let state = Rc::new(RefCell::new(crate::shared::State::new()));
+    crate::shared::graph::init(&ui, &state);
+
+    // The starter graph's checkpoint -> sampler wire runs from the checkpoint's
+    // right edge (288, 90) to the sampler's left edge (420, 230), so its
+    // midpoint is empty canvas a click can reach — which is exactly where a
+    // wire is easiest to click and hardest to aim at by hand.
+    let before = ui.get_canvas_ink().row_count();
+    crate::shared::graph::pointer(&ui, &state, 1, 354.0, 160.0);
+    crate::shared::graph::pointer(&ui, &state, 3, 354.0, 160.0);
+    assert!(
+        ui.get_canvas_ink().row_count() < before,
+        "a click on a wire should cut it: {} -> {}",
+        before,
+        ui.get_canvas_ink().row_count()
+    );
+    assert!(ui.get_canvas_status().contains("Wire removed"));
+
+    // A click in genuinely empty canvas cuts nothing.
+    let after = ui.get_canvas_ink().row_count();
+    crate::shared::graph::pointer(&ui, &state, 1, 20.0, 20.0);
+    crate::shared::graph::pointer(&ui, &state, 3, 20.0, 20.0);
+    assert_eq!(ui.get_canvas_ink().row_count(), after);
+    assert!(!ui.get_canvas_has_selection());
+}
+
+#[test]
+fn the_canvas_refuses_to_generate_from_a_blank_prompt() {
+    i_slint_backend_testing::init_no_event_loop();
+    let ui = AppWindow::new().expect("AppWindow must build headless");
+    let state = Rc::new(RefCell::new(crate::shared::State::new()));
+    crate::shared::graph::init(&ui, &state);
+
+    // The starter graph has a Prompt node with no text in it, so the
+    // flatten step reports which node needs writing instead of building a
+    // request that would generate nothing.
+    crate::shared::graph::generate(&ui, &state);
+    assert!(!ui.get_canvas_busy(), "a refusal must not start a render");
+    assert!(
+        ui.get_canvas_status().contains("prompt"),
+        "{} should say which node needs text",
+        ui.get_canvas_status()
+    );
+}
+
+#[test]
+fn the_image_studio_renders_native_tiles_headless() {
         i_slint_backend_testing::init_no_event_loop();
         let ui = AppWindow::new().expect("AppWindow must build headless");
         let state = Rc::new(RefCell::new(crate::shared::State::new()));

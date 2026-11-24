@@ -28,6 +28,7 @@ pub mod agent;
 pub mod backup;
 pub mod cards;
 pub mod graph;
+pub mod graph_canvas;
 pub mod graph_factory;
 pub mod graph_nodes;
 pub mod graph_request;

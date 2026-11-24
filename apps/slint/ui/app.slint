@@ -97,6 +97,40 @@ export struct ImageLoraRow {
     weight: string,
 }
 
+// Canvas node graph: the same drawing the web studio edits, rendered as
+// screen-space rows (the Rust side applies pan and zoom) and sampled wire
+// runs (Slint's Path cannot be built from data).
+export struct CanvasNodeUi {
+    id: int,
+    title: string,
+    color: color,
+    // screen-space box, already panned and zoomed
+    x: float, y: float, width: float, height: float, header-h: float,
+}
+
+export struct CanvasInkUi {
+    // one axis-aligned rectangle of a wire's ink
+    x: float, y: float, w: float, h: float,
+}
+
+export struct CanvasKnobUi {
+    id: string, label: string, control: string, value: string,
+    toggle: bool,
+}
+
+export struct CanvasLoraUi { name: string, weight: string }
+
+export struct CanvasPaletteUi { kind: string, title: string, color: color }
+
+export struct CanvasComboUi {
+    // the knob this combobox drives, plus its choices and which is current
+    knob: string,
+    values: [string],
+    selected-index: int,
+}
+
+export struct CanvasAspectUi { ratio: string, selected: bool }
+
 // One finished clip in the workspace list: vibe gradient thumbnail
 // with a play glyph, title, spec line, model in the studio purple.
 component TileCard inherits Rectangle {
@@ -448,6 +482,22 @@ export component AppWindow inherits Window {
     in-out property <string> image-base-url;
     in property <bool> image-busy: false;
     in property <string> image-status;
+    // ---- canvas node graph ----
+    in property <[CanvasPaletteUi]> canvas-palette;
+    in property <[CanvasNodeUi]> canvas-nodes;
+    in property <[CanvasComboUi]> canvas-combos;
+    in property <[CanvasAspectUi]> canvas-aspects;
+    in property <[CanvasInkUi]> canvas-ink;
+    in property <[CanvasKnobUi]> canvas-knobs;
+    in property <[CanvasLoraUi]> canvas-loras;
+    in property <[ImageTileUi]> canvas-tiles;
+    in property <string> canvas-status;
+    in property <string> canvas-zoom: "100%";
+    in property <bool> canvas-has-selection: false;
+    in property <bool> canvas-seed-locked: false;
+    in property <bool> canvas-busy: false;
+    in property <[string]> canvas-backends;
+    in property <int> canvas-provider: 0;
     // ---- IDE (three surface modes, like Cursor's composer toggles) ----
     // 0 = Chat, 1 = Agent (input drives the agent loop), 2 = IDE
     // (workspace editor + the agent in a sidebar column).
@@ -549,6 +599,22 @@ export component AppWindow inherits Window {
     callback image-lora-remove(int);     // row index
     callback image-lora-name-edited(int, string);
     callback image-lora-weight-edited(int, string);
+    // ---- canvas node graph ----
+    // One pointer gesture: 1 press, 2 move, 3 release.
+    callback canvas-pointer(int, float, float);
+    callback canvas-zoom-at(float, float, float);   // pivot x/y, wheel delta
+    callback canvas-add-node(string);            // node kind from the palette
+    callback canvas-knob-edited(string, string); // knob id, new value
+    callback canvas-aspect(string);              // "16:9" etc.
+    callback canvas-lora-edited(int, string, string);
+    callback canvas-lora-add();
+    callback canvas-lora-remove(int);
+    callback canvas-seed-roll();
+    callback canvas-seed-lock-toggle();
+    callback canvas-delete-selected();
+    callback canvas-backend(string);         // the chosen backend's label
+    callback canvas-generate();
+    callback canvas-save();
     // ---- IDE ----
     callback mode-selected(int);       // Chat(0) / Agent(1) / IDE(2)
     callback workspace-open(string);   // workspace root (from the palette query)
@@ -786,7 +852,7 @@ export component AppWindow inherits Window {
                     width: 352px;
                     HorizontalLayout {
                         spacing: 2px;
-                        for m[i] in ["Chat", "Agent", "IDE", "Studio", "Image"] : Rectangle {
+                        for m[i] in ["Chat", "Agent", "IDE", "Studio", "Image", "Canvas"] : Rectangle {
                             height: 26px;
                             HorizontalLayout {
                                 padding-left: 8px;
@@ -2042,6 +2108,254 @@ export component AppWindow inherits Window {
                     }
                 }
         }
+                if ui-mode == 5 : HorizontalLayout {
+                    spacing: 8px;
+
+                    // ---- palette + inspector ----
+                    Rectangle {
+                        width: 336px;
+                        background: #161616;
+                        border-width: 1px;
+                        border-color: #333333;
+                        border-radius: 10px;
+                        clip: true;
+                        ScrollView {
+                            VerticalLayout {
+                                padding: 10px;
+                                spacing: 6px;
+
+                                Text { text: "Node Studio"; color: #ffffff; font-size: 16px; font-weight: 700; }
+                                Text { text: "The same canvas the web studio edits."; color: #a3a3a3; font-size: 10px; }
+
+                                Text { text: "Add node"; color: #a3a3a3; font-size: 11px; }
+                                for entry[ei] in canvas-palette : Rectangle {
+                                    height: 24px;
+                                    border-radius: 6px;
+                                    background: transparent;
+                                    HorizontalLayout {
+                                        padding-left: 6px;
+                                        spacing: 6px;
+                                        Rectangle {
+                                            width: 8px;
+                                            height: 8px;
+                                            border-radius: 4px;
+                                            background: entry.color;
+                                        }
+                                        Text {
+                                            text: entry.title;
+                                            color: entry.color;
+                                            font-size: 11px;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    TouchArea {
+                                        clicked => { canvas-add-node(entry.kind); }
+                                        mouse-cursor: pointer;
+                                    }
+                                }
+
+                                if canvas-has-selection : VerticalLayout {
+                                    spacing: 4px;
+                                    padding-top: 8px;
+                                    Text { text: "Selected node"; color: #a3a3a3; font-size: 11px; }
+
+                                    for knob[ki] in canvas-knobs : VerticalLayout {
+                                        spacing: 2px;
+                                        Text { text: knob.label; color: #8b95a1; font-size: 10px; }
+                                        if knob.toggle : Button {
+                                            text: canvas-seed-locked ? "Seed locked" : "Seed unlocked";
+                                            clicked => { canvas-seed-lock-toggle(); }
+                                        }
+                                        if !knob.toggle : LineEdit {
+                                            text: knob.value;
+                                            placeholder-text: knob.id == "seed" ? "empty = random" : "";
+                                            edited(value) => { canvas-knob-edited(knob.id, value); }
+                                        }
+                                    }
+
+                                    for combo in canvas-combos : ComboBox {
+                                        model: combo.values;
+                                        current-index: combo.selected-index;
+                                        selected(value) => { canvas-knob-edited(combo.knob, value); }
+                                    }
+
+                                    // Aspect presets, drawn as buttons because five
+                                    // short labels read better than a dropdown.
+                                    HorizontalLayout {
+                                        visible: canvas-aspects.length > 0;
+                                        spacing: 4px;
+                                        for preset in canvas-aspects : Rectangle {
+                                            width: 36px;
+                                            height: 20px;
+                                            border-radius: 4px;
+                                            background: preset.selected ? #b026ff : #232735;
+                                            Text {
+                                                text: preset.ratio;
+                                                color: #ffffff;
+                                                font-size: 10px;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                            TouchArea {
+                                                clicked => { canvas-aspect(preset.ratio); }
+                                                mouse-cursor: pointer;
+                                            }
+                                        }
+                                    }
+
+                                    if canvas-knobs.length > 0 && canvas-knobs[0].id == "seed" : Button {
+                                        text: "Roll seed";
+                                        enabled: !canvas-seed-locked;
+                                        clicked => { canvas-seed-roll(); }
+                                    }
+
+                                    for lora[ro] in canvas-loras : HorizontalLayout {
+                                        spacing: 4px;
+                                        LineEdit {
+                                            width: 150px;
+                                            text: lora.name;
+                                            placeholder-text: "lora name";
+                                            edited(v) => { canvas-lora-edited(ro, v, lora.weight); }
+                                        }
+                                        LineEdit {
+                                            width: 52px;
+                                            text: lora.weight;
+                                            placeholder-text: "0.8";
+                                            edited(v) => { canvas-lora-edited(ro, lora.name, v); }
+                                        }
+                                        Button {
+                                            text: "×";
+                                            clicked => { canvas-lora-remove(ro); }
+                                        }
+                                    }
+                                    Button { text: "+ Add LoRA"; clicked => { canvas-lora-add(); } }
+                                    Button { text: "Delete node"; clicked => { canvas-delete-selected(); } }
+                                }
+                            }
+                        }
+                    }
+
+                    // ---- the canvas ----
+                    Rectangle {
+                        clip: true;
+                        background: #0b0d14;
+                        // One gesture handler for the whole canvas: a node's own
+                        // knob controls stop propagation, so a click that lands in
+                        // a field never also pans the viewport.
+                        TouchArea {
+                            pointer-event(event) => {
+                                // One integer per gesture: 1 press, 2 move,
+                                // 3 release. Anything else is a move.
+                                if event.kind == PointerEventKind.down {
+                                    canvas-pointer(1, self.mouse-x / 1px, self.mouse-y / 1px);
+                                }
+                                if event.kind == PointerEventKind.up {
+                                    canvas-pointer(3, self.mouse-x / 1px, self.mouse-y / 1px);
+                                }
+                                if event.kind != PointerEventKind.down && event.kind != PointerEventKind.up {
+                                    canvas-pointer(2, self.mouse-x / 1px, self.mouse-y / 1px);
+                                }
+                            }
+                            scroll-event(event) => {
+                                // Zoom about the pointer, so the point under
+                                // the cursor is the point that stays put.
+                                canvas-zoom-at(self.mouse-x / 1px, self.mouse-y / 1px, event.delta-y / 1px);
+                                return accept;
+                            }
+                            mouse-cursor: crosshair;
+                        }
+                        // Wires beneath the nodes: the ink of a sampled
+                        // polyline of the core's bezier. Slint rotates only
+                        // Image and Text, so each run is an axis-dominant
+                        // rectangle rather than a rotated one.
+                        for ink in canvas-ink : Rectangle {
+                            x: ink.x * 1px;
+                            y: ink.y * 1px;
+                            width: max(2px, ink.w * 1px);
+                            height: max(2px, ink.h * 1px);
+                            background: #b026ff;
+                        }
+                        for node[ni] in canvas-nodes : Rectangle {
+                            x: node.x * 1px;
+                            y: node.y * 1px;
+                            width: node.width * 1px;
+                            height: node.height * 1px;
+                            border-radius: 8px;
+                            border-width: 1px;
+                            border-color: #2a2f3f;
+                            clip: true;
+                            background: #12141c;
+                            Rectangle {
+                                height: node.header-h * 1px;
+                                background: node.color;
+                                // A layout carries the padding; a bare Text
+                                // ignores it.
+                                HorizontalLayout {
+                                    padding-left: 8px;
+                                    Text {
+                                        text: node.title;
+                                        color: #0b0d14;
+                                        font-size: 11px;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                        Text {
+                            x: 12px;
+                            y: 12px;
+                            text: canvas-status;
+                            color: #8b90a3;
+                            font-size: 11px;
+                        }
+                        Text {
+                            x: 12px;
+                            y: 30px;
+                            text: canvas-zoom;
+                            color: #8b90a3;
+                            font-size: 11px;
+                        }
+                    }
+
+                    // ---- output ----
+                    Rectangle {
+                        width: 264px;
+                        background: #161616;
+                        border-width: 1px;
+                        border-color: #333333;
+                        border-radius: 10px;
+                        clip: true;
+                        ScrollView {
+                            VerticalLayout {
+                                padding: 10px;
+                                spacing: 8px;
+                                Text { text: "Output"; color: #a3a3a3; font-size: 11px; }
+                                ComboBox {
+                                    model: canvas-backends;
+                                    current-index: canvas-provider;
+                                    selected(value) => { canvas-backend(value); }
+                                }
+                                Button {
+                                    text: "Generate";
+                                    enabled: !canvas-busy;
+                                    clicked => { canvas-generate(); }
+                                }
+                                Button { text: "Save canvas"; clicked => { canvas-save(); } }
+                                for tile in canvas-tiles : VerticalLayout {
+                                    spacing: 4px;
+                                    Image {
+                                        source: tile.image;
+                                        width: 100%;
+                                        height: 120px;
+                                        image-fit: contain;
+                                    }
+                                    Text { text: tile.label; color: #8b90a1; font-size: 10px; }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
         // ---- research panel ----
