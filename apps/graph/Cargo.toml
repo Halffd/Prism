@@ -31,32 +31,18 @@ gloo-net = "0.6"
 # The browser's clock, for the `updated_at` a save must carry.
 js-sys = "0.3"
 
-[features]
-# One gate for the browser surface. `dioxus/web` is a target dependency,
-# so enabling this feature only resolves on wasm32 — which is exactly the
-# cockpit wanted: `cargo build` on a desktop skips the bin, and
-# `trunk serve apps/graph/index.html` (which builds with wasm32) gets it.
-web = ["dioxus/web"]
-
-# The browser entry point Cargo builds only for wasm.
-[[bin]]
-name = "prism-graph"
-path = "src/main.rs"
-required-features = ["web"]
-
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("web"))'] }
-
 # ---- how to run ----
-#   cargo test -p prism-graph              # canvas + generation tests (no browser)
+# The graph model, the canvas interaction math and the form-to-request
+# mapping are tested in prism-core (they are shared with the Slint canvas and
+# the sync API); this crate holds the Dioxus surface.
+#
+# Two host quirks worth knowing before a browser build:
+#   * the default PATH resolves `cargo` to a distro build with no wasm32
+#     target — the rustup shims do, so `export PATH="$HOME/.cargo/bin:$PATH"`
+#     first;
+#   * `trunk` lives in `~/.local/bin`, which `execvp` cannot expand because
+#     the PATH entry is a literal `~`. Use `$HOME/.local/bin/trunk` directly.
+#
+#   cargo test -p prism-graph              # canvas + generation, no browser
 #   cargo check -p prism-graph --target wasm32-unknown-unknown
-#   trunk serve apps/graph/index.html     # the canvas, WASM build
-#
-# Note on this host: the default PATH resolves `cargo` to a distro build in
-# /usr/bin that has no wasm32 target. The rustup shims in ~/.cargo/bin do, so
-# a wasm build needs `export PATH="$HOME/.cargo/bin:$PATH"` first (that PATH
-# also carries `trunk` and `wasm-bindgen`).
-#
-# The graph *model* is tested in prism-core (it is shared with the Slint
-# canvas and the sync API); this crate tests the canvas interaction math and
-# the form-to-request mapping on the host, and holds the Dioxus surface.
+#   $HOME/.local/bin/trunk serve apps/graph/index.html
