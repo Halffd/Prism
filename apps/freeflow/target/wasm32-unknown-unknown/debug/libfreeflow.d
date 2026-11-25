@@ -1,1 +1,0 @@
-/home/void/Prism/apps/freeflow/target/wasm32-unknown-unknown/debug/libfreeflow.rlib: /home/void/Prism/apps/freeflow/src/app.rs /home/void/Prism/apps/freeflow/src/components.rs /home/void/Prism/apps/freeflow/src/icons.rs /home/void/Prism/apps/freeflow/src/lib.rs
