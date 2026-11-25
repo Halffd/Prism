@@ -1,0 +1,1 @@
+{"$message_type":"unused_extern","lint_level":"force-warn","unused_extern_names":["async_trait","dioxus_core_macro","dioxus_core_types","dioxus_hooks","futures_channel","generational_box","rustversion","tracing"]}

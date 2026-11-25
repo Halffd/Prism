@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FreeFlow — free AI creative suite</title>
+    <link data-trunk rel="css" href="assets/main.css" />
+    <style>
+      /* Paint the page the same colour as the app so a cold load has no
+         white flash before the wasm boots. */
+      html, body { margin: 0; padding: 0; height: 100%; background: #0E0E10; }
+      /* The loading state, while the wasm is still booting. */
+      #boot {
+        height: 100%; display: flex; align-items: center; justify-content: center;
+        color: #A1A1AA; font: 500 13px/1.6 Inter, system-ui, -apple-system, sans-serif;
+        letter-spacing: .04em;
+      }
+      #boot b { color: #D946EF; font-weight: 700; }
+    </style>
+  </head>
+  <body>
+    <!-- Load-bearing: dioxus mounts into #main. Without it, dioxus-web
+         constructs a *detached* body element and renders into that, which
+         leaves a blank page with no error anyone would notice.
+
+         The boot line lives inside #main so the app's own fixed root
+         covers it once the wasm has mounted. -->
+    <div id="main">
+      <div id="boot">loading <b>FreeFlow</b>…</div>
+    </div>
+    <link data-trunk rel="rust" />
+  </body>
+</html>
