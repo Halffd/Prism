@@ -1385,6 +1385,9 @@ mod tests {
                     StreamEvent::Chunk(chunk) => text.push_str(&chunk),
                     StreamEvent::Done => done = true,
                     StreamEvent::Error(error) => panic!("stream error: {error}"),
+                    // A retry notice carries no text and changes no
+                    // request state; these fixtures do not exercise one.
+                    StreamEvent::Retrying { .. } => {}
                 }
             }
         }
@@ -1469,6 +1472,9 @@ mod tests {
                     StreamEvent::Chunk(chunk) => text.push_str(&chunk),
                     StreamEvent::Done => done = true,
                     StreamEvent::Error(error) => panic!("stream error: {error}"),
+                    // A retry notice carries no text and changes no
+                    // request state; these fixtures do not exercise one.
+                    StreamEvent::Retrying { .. } => {}
                 }
             }
         }

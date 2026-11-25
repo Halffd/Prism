@@ -293,9 +293,13 @@ fn graph_starter_and_flatten_agree() {
 
 #[test]
 fn graph_merge_prefers_the_newer_document() {
+    // One timestamp, named, so the stamp and the assertions cannot drift by
+    // a factor of a thousand — which is exactly what happened once.
+    const NEWER_AT: u64 = 9_000_000_000_000;
+
     let base = prism_wasm::graph_starter();
     let mut newer: Value = serde_json::from_str(&base).unwrap();
-    newer["updated_at"] = serde_json::json!(9_000_000_000_000u64);
+    newer["updated_at"] = serde_json::json!(NEWER_AT);
     let mut nodes = newer["graph"]["nodes"].as_array().unwrap().clone();
     let prompt = nodes.iter_mut().find(|n| n["kind"] == "prompt").unwrap();
     prompt["values"]["text"] = serde_json::json!([["prompt", "the newer prompt"]]);
@@ -304,10 +308,10 @@ fn graph_merge_prefers_the_newer_document() {
 
     let merged: Value =
         serde_json::from_str(&prism_wasm::graph_merge(&base, &newer_body)).unwrap();
-    assert_eq!(merged["Ok"]["updated_at"], 9_000_000_000_000u64);
+    assert_eq!(merged["Ok"]["updated_at"], NEWER_AT);
 
     // The older document cannot roll the newer one back.
     let reverted: Value =
         serde_json::from_str(&prism_wasm::graph_merge(&newer_body, &base)).unwrap();
-    assert_eq!(reverted["Ok"]["updated_at"], 9_000_000_000u64);
+    assert_eq!(reverted["Ok"]["updated_at"], NEWER_AT);
 }
