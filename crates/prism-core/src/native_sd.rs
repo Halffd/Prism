@@ -78,11 +78,23 @@ fn resolve_seed(req: &MediaRequest) -> u64 {
     if let Some(seed) = req.seed {
         return seed;
     }
-    let nanos = std::time::SystemTime::now()
+    let hashed = fnv1a(&req.prompt, 0x9E37_79B9_7F4A_7C15);
+
+    // A blank seed should vary run to run, but `SystemTime::now()` *panics*
+    // on wasm32-unknown-unknown ("time not implemented on this platform") —
+    // which took the browser's whole render down, since the panic unwound
+    // through the async task. There the clock is skipped and the seed is a
+    // deterministic function of the prompt, which is the honest answer:
+    // an in-process preview with no clock cannot have a time-varying seed.
+    #[cfg(not(target_arch = "wasm32"))]
+    let clock = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(0);
-    nanos ^ fnv1a(&req.prompt, 0x9E37_79B9_7F4A_7C15)
+    #[cfg(target_arch = "wasm32")]
+    let clock = 0u64;
+
+    clock ^ hashed
 }
 
 fn render_cell(req: &MediaRequest, seed: u64, width: u32, height: u32) -> Vec<u8> {
@@ -483,6 +495,26 @@ mod tests {
     #[test]
     fn png_rejects_a_wrong_buffer_size() {
         assert!(encode_png(2, 2, &[0; 4]).is_err());
+    }
+
+    #[test]
+    fn a_named_seed_is_used_and_a_blank_one_still_resolves() {
+        let mut req = MediaRequest::default();
+        req.prompt = "a fox".into();
+
+        // A named seed wins untouched: the caller asked for it.
+        req.seed = Some(4242);
+        assert_eq!(resolve_seed(&req), 4242);
+
+        // A blank seed has to land on something usable, and different
+        // prompts must not collide. On wasm32-unknown-unknown there is no
+        // clock, so this is the whole of the fallback — which is why it has
+        // to be prompt-derived rather than empty.
+        req.seed = None;
+        let first = resolve_seed(&req);
+        assert_ne!(first, 0);
+        req.prompt = "a different prompt".into();
+        assert_ne!(resolve_seed(&req), first);
     }
 }
 

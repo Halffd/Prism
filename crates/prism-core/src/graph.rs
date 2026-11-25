@@ -384,11 +384,18 @@ pub fn wire_endpoints(graph: &Graph, wire: &Wire) -> Option<((f64, f64), (f64, f
 /// canvas's sampled polyline and the hit-testing curve are the same curve.
 /// The control points extend horizontally by half the horizontal gap (at
 /// least 40px) so the wire reads as a cable rather than a hairpin.
+///
+/// They extend *toward the destination*, which matters as soon as a wire
+/// runs right-to-left — an output on a node's left feeding a node drawn
+/// further left, as the LoRA stack does into the checkpoint's adapter port.
+/// Adding a fixed +bend to the start and -bend to the end there makes the
+/// curve bulge backwards and cross itself.
 pub fn wire_bezier(from: (f64, f64), to: (f64, f64)) -> ((f64, f64), (f64, f64), (f64, f64), (f64, f64)) {
     let dx = (to.0 - from.0).abs();
     let bend = (dx * 0.5).max(40.0);
-    let c1 = (from.0 + bend, from.1);
-    let c2 = (to.0 - bend, to.1);
+    let direction = if to.0 >= from.0 { 1.0 } else { -1.0 };
+    let c1 = (from.0 + bend * direction, from.1);
+    let c2 = (to.0 - bend * direction, to.1);
     (from, c1, c2, to)
 }
 

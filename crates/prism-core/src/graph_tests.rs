@@ -134,6 +134,24 @@ fn the_bezier_control_points_bend_horizontally_toward_the_gap() {
 }
 
 #[test]
+fn a_reversed_wire_bends_toward_its_destination() {
+    // The LoRA stack feeds the checkpoint's adapter port right-to-left. The
+    // control points have to extend *toward* the destination there, or the
+    // curve bulges backwards and crosses itself — which is what it did
+    // before a browser rendered it.
+    let (start, c1, c2, end) = wire_bezier((288.0, 350.0), (40.0, 90.0));
+    assert_eq!(start, (288.0, 350.0));
+    assert_eq!(end, (40.0, 90.0));
+    // Half the 248px gap, halved to 124 — directed backwards.
+    assert_eq!(c1, (164.0, 350.0));
+    assert_eq!(c2, (164.0, 90.0));
+    // Both control points sit between the endpoints, which is the property
+    // a backwards bulge breaks.
+    assert!(c1.0 < start.0 && c1.0 > end.0, "{c1:?}");
+    assert!(c2.0 < start.0 && c2.0 > end.0, "{c2:?}");
+}
+
+#[test]
 fn a_narrow_gap_still_gets_a_usable_bend() {
     // Under 80px of gap, half the gap would be a hairpin, so the bend
     // floors at 40px — the reason a short wire still reads as a cable.

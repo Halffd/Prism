@@ -18,6 +18,11 @@
     </style>
   </head>
   <body>
+    <!-- Dioxus mounts into `#main`. Without it, dioxus-web falls back to
+         creating a *detached* body element and rendering into that, which
+         leaves a blank page with no error anyone would notice — so this
+         element is load-bearing, not decoration. -->
+    <div id="main"></div>
     <!-- Build only the app binary: the crate also has an `rlib` (used by the
          host-side unit tests), and trunk refuses to guess between two wasm
          artifacts with the same base name. -->

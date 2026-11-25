@@ -192,7 +192,7 @@ pub fn App() -> Element {
                         view.set(next);
                     },
 
-                    {canvas_layers(graph, selected, view, drag)},
+                    {canvas_layers(graph, selected, view, drag, status)},
                 }
                 {output_panel(images)},
             }
@@ -207,6 +207,7 @@ fn canvas_layers(
     selected: Signal<Option<u64>>,
     view: Signal<View>,
     drag: Signal<Option<Drag>>,
+    status: Signal<String>,
 ) -> Element {
     let snapshot = graph.read().clone();
     let view_now = *view.read();
@@ -216,7 +217,7 @@ fn canvas_layers(
         div {
             style: "position: absolute; left: 0; top: 0; transform-origin: 0 0; transform: translate({view_now.pan_x}px, {view_now.pan_y}px) scale({view_now.zoom});",
             svg {
-                style: "position: absolute; left: 0; top: 0; overflow: visible; width: 1px; height: 1px;",
+                style: "position: absolute; left: 0; top: 0; overflow: visible; width: 1px; height: 1px; pointer-events: none;",
                 for wire in snapshot.wires.iter() {
                     if let Some((from, to)) = prism_core::graph::wire_endpoints(&snapshot, wire) {
                         path {
@@ -246,7 +247,7 @@ fn canvas_layers(
             for node in snapshot.nodes.iter() {
                 div {
                     key: "node-{node.id}",
-                    style: "position: absolute; left: {node.x}px; top: {node.y}px; width: {NODE_WIDTH}px; border-radius: 8px; overflow: hidden; border: 1px solid #2a2f3f; box-shadow: 0 6px 18px rgba(0,0,0,0.45);",
+                    style: "position: absolute; left: {node.x}px; top: {node.y}px; width: {NODE_WIDTH}px; border-radius: 8px; overflow: hidden; border: 1px solid #2a2f3f; box-shadow: 0 6px 18px rgba(0,0,0,0.45); pointer-events: none;",
                     div {
                         style: "height: {HEADER_H}px; padding: 0 10px; display: flex; align-items: center; background: {node_color(&node.kind)}; color: #0b0d14; font-size: 12px; font-weight: 700; cursor: grab;",
                         "{node_title(&node.kind)}"
@@ -265,9 +266,13 @@ fn canvas_layers(
                 }
             }
 
-            // The status line, over the canvas corner.
+            // The corner: what the canvas last did, then the zoom. The
+            // status is the only place a failed sync or a refused
+            // generation ever surfaces, so it has to actually render.
             div {
                 style: "position: absolute; left: 12px; bottom: 10px; font-size: 11px; color: {TEXT_DIM}; pointer-events: none;",
+                "{status.read()}"
+                " · "
                 "{status_line(view_now, snapshot.nodes.len())}"
             }
         }
@@ -445,7 +450,7 @@ fn knob_control(row: KnobRow, node_id: u64, mut graph: Signal<Graph>) -> Element
             label { style: "font-size: 10px; color: {TEXT_DIM};", "{row.label}" }
             if control == "enum" {
                 select {
-                    style: "padding: 4px 6px; border-radius: 5px; border: 1px solid #2a2f3f; background: #191c26; color: #e6e8ef; font-size: 11px;",
+                    style: "padding: 4px 6px; border-radius: 5px; border: 1px solid #2a2f3f; background: #191c26; color: #e6e8ef; font-size: 11px; pointer-events: auto;",
                     onmousedown: soak_gesture,
                     value: "{row.value}",
                     oninput: move |evt| {
@@ -469,7 +474,7 @@ fn knob_control(row: KnobRow, node_id: u64, mut graph: Signal<Graph>) -> Element
                 }
             } else if toggle {
                 button {
-                    style: "padding: 4px 8px; border-radius: 5px; border: 1px solid #2a2f3f; cursor: pointer; font-size: 11px; text-align: left;",
+                    style: "padding: 4px 8px; border-radius: 5px; border: 1px solid #2a2f3f; cursor: pointer; font-size: 11px; text-align: left; pointer-events: auto;",
                     onmousedown: soak_gesture,
                     onclick: move |_| flip_seed_lock(graph, node_id),
                     "Seed locked: {row.value}"
@@ -480,7 +485,7 @@ fn knob_control(row: KnobRow, node_id: u64, mut graph: Signal<Graph>) -> Element
                     // remount the input on every keystroke and steal focus
                     // mid-word.
                     key: "{row.id}",
-                    style: "padding: 4px 6px; border-radius: 5px; border: 1px solid #2a2f3f; background: #191c26; color: #e6e8ef; font-size: 11px;",
+                    style: "padding: 4px 6px; border-radius: 5px; border: 1px solid #2a2f3f; background: #191c26; color: #e6e8ef; font-size: 11px; pointer-events: auto;",
                     r#type: "text",
                     onmousedown: soak_gesture,
                     placeholder: "{row.placeholder}",
@@ -518,7 +523,7 @@ fn lora_editor(node: &GraphNode, mut graph: Signal<Graph>) -> Element {
             for (index, row) in node.values.loras.iter().enumerate() {
                 div { key: "lora-{index}", style: "display: flex; gap: 4px; align-items: center;",
                     input {
-                        style: "flex: 1; min-width: 0; padding: 4px 6px; border-radius: 5px; border: 1px solid #2a2f3f; background: #191c26; color: #e6e8ef; font-size: 11px;",
+                        style: "flex: 1; min-width: 0; padding: 4px 6px; border-radius: 5px; border: 1px solid #2a2f3f; background: #191c26; color: #e6e8ef; font-size: 11px; pointer-events: auto;",
                         r#type: "text",
                         onmousedown: soak_gesture,
                         placeholder: "lora name",
@@ -532,7 +537,7 @@ fn lora_editor(node: &GraphNode, mut graph: Signal<Graph>) -> Element {
                         },
                     }
                     input {
-                        style: "width: 54px; padding: 4px 6px; border-radius: 5px; border: 1px solid #2a2f3f; background: #191c26; color: #e6e8ef; font-size: 11px;",
+                        style: "width: 54px; padding: 4px 6px; border-radius: 5px; border: 1px solid #2a2f3f; background: #191c26; color: #e6e8ef; font-size: 11px; pointer-events: auto;",
                         r#type: "text",
                         onmousedown: soak_gesture,
                         placeholder: "0.8",
@@ -546,7 +551,7 @@ fn lora_editor(node: &GraphNode, mut graph: Signal<Graph>) -> Element {
                         },
                     }
                     button {
-                        style: "padding: 3px 7px; border-radius: 5px; border: 1px solid #2a2f3f; background: #191c26; color: {TEXT_DIM}; cursor: pointer; font-size: 11px;",
+                        style: "padding: 3px 7px; border-radius: 5px; border: 1px solid #2a2f3f; background: #191c26; color: {TEXT_DIM}; cursor: pointer; font-size: 11px; pointer-events: auto;",
                         onmousedown: soak_gesture,
                         onclick: move |_| {
                             if let Some(target) = graph.write().node_mut(node_id) {
@@ -560,7 +565,7 @@ fn lora_editor(node: &GraphNode, mut graph: Signal<Graph>) -> Element {
                 }
             }
             button {
-                style: "padding: 4px 8px; border-radius: 5px; border: 1px dashed #2a2f3f; background: transparent; color: {TEXT_DIM}; cursor: pointer; font-size: 11px;",
+                style: "padding: 4px 8px; border-radius: 5px; border: 1px dashed #2a2f3f; background: transparent; color: {TEXT_DIM}; cursor: pointer; font-size: 11px; pointer-events: auto;",
                 onmousedown: soak_gesture,
                 onclick: move |_| {
                     if let Some(target) = graph.write().node_mut(node_id) {
@@ -584,7 +589,7 @@ fn seed_editor(node: &GraphNode, mut graph: Signal<Graph>) -> Element {
     rsx! {
         div { style: "display: flex; gap: 4px; align-items: center;",
             button {
-                style: "padding: 4px 8px; border-radius: 5px; border: 1px solid #2a2f3f; cursor: pointer; font-size: 11px;",
+                style: "padding: 4px 8px; border-radius: 5px; border: 1px solid #2a2f3f; cursor: pointer; font-size: 11px; pointer-events: auto;",
                 onmousedown: soak_gesture,
                 disabled: locked,
                 onclick: move |_| {
@@ -598,7 +603,7 @@ fn seed_editor(node: &GraphNode, mut graph: Signal<Graph>) -> Element {
                 "Roll"
             }
             button {
-                style: "padding: 4px 8px; border-radius: 5px; border: 1px solid #2a2f3f; cursor: pointer; font-size: 11px;",
+                style: "padding: 4px 8px; border-radius: 5px; border: 1px solid #2a2f3f; cursor: pointer; font-size: 11px; pointer-events: auto;",
                 onmousedown: soak_gesture,
                 onclick: move |_| flip_seed_lock(graph, node_id),
                 if locked { "Unlock seed" } else { "Lock seed" }
