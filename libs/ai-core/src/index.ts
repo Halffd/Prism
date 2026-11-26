@@ -950,9 +950,9 @@ export function macroContext(
   return {
     char: card.name,
     user: persona.name,
-    description: persona.description ?? '',
-    personality: persona.personality ?? '',
-    scenario: persona.scenario ?? '',
+    description: card.description ?? '',
+    personality: card.personality ?? '',
+    scenario: card.scenario ?? '',
     persona: personaExpanded,
     first_mes: card.first_mes ?? '',
     mes_example: card.mes_example ?? '',

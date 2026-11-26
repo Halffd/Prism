@@ -121,7 +121,7 @@ export default defineConfig({
         const staging = resolve(__dirname, '../../dist/.wasm-pkg-stage');
         rmSync(staging, { recursive: true, force: true });
         cpSync(
-          resolve(__dirname, '../../libs/ai-core/src/wasm-pkg-web'),
+          resolve(__dirname, '../../apps/web/public/wasm-pkg-web'),
           staging,
           { recursive: true },
         );
