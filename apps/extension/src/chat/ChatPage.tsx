@@ -61,6 +61,7 @@ import {
   saveTabState,
   type ChatTabState,
 } from './chat-tabs';
+import { getOfflineModels } from '../popup/model-cache';
 import { assembleContext } from '@prism/context-manager';
 import { CharacterSelector } from '../components/CharacterSelector';
 import { PersonaSelector } from '../components/PersonaSelector';
@@ -157,6 +158,7 @@ export function ChatPage() {
   const groupChatState = useSelector((state: RootState) => state.groupChat);
 
   const [input, setInput] = useState('');
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [showMenu, setShowMenu] = useState(false);
   const [showCharacterSelector, setShowCharacterSelector] = useState(false);
   const [showPersonaSelector, setShowPersonaSelector] = useState(false);
@@ -294,11 +296,27 @@ export function ChatPage() {
     // Load chat sessions
     loadChatSessionsFromDB();
 
+    // A prompt handed over by the popup, context menu or in-page button
+    // lands in the composer instead of being silently dropped.
+    const query = new URLSearchParams(window.location.search).get('q');
+    if (query) {
+      setInput(query);
+    }
+
     // Restore the open chat tabs and the conversation they show. The tab
     // state is stored across page loads, so the chat page opens on the
     // chats the user was last working in.
     void restoreChatTabs();
   }, [dispatch]);
+
+  useEffect(() => {
+    void getOfflineModels(selectedProvider).then((models) => {
+      const selected = reduxAIConfig.model;
+      setAvailableModels(
+        selected && !models.includes(selected) ? [selected, ...models] : models,
+      );
+    });
+  }, [selectedProvider, reduxAIConfig.model]);
 
   useEffect(() => {
     scrollToBottom();
@@ -313,9 +331,22 @@ export function ChatPage() {
   const restoreChatTabs = async () => {
     try {
       const storedSessions = await getChatSessions();
-      const state = await restoreTabState(
+      const requestedSession = new URLSearchParams(window.location.search).get(
+        'session',
+      );
+      let state = await restoreTabState(
         storedSessions.map((session) => session.id),
       );
+
+      // The popup opens the chat page with `?session=<id>` after a send,
+      // so the response and its transcript are visible in the tabbed view.
+      if (requestedSession && !state.openTabs.includes(requestedSession)) {
+        state = openTab(state, requestedSession);
+        await saveTabState(state);
+      } else if (requestedSession) {
+        state = { ...state, activeTabId: requestedSession };
+        await saveTabState(state);
+      }
 
       // A chat that was never written to the database — a fresh tab from
       // the last session, for instance — is written now, so that it is a
@@ -1131,6 +1162,14 @@ export function ChatPage() {
       }
     } catch (error) {
       console.error('Error sending message:', error);
+      const errorMessage: Message = {
+        id: `error_${Date.now()}`,
+        role: 'assistant',
+        content: `Error: ${(error as Error).message || 'Failed to get response from AI'}`,
+        timestamp: Date.now(),
+      };
+      dispatch(addMessage(errorMessage));
+      await saveCurrentChatToDB([...messages, userMessage, errorMessage]);
     } finally {
       dispatch(setLoading(false));
     }
@@ -1348,6 +1387,7 @@ export function ChatPage() {
               )
             }
             className="provider-selector"
+            aria-label="Select AI provider"
           >
             <option value="openai">OpenAI</option>
             <option value="gemini">Gemini</option>
@@ -1363,6 +1403,25 @@ export function ChatPage() {
             <option value="grok">Grok</option>
             <option value="openrouter">OpenRouter</option>
             <option value="poe">Poe</option>
+          </select>
+
+          <select
+            value={reduxAIConfig.model || ''}
+            onChange={(e) => {
+              const updated = { ...reduxAIConfig, model: e.target.value };
+              dispatch(updateAIConfigAction(updated));
+              client.updateAIConfig(updated);
+              void chrome.storage.local.set({ aiConfig: updated });
+            }}
+            className="model-selector"
+            aria-label="Select AI model"
+          >
+            <option value="">No model selected</option>
+            {availableModels.map((model) => (
+              <option key={model} value={model}>
+                {model}
+              </option>
+            ))}
           </select>
 
           <button

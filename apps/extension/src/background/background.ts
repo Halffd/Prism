@@ -7,6 +7,7 @@ import type {
 } from '@prism/shared-types';
 import { BadgeController } from './badge-state';
 import type { PrismBadgeState } from './badge-state';
+import { withFallback } from '../shared/async';
 
 const defaultAIConfig: AIConfig = {
   provider: 'prism-api',
@@ -85,6 +86,11 @@ chrome.runtime.onMessage.addListener(
       return false;
     }
 
+    if (request.type === 'OPEN_CHAT_SESSION') {
+      focusOrOpenSessionTab(request.sessionId);
+      return false;
+    }
+
     if (request.type === 'INSERT_PROMPT_SHORTCUT') {
       Promise.resolve(
         chrome.runtime.sendMessage({
@@ -133,6 +139,29 @@ function openChatInNewTab(query?: string) {
   chrome.tabs.create({ url: chatUrl });
 }
 
+/** Focus the chat tab already showing a session, or open it once. */
+function focusOrOpenSessionTab(sessionId: string) {
+  const chatUrl = chrome.runtime.getURL(
+    `chat.html?session=${encodeURIComponent(sessionId)}`,
+  );
+  void chrome.tabs.query(
+    { url: `${chrome.runtime.getURL('chat.html')}*` },
+    (tabs) => {
+      const tab = tabs.find((entry) =>
+        entry.url?.includes(`session=${encodeURIComponent(sessionId)}`),
+      );
+      if (tab?.id !== undefined) {
+        void chrome.tabs.update(tab.id, { active: true });
+        if (tab.windowId !== undefined) {
+          void chrome.windows.update(tab.windowId, { focused: true });
+        }
+        return;
+      }
+      void chrome.tabs.create({ url: chatUrl });
+    },
+  );
+}
+
 async function handleSendMessage(data: {
   content: string;
   context?: ContextData;
@@ -173,22 +202,34 @@ async function handleSendMessage(data: {
 }
 
 async function handleGetContext(tabId?: number) {
-  if (!tabId) return { error: 'No active tab' };
+  // A message from the action popup has no `sender.tab`. Querying the
+  // active tab here is what makes page context work from the real popup,
+  // where the sender is not a content script.
+  const targetTabId =
+    tabId ??
+    (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
+  if (!targetTabId) return { error: 'No active tab' };
 
   try {
     const result = await chrome.storage.local.get(['displaySettings']);
     const settings = result.displaySettings;
     const pageContentTokenLimit = settings?.pageContentTokenLimit || 20000;
 
-    const response = await chrome.tabs.sendMessage(tabId, {
-      type: 'EXTRACT_CONTEXT',
-      pageContentTokenLimit,
-    });
-
-    return response;
+    // A content listener may answer asynchronously and then never call
+    // sendResponse. Keep the composer responsive rather than waiting on a
+    // channel that can stay open indefinitely.
+    return await withFallback<{ error?: string }>(
+      () =>
+        chrome.tabs.sendMessage(targetTabId, {
+          type: 'EXTRACT_CONTEXT',
+          pageContentTokenLimit,
+        }) as unknown as Promise<{ error?: string }>,
+      1500,
+      { error: 'Page context unavailable' },
+    );
   } catch (error) {
     console.error('Error getting context:', error);
-    throw error;
+    return { error: (error as Error).message || 'Page context unavailable' };
   }
 }
 

@@ -28,7 +28,8 @@
       gap: var(--spacing-sm);
       align-items: center;
 
-      .provider-selector {
+      .provider-selector,
+      .model-selector {
         background: var(--surface-container-high);
         color: var(--on-surface);
         border: none;
@@ -36,6 +37,7 @@
         padding: var(--spacing-xs) var(--spacing-sm);
         font-size: var(--font-sm);
         cursor: pointer;
+        max-width: 180px;
 
         &:focus {
           outline: none;

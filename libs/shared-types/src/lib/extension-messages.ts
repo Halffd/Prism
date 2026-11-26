@@ -32,6 +32,7 @@ export type BackgroundRequest =
   | { type: 'UPDATE_AI_CONFIG'; data: AIConfig }
   | { type: 'GET_AI_CONFIG' }
   | { type: 'OPEN_CHAT' }
+  | { type: 'OPEN_CHAT_SESSION'; sessionId: string }
   | { type: 'INSERT_PROMPT_SHORTCUT'; content: string }
   | { type: 'TOGGLE_MODE'; mode: PrismToggleMode; value: boolean }
   | { type: 'SET_BADGE_STATE'; state: PrismBadgeState; count?: number };

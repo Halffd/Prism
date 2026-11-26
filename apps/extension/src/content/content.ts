@@ -595,8 +595,10 @@ async function openChatInterface() {
       break;
     case 'popup':
     default:
-      // For popup mode, we'll use the browser action popup
-      chrome.runtime.sendMessage({ type: 'OPEN_EXTENSION_POPUP' });
+      // A page button cannot open the browser-action popup without a
+      // browser UI gesture. The in-page iframe keeps the advertised chat
+      // visible while still leaving the toolbar popup available.
+      injectChatPopup();
       break;
   }
 }
@@ -893,8 +895,10 @@ function injectFloatingButton() {
     'prism-floating-button',
     '💎',
     () => {
-      // Send message to open popup or sidebar
-      chrome.runtime.sendMessage({ type: 'OPEN_CHAT' });
+      // A content-script click cannot reliably open the browser-action
+      // popup. Open the in-page chat directly instead, then honour the
+      // user's chosen display mode inside openChatInterface.
+      void openChatInterface();
     },
     `
       position: fixed;

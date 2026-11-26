@@ -76,6 +76,7 @@ import {
 } from './provider-catalog';
 import { modelsForProvider, resolveModels } from './model-cache';
 import { loadBackupSettings, runBackupNow } from './auto-backup';
+import { withFallback } from '../shared/async';
 
 // Initialize with default settings - will be overridden by stored settings
 const defaultAIConfig: AIConfig = {
@@ -989,10 +990,16 @@ export function Popup() {
         active: true,
         currentWindow: true,
       });
-      if (tab.id) {
-        const result = (await chrome.tabs.sendMessage(tab.id, {
-          type: 'GET_SELECTED_TEXT',
-        })) as { text?: string } | undefined;
+      const tabId = tab.id;
+      if (tabId !== undefined) {
+        const result = await withFallback(
+          () =>
+            chrome.tabs.sendMessage(tabId, {
+              type: 'GET_SELECTED_TEXT',
+            }) as unknown as Promise<{ text?: string } | undefined>,
+          1000,
+          undefined,
+        );
         return result?.text || '';
       }
       return '';
@@ -1013,11 +1020,17 @@ export function Popup() {
         active: true,
         currentWindow: true,
       });
-      if (tab.id) {
-        const result = (await chrome.tabs.sendMessage(tab.id, {
-          type: 'GET_PAGE_CONTENTS_WITH_LIMIT',
-          tokenLimit: pageContentTokenLimit,
-        })) as { content?: string } | undefined;
+      const tabId = tab.id;
+      if (tabId !== undefined) {
+        const result = await withFallback(
+          () =>
+            chrome.tabs.sendMessage(tabId, {
+              type: 'GET_PAGE_CONTENTS_WITH_LIMIT',
+              tokenLimit: pageContentTokenLimit,
+            }) as unknown as Promise<{ content?: string } | undefined>,
+          1000,
+          undefined,
+        );
         return result?.content || '';
       }
       return '';
@@ -1469,10 +1482,18 @@ export function Popup() {
         currentWindow: true,
       });
 
-      if (tab.id) {
-        const response = (await chrome.runtime.sendMessage({
-          type: 'GET_CONTEXT',
-        })) as (ContextData & { error?: string }) | undefined;
+      const tabId = tab.id;
+      if (tabId !== undefined) {
+        const response = await withFallback(
+          () =>
+            chrome.runtime.sendMessage({
+              type: 'GET_CONTEXT',
+            }) as unknown as Promise<
+              (ContextData & { error?: string }) | undefined
+            >,
+          1500,
+          undefined,
+        );
 
         if (response && !response.error) {
           dispatch(setContext(response));
@@ -1652,6 +1673,17 @@ export function Popup() {
     return Math.max(1, tokenCount);
   };
 
+  const showChatTab = (sessionId: string) => {
+    const opened = chrome.runtime.sendMessage({
+      type: 'OPEN_CHAT_SESSION',
+      sessionId,
+    }) as unknown as Promise<void> | void;
+    void Promise.resolve(opened).catch(() => {
+      // The inline popup transcript is the fallback when a chat tab
+      // cannot be opened (for example from a restricted context).
+    });
+  };
+
   const sendMessage = async () => {
     if (!input.trim() && uploadedImages.length === 0) return;
 
@@ -1798,6 +1830,7 @@ export function Popup() {
 
         // Save to local IndexedDB to ensure persistence
         await saveCurrentChatToDB([...messages, userMessage, response.data]);
+        showChatTab(currentSessionId);
       } else {
         // Handle error response
         console.error('Message failed:', response?.error || 'Unknown error');
@@ -1811,6 +1844,7 @@ export function Popup() {
         };
         dispatch(addMessage(errorMessage));
         await saveCurrentChatToDB([...messages, userMessage, errorMessage]);
+        showChatTab(currentSessionId);
       }
     } catch (error) {
       console.error('Error sending message:', error);
@@ -1824,6 +1858,7 @@ export function Popup() {
       };
       dispatch(addMessage(errorMessage));
       await saveCurrentChatToDB([...messages, userMessage, errorMessage]);
+      showChatTab(currentSessionId);
     } finally {
       dispatch(setLoading(false));
     }
@@ -2367,6 +2402,8 @@ export function Popup() {
         generatedImage={generatedImage}
         imageGenerationPrompt={imageGenerationPrompt}
         setImageGenerationPrompt={setImageGenerationPrompt}
+        imageGenerationModel={imageGenerationModel}
+        setImageGenerationModel={setImageGenerationModel}
         generateImage={generateImage}
         isGeneratingImage={isGeneratingImage}
         imageGenerationApiKey={imageGenerationApiKey}

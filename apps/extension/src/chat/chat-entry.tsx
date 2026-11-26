@@ -1,12 +1,18 @@
-
 import { createRoot } from 'react-dom/client';
-import { StandaloneChatPage } from './StandaloneChatPage';
+import { Provider } from 'react-redux';
+import { store } from '@prism/redux-store';
+import { ChatPage } from './ChatPage';
 
-// Create the root container for the React app
+// The chat tab uses the same Redux store as the popup, so session tabs,
+// saved transcripts and model settings stay in sync between them.
 const container = document.getElementById('chatApp');
 if (container) {
   const root = createRoot(container);
-  root.render(<StandaloneChatPage />);
+  root.render(
+    <Provider store={store}>
+      <ChatPage />
+    </Provider>,
+  );
 } else {
   console.error('Could not find chatApp container');
 }

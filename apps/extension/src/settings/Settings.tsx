@@ -11,6 +11,11 @@ import {
   HotkeyBinding,
 } from '@prism/shared-types';
 import { UnifiedAIClient } from '@prism/api-client';
+import {
+  IMAGE_MODEL_OPTIONS,
+  imageModelsForAccess,
+  type ImageModelAccess,
+} from '@prism/image-gen';
 import { logger, type LogLevel } from '@prism/logging';
 import { ModelRecentsEditor } from './ModelRecentsEditor';
 import { BackupSettingsPanel } from './BackupSettings';
@@ -60,6 +65,11 @@ const defaultAIConfig: AIConfig = {
 interface SettingsProps {
   onClose?: () => void;
 }
+
+const IMAGE_ACCESS_LABEL: Record<ImageModelAccess, string> = {
+  free: 'Free models',
+  'pro-only': 'Pro-only models',
+};
 
 /** Providers whose model list the core can refresh: each exposes an
  *  OpenAI-compatible `/models` endpoint. The extension-only providers
@@ -2284,24 +2294,29 @@ export function Settings({ onClose }: SettingsProps) {
           <div className="form-group">
             <label>Image Generation Model</label>
             <select
-              value={imageGenerationModel}
+              value={
+                IMAGE_MODEL_OPTIONS.find(
+                  (model) => model.id === imageGenerationModel,
+                )?.id ?? IMAGE_MODEL_OPTIONS[0].id
+              }
               onChange={(e) => setImageGenerationModel(e.target.value)}
               className="form-control"
+              aria-label="Select image model"
             >
-              <option value="stabilityai/stable-diffusion-2-1">
-                Stable Diffusion 2.1
-              </option>
-              <option value="runwayml/stable-diffusion-v1-5">
-                Stable Diffusion 1.5
-              </option>
-              <option value="stabilityai/stable-diffusion-xl-base-1.0">
-                SDXL
-              </option>
-              <option value="black-forest-labs/FLUX.1-schnell">
-                FLUX Schnell
-              </option>
-              <option value="black-forest-labs/FLUX.1-dev">FLUX Dev</option>
+              {(['free', 'pro-only'] as const).map((access) => (
+                <optgroup key={access} label={IMAGE_ACCESS_LABEL[access]}>
+                  {imageModelsForAccess(access).map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
             </select>
+            <small className="form-hint">
+              Free models use a standard provider token. Pro-only models need
+              access from the image provider.
+            </small>
           </div>
         </div>
 

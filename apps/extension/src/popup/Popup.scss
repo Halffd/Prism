@@ -389,6 +389,32 @@
       }
     }
   }
+
+  .image-model-row {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-top: var(--spacing-md);
+    color: var(--on-surface-variant);
+    font-size: var(--font-sm);
+
+    .image-model-select {
+      flex: 1;
+      min-width: 0;
+      padding: var(--spacing-xs) var(--spacing-sm);
+      border: none;
+      border-radius: var(--radius-pill);
+      background: var(--surface-container-lowest);
+      color: var(--on-surface);
+      font-size: var(--font-sm);
+    }
+  }
+
+  .image-model-note {
+    margin: var(--spacing-xs) 0 0;
+    color: var(--on-surface-variant);
+    font-size: var(--font-xs, 11px);
+  }
 }
 
 .image-generation-result {
