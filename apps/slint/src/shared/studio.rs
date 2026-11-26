@@ -333,6 +333,7 @@ pub fn init(ui: &AppWindow, state: &Rc<RefCell<State>>) {
     ui.set_studio_folder(st.studio.folder as i32);
     let wide = ui.window().size().width as f32;
     ui.set_studio_narrow(wide < NARROW_PX);
+    ui.set_studio_width(wide);
 }
 
 // ---------------------------------------------------------------------------
@@ -394,13 +395,18 @@ pub fn generate(ui: &AppWindow, state: &Rc<RefCell<State>>) {
 
 /// Advance the simulated render; when the countdown ends, land the
 /// tiles in the workspace grid (newest first).
-/// Keep the drawer breakpoint in step with the window. Slint has no resize
-/// callback, so the 50 ms pump reads the size and reports the flip; the
-/// property only changes across the threshold, so nothing re-layouts.
+/// Keep the drawer breakpoint and the narrow top bar in step with the
+/// window. Slint has no resize callback, so the 50 ms pump reads the size.
+/// The breakpoint flips only across the threshold; the width follows every
+/// change so the bar can place its Library control.
 pub fn poll_narrow(ui: &AppWindow) {
-    let narrow = (ui.window().size().width as f32) < NARROW_PX;
+    let width = ui.window().size().width as f32;
+    let narrow = width < NARROW_PX;
     if ui.get_studio_narrow() != narrow {
         ui.set_studio_narrow(narrow);
+    }
+    if ui.get_studio_width() != width {
+        ui.set_studio_width(width);
     }
 }
 

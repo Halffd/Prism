@@ -170,16 +170,27 @@ mod headless_tests {
         ui.window().set_size(slint::LogicalSize::new(1400.0, 900.0));
         crate::shared::studio::poll_narrow(&ui);
         assert!(!ui.get_studio_narrow());
+        assert_eq!(ui.get_studio_width(), 1400.0);
 
         // Below the threshold the outer columns become drawers; above it
-        // they are columns again.
+        // they are columns again. The width also feeds the narrow top bar,
+        // whose own layout width is zero.
         ui.window().set_size(slint::LogicalSize::new(430.0, 800.0));
         crate::shared::studio::poll_narrow(&ui);
         assert!(ui.get_studio_narrow());
+        assert_eq!(ui.get_studio_width(), 430.0);
+
+        crate::shared::studio::set_drawer(&ui, &state, 1);
+        assert_eq!(ui.get_studio_drawer(), 1);
+        crate::shared::studio::set_drawer(&ui, &state, 2);
+        assert_eq!(ui.get_studio_drawer(), 2);
+        crate::shared::studio::set_drawer(&ui, &state, 0);
+        assert_eq!(ui.get_studio_drawer(), 0);
 
         ui.window().set_size(slint::LogicalSize::new(1400.0, 900.0));
         crate::shared::studio::poll_narrow(&ui);
         assert!(!ui.get_studio_narrow());
+        assert_eq!(ui.get_studio_width(), 1400.0);
     }
 
     #[test]
