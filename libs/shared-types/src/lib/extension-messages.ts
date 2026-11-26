@@ -44,7 +44,7 @@ export type ContentRequest =
   | { type: 'GET_PAGE_CONTENTS' }
   | { type: 'GET_PAGE_CONTENTS_WITH_LIMIT'; tokenLimit?: number }
   | { type: 'OPEN_CHAT' }
-  | { type: 'INJECT_IFRAME_CHAT' }
+  | { type: 'INJECT_IFRAME_CHAT'; sessionId?: string }
   | { type: 'UPDATE_DISPLAY_MODE'; data: Partial<ExtensionSettings> }
   | { type: 'UPDATE_FONT_SCALE'; scale: number }
   | { type: 'PING' };

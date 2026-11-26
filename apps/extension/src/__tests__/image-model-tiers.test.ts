@@ -1,6 +1,7 @@
 import {
   IMAGE_MODEL_OPTIONS,
   imageModelAccess,
+  imageModelOptionLabel,
   imageModelsForAccess,
 } from '@prism/image-gen';
 
@@ -24,5 +25,13 @@ describe('image model tiers', () => {
   it('places FLUX dev in pro-only and FLUX schnell in free', () => {
     expect(imageModelAccess('black-forest-labs/FLUX.1-dev')).toBe('pro-only');
     expect(imageModelAccess('black-forest-labs/FLUX.1-schnell')).toBe('free');
+  });
+
+  it('shows the tier in the option label', () => {
+    const dev = IMAGE_MODEL_OPTIONS.find(
+      (model) => model.id === 'black-forest-labs/FLUX.1-dev',
+    );
+    expect(dev).toBeDefined();
+    expect(imageModelOptionLabel(dev!)).toBe('FLUX.1 dev — pro-only');
   });
 });

@@ -19,7 +19,11 @@ import {
   updateChatSessionMeta,
   type DBChatSession,
 } from '@prism/shared-db';
-import type { PromptShortcut, Snippet } from '@prism/shared-types';
+import type {
+  ApiResponse,
+  PromptShortcut,
+  Snippet,
+} from '@prism/shared-types';
 import { matchSnippet } from '@prism/shared-types';
 import { UnifiedAIClient, networkStatusService } from '@prism/api-client';
 import { ImageGenerationService } from '@prism/image-gen';
@@ -1673,14 +1677,33 @@ export function Popup() {
     return Math.max(1, tokenCount);
   };
 
-  const showChatTab = (sessionId: string) => {
+  const showChatResult = async (sessionId: string) => {
+    // The in-page iframe is the primary surface: it keeps the popup
+    // transcript visible and opens the same session with its tabs,
+    // model controls and metrics. Restricted pages have no content
+    // script, so fall back to a normal chat tab in that case.
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tabId = tab?.id;
+    if (tabId !== undefined) {
+      const injected = await withFallback<{ success?: boolean } | undefined>(
+        () =>
+          chrome.tabs.sendMessage(tabId, {
+            type: 'INJECT_IFRAME_CHAT',
+            sessionId,
+          }) as unknown as Promise<{ success?: boolean }>,
+        800,
+        undefined,
+      );
+      if (injected?.success) return;
+    }
+
     const opened = chrome.runtime.sendMessage({
       type: 'OPEN_CHAT_SESSION',
       sessionId,
     }) as unknown as Promise<void> | void;
     void Promise.resolve(opened).catch(() => {
-      // The inline popup transcript is the fallback when a chat tab
-      // cannot be opened (for example from a restricted context).
+      // The popup transcript remains visible when neither surface can
+      // be opened (for example from a restricted context).
     });
   };
 
@@ -1817,12 +1840,17 @@ export function Popup() {
       client.updateAIConfig(resolveRequestConfig(reduxAIConfig));
 
       // Try to send the message using the client (which handles online/offline)
-      const response = await client.sendMessage(
-        fullInput,
-        freshContext ?? undefined,
-        currentSessionId,
-        undefined,
-        conversationHistory,
+      const response = await withFallback<ApiResponse<Message>>(
+        () =>
+          client.sendMessage(
+            fullInput,
+            freshContext ?? undefined,
+            currentSessionId,
+            undefined,
+            conversationHistory,
+          ),
+        30000,
+        { success: false, error: 'AI request timed out. Try again.' },
       );
 
       if (response && response.success && response.data) {
@@ -1830,7 +1858,7 @@ export function Popup() {
 
         // Save to local IndexedDB to ensure persistence
         await saveCurrentChatToDB([...messages, userMessage, response.data]);
-        showChatTab(currentSessionId);
+        await showChatResult(currentSessionId);
       } else {
         // Handle error response
         console.error('Message failed:', response?.error || 'Unknown error');
@@ -1844,7 +1872,7 @@ export function Popup() {
         };
         dispatch(addMessage(errorMessage));
         await saveCurrentChatToDB([...messages, userMessage, errorMessage]);
-        showChatTab(currentSessionId);
+        await showChatResult(currentSessionId);
       }
     } catch (error) {
       console.error('Error sending message:', error);
@@ -1858,7 +1886,7 @@ export function Popup() {
       };
       dispatch(addMessage(errorMessage));
       await saveCurrentChatToDB([...messages, userMessage, errorMessage]);
-      showChatTab(currentSessionId);
+      await showChatResult(currentSessionId);
     } finally {
       dispatch(setLoading(false));
     }

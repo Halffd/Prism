@@ -15,7 +15,12 @@ import {
   updateChatSessionMeta,
   deleteChatSession,
 } from '@prism/shared-db';
-import type { Message, AIConfig, SessionContextItem } from '@prism/shared-types';
+import type {
+  ApiResponse,
+  Message,
+  AIConfig,
+  SessionContextItem,
+} from '@prism/shared-types';
 import {
   setMessages,
   addMessage,
@@ -62,6 +67,7 @@ import {
   type ChatTabState,
 } from './chat-tabs';
 import { getOfflineModels } from '../popup/model-cache';
+import { withFallback } from '../shared/async';
 import { assembleContext } from '@prism/context-manager';
 import { CharacterSelector } from '../components/CharacterSelector';
 import { PersonaSelector } from '../components/PersonaSelector';
@@ -1141,13 +1147,18 @@ export function ChatPage() {
         const enhancedInput = searchContext ? input + searchContext : input;
 
         // Single character send flow (original behavior)
-        const response = await client.sendMessage(
-          enhancedInput,
-          {
-            ...(reduxContext ?? { type: 'page' as const }),
-            systemPrompt,
-          },
-          currentSessionId,
+        const response = await withFallback<ApiResponse<Message>>(
+          () =>
+            client.sendMessage(
+              enhancedInput,
+              {
+                ...(reduxContext ?? { type: 'page' as const }),
+                systemPrompt,
+              },
+              currentSessionId,
+            ),
+          30000,
+          { success: false, error: 'AI request timed out. Try again.' },
         );
 
         if (response.success && response.data) {
@@ -1158,6 +1169,15 @@ export function ChatPage() {
           if (reduxAIConfig.provider !== selectedProvider) {
             client.updateAIConfig(reduxAIConfig);
           }
+        } else {
+          const errorMessage: Message = {
+            id: `error_${Date.now()}`,
+            role: 'assistant',
+            content: `Error: ${response?.error || 'Failed to get response from AI'}`,
+            timestamp: Date.now(),
+          };
+          dispatch(addMessage(errorMessage));
+          await saveCurrentChatToDB([...messages, userMessage, errorMessage]);
         }
       }
     } catch (error) {

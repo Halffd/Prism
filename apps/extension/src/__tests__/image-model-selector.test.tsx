@@ -22,7 +22,9 @@ describe('ImageGenerationSection model picker', () => {
     );
     expect(groups).toContain('Free models');
     expect(groups).toContain('Pro-only models');
-    expect(screen.getByRole('option', { name: 'FLUX.1 dev' })).toBeTruthy();
+    expect(
+      screen.getByRole('option', { name: 'FLUX.1 dev — pro-only' }),
+    ).toBeTruthy();
     expect(screen.getByText(/Pro-only: this model needs access/)).toBeTruthy();
   });
 
@@ -35,5 +37,17 @@ describe('ImageGenerationSection model picker', () => {
     );
 
     expect(screen.getByText(/Free: this model works/)).toBeTruthy();
+  });
+
+  it('keeps the tier visible after an image is generated', () => {
+    render(
+      <ImageGenerationSection
+        {...props}
+        generatedImage="data:image/png;base64,AA"
+      />,
+    );
+
+    expect(screen.getByText(/FLUX\.1 dev — pro-only/)).toBeTruthy();
+    expect(screen.getByText(/needs image-provider access/)).toBeTruthy();
   });
 });

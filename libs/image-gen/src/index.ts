@@ -65,6 +65,11 @@ export function imageModelAccess(id: string): ImageModelAccess | undefined {
   return IMAGE_MODEL_OPTIONS.find((model) => model.id === id)?.access;
 }
 
+/** Option text that shows the access tier without opening a separate panel. */
+export function imageModelOptionLabel(model: ImageModelOption): string {
+  return `${model.label} — ${model.access}`;
+}
+
 export class ImageGenerationService {
   private hf: HfInference;
   private config: ImageGenerationConfig;

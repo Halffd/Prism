@@ -11,6 +11,7 @@ import {
   attachShadowToElement,
   createButton,
   hasShadowRoot,
+  getShadowRoot,
   forgetShadowRoot,
 } from './iframe-manager';
 import { showToast, createFloatingButton } from './ui-controls';
@@ -181,7 +182,7 @@ chrome.runtime.onMessage.addListener(
       if (!isTopFrame) {
         return false;
       }
-      injectChatPopup();
+      injectChatPopup(request.sessionId);
       sendResponse({ success: true });
       return true;
     }
@@ -944,15 +945,31 @@ function injectFloatingButton() {
 }
 
 // Function to inject the chat popup iframe using shadow DOM
-function injectChatPopup() {
+function injectChatPopup(sessionId?: string) {
   if (!isTopFrame) {
     return;
   }
+
+  // A popup send hands the active session to the in-page iframe so the
+  // transcript the user just created is the one that opens.
+  const chatUrl = sessionId
+    ? chrome.runtime.getURL(
+        `chat.html?session=${encodeURIComponent(sessionId)}`,
+      )
+    : chrome.runtime.getURL('chat.html');
 
   // Check if popup already exists to avoid duplicates. The iframe lives
   // inside a closed shadow root, so the extension checks its own registry
   // rather than querying the document.
   if (hasShadowRoot(CHAT_POPUP_CONTAINER_ID)) {
+    const existingIframe = getShadowRoot(CHAT_POPUP_CONTAINER_ID)?.getElementById(
+      CHAT_IFRAME_ID,
+    ) as HTMLIFrameElement | null;
+    if (existingIframe) {
+      existingIframe.src = chatUrl;
+      existingIframe.onload = () => existingIframe.focus();
+      existingIframe.focus();
+    }
     return;
   }
 
@@ -979,7 +996,7 @@ function injectChatPopup() {
 
   // Create the iframe
   const iframe = createIframe({
-    src: chrome.runtime.getURL('chat.html'), // Points to your React chat page
+    src: chatUrl, // Points to the React chat page for this session
     id: CHAT_IFRAME_ID,
     style: `
       position: fixed;

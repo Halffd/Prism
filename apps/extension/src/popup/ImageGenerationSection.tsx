@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   IMAGE_MODEL_OPTIONS,
+  imageModelOptionLabel,
   imageModelsForAccess,
   type ImageModelAccess,
 } from '@prism/image-gen';
@@ -31,10 +32,20 @@ export const ImageGenerationSection: React.FC<ImageGenerationSectionProps> = ({
   isGeneratingImage,
   imageGenerationApiKey
 }) => {
+  const selectedModel =
+    IMAGE_MODEL_OPTIONS.find((model) => model.id === imageGenerationModel) ??
+    IMAGE_MODEL_OPTIONS[0];
+
   if (generatedImage) {
     return (
       <div className="image-generation-result">
         <h3>Generated Image</h3>
+        <p className="image-result-model">
+          {imageModelOptionLabel(selectedModel)} ·{' '}
+          {selectedModel.access === 'pro-only'
+            ? 'needs image-provider access'
+            : 'works with a standard provider token'}
+        </p>
         <img src={generatedImage} alt="Generated" style={{ maxWidth: '100%', borderRadius: '8px' }} />
         <div className="image-actions">
           <button
@@ -61,10 +72,6 @@ export const ImageGenerationSection: React.FC<ImageGenerationSectionProps> = ({
       </div>
     );
   }
-
-  const selectedModel =
-    IMAGE_MODEL_OPTIONS.find((model) => model.id === imageGenerationModel) ??
-    IMAGE_MODEL_OPTIONS[0];
 
   return (
     <div className="image-generation-section">
@@ -98,7 +105,7 @@ export const ImageGenerationSection: React.FC<ImageGenerationSectionProps> = ({
             <optgroup key={access} label={ACCESS_LABEL[access]}>
               {imageModelsForAccess(access).map((model) => (
                 <option key={model.id} value={model.id}>
-                  {model.label}
+                  {imageModelOptionLabel(model)}
                 </option>
               ))}
             </optgroup>

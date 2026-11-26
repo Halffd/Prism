@@ -431,6 +431,13 @@
     margin-bottom: var(--spacing-md);
   }
 
+  .image-result-model {
+    margin: 0 0 var(--spacing-md);
+    color: var(--on-surface-variant);
+    font-size: var(--font-sm);
+    text-align: center;
+  }
+
   img {
     max-width: 100%;
     border-radius: var(--radius-lg);

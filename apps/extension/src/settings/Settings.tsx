@@ -13,6 +13,7 @@ import {
 import { UnifiedAIClient } from '@prism/api-client';
 import {
   IMAGE_MODEL_OPTIONS,
+  imageModelOptionLabel,
   imageModelsForAccess,
   type ImageModelAccess,
 } from '@prism/image-gen';
@@ -2307,7 +2308,7 @@ export function Settings({ onClose }: SettingsProps) {
                 <optgroup key={access} label={IMAGE_ACCESS_LABEL[access]}>
                   {imageModelsForAccess(access).map((model) => (
                     <option key={model.id} value={model.id}>
-                      {model.label}
+                      {imageModelOptionLabel(model)}
                     </option>
                   ))}
                 </optgroup>
