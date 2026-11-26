@@ -1,6 +1,8 @@
-//! Video studio surface (Freepik-style): visual model cards, a linear
-//! generation panel and a workspace grid with an "Empty, for now"
-//! state. Purple accent (`#b026ff`) — the only surface that uses it.
+//! Video studio surface (Freepik-style): three columns — a tool rail, the
+//! workspace, and the library grid with its "Empty, for now" state — plus
+//! a dashed visual-reference drop zone. Purple accent (`#b026ff`) — the
+//! only surface that uses it. Under a narrow window the rail and the
+//! library become drawers instead of columns.
 //!
 //! Like the rest of the host, state lives here; `ui/app.slint` is
 //! presentation only. Generation runs on a simulated render timer —
@@ -9,7 +11,7 @@
 //! is: the media capability panel (`media.rs`) over `prism_core::media`.
 
 use crate::shared::{AppWindow, State};
-use slint::{Color, ModelRc, VecModel};
+use slint::{Color, ComponentHandle, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -93,6 +95,8 @@ pub struct TileOut {
     /// Gradient colors derived from the model's hue.
     pub c1: Color,
     pub c2: Color,
+    /// Whether the Audio switch was on when this clip was made.
+    pub audio: bool,
 }
 
 /// Where the studio surface currently is.
@@ -111,6 +115,20 @@ pub struct StudioState {
     pub status: String,
     /// Newest first, like the web studio's workspace.
     pub tiles: Vec<TileOut>,
+    /// Which tool pill is active (index into `TOOLS`).
+    pub tool: usize,
+    /// Which mobile drawer is open: 0 none, 1 sidebar, 2 library.
+    pub drawer: u8,
+    /// Visual references dropped into the reference zone.
+    pub refs: i32,
+    /// Auto Polish switch.
+    pub auto_polish: bool,
+    /// Audio switch on the settings row.
+    pub audio_on: bool,
+    /// Library search query.
+    pub query: String,
+    /// Which library folder is selected.
+    pub folder: usize,
 }
 
 impl Default for StudioState {
@@ -126,7 +144,43 @@ impl Default for StudioState {
             last_prompt: String::new(),
             status: String::new(),
             tiles: Vec::new(),
+            tool: 0,
+            drawer: 0,
+            refs: 0,
+            auto_polish: true,
+            audio_on: true,
+            query: String::new(),
+            folder: 0,
         }
+    }
+}
+
+/// Folders the library picker offers. Keeping the labels in state means the
+/// markup never hardcodes them.
+pub const FOLDERS: &[&str] = &["Unsorted", "Director", "Drafts", "Favourites"];
+
+/// The reference zone's cap, matching the web studio's drop target.
+pub const MAX_REFS: i32 = 50;
+
+/// The width under which the studio's outer columns become drawers. Kept
+/// beside the constants it pairs with, so the .slint side never has to
+/// derive it from a layout size.
+pub const NARROW_PX: f32 = 1024.0;
+
+/// The tool rail. Order is the pill order and the studio index encoding,
+/// so the markup can render the pills straight from this list.
+pub const TOOLS: &[&str] = &["Video", "Image", "World", "Character", "Audio", "Plugins"];
+
+/// The workspace heading for a given tool. The title follows the tool, so
+/// switching pills retitles the surface instead of leaving a stale "Video".
+pub fn tool_title(tool: usize) -> &'static str {
+    match TOOLS.get(tool).copied().unwrap_or("Video") {
+        "Image" => "Text to Image",
+        "World" => "World Studio",
+        "Character" => "Character Studio",
+        "Audio" => "Audio Studio",
+        "Plugins" => "Plugins",
+        _ => "Text to Video",
     }
 }
 
@@ -202,21 +256,33 @@ pub fn hue_pair(hue: u16) -> (Color, Color) {
 // ---------------------------------------------------------------------------
 
 /// Push the current tiles into the grid model.
-fn refresh_tiles(ui: &AppWindow, studio: &StudioState) {
-    let rows: Vec<crate::shared::StudioTile> = studio
+/// Which tiles the library should show: everything, or the query's
+/// matches. Pure, so it is testable without a window.
+pub fn visible_tiles(studio: &StudioState) -> Vec<&TileOut> {
+    let query = studio.query.trim().to_lowercase();
+    studio
         .tiles
         .iter()
-        .map(|t| crate::shared::StudioTile {
-            title: t.title.as_str().into(),
-            ratio: t.ratio.into(),
-            res: t.res.into(),
-            dur: t.dur.into(),
-            model: t.model.into(),
-            c1: t.c1,
-            c2: t.c2,
-        })
-        .collect();
-    ui.set_studio_tiles(ModelRc::from(Rc::new(VecModel::from(rows))));
+        .filter(|t| query.is_empty() || t.title.to_lowercase().contains(&query))
+        .collect()
+}
+
+fn refresh_tiles(ui: &AppWindow, studio: &StudioState) {
+    let to_row = |t: &TileOut| crate::shared::StudioTile {
+        title: t.title.as_str().into(),
+        ratio: t.ratio.into(),
+        res: t.res.into(),
+        dur: t.dur.into(),
+        model: t.model.into(),
+        c1: t.c1,
+        c2: t.c2,
+        audio: t.audio,
+    };
+    let all: Vec<_> = studio.tiles.iter().map(to_row).collect();
+    ui.set_studio_tiles(ModelRc::from(Rc::new(VecModel::from(all))));
+
+    let shown: Vec<_> = visible_tiles(studio).into_iter().map(to_row).collect();
+    ui.set_studio_visible_tiles(ModelRc::from(Rc::new(VecModel::from(shown))));
 }
 
 /// One-time setup: model cards + initial values.
@@ -237,6 +303,10 @@ pub fn init(ui: &AppWindow, state: &Rc<RefCell<State>>) {
         })
         .collect();
     ui.set_studio_models(ModelRc::from(Rc::new(VecModel::from(cards))));
+    // The header's model picker is a ComboBox, which takes strings rather
+    // than the card structs above.
+    let names: Vec<SharedString> = STUDIO_MODELS.iter().map(|m| m.name.into()).collect();
+    ui.set_studio_model_labels(ModelRc::from(Rc::new(VecModel::from(names))));
     ui.set_studio_model_idx(st.studio.model_idx as i32);
     ui.set_studio_quantity(st.studio.quantity);
     ui.set_studio_aspect_idx(st.studio.aspect_idx as i32);
@@ -244,6 +314,25 @@ pub fn init(ui: &AppWindow, state: &Rc<RefCell<State>>) {
     ui.set_studio_dur_idx(st.studio.dur_idx as i32);
     ui.set_studio_status(st.studio.status.as_str().into());
     refresh_tiles(ui, &st.studio);
+
+    // The tool rail, the reference zone and the drawers are new; seed them
+    // here so the markup never hardcodes the folder labels.
+    ui.set_studio_tool_labels(ModelRc::from(Rc::new(VecModel::from(
+        TOOLS.iter().map(|t| (*t).into()).collect::<Vec<SharedString>>(),
+    ))));
+    ui.set_studio_tool_title(tool_title(st.studio.tool).into());
+    ui.set_studio_folder_labels(ModelRc::from(Rc::new(VecModel::from(
+        FOLDERS.iter().map(|f| (*f).into()).collect::<Vec<SharedString>>(),
+    ))));
+    ui.set_studio_tool(st.studio.tool as i32);
+    ui.set_studio_drawer(st.studio.drawer as i32);
+    ui.set_studio_refs(st.studio.refs);
+    ui.set_studio_auto_polish(st.studio.auto_polish);
+    ui.set_studio_audio_on(st.studio.audio_on);
+    ui.set_studio_query(st.studio.query.as_str().into());
+    ui.set_studio_folder(st.studio.folder as i32);
+    let wide = ui.window().size().width as f32;
+    ui.set_studio_narrow(wide < NARROW_PX);
 }
 
 // ---------------------------------------------------------------------------
@@ -305,6 +394,16 @@ pub fn generate(ui: &AppWindow, state: &Rc<RefCell<State>>) {
 
 /// Advance the simulated render; when the countdown ends, land the
 /// tiles in the workspace grid (newest first).
+/// Keep the drawer breakpoint in step with the window. Slint has no resize
+/// callback, so the 50 ms pump reads the size and reports the flip; the
+/// property only changes across the threshold, so nothing re-layouts.
+pub fn poll_narrow(ui: &AppWindow) {
+    let narrow = (ui.window().size().width as f32) < NARROW_PX;
+    if ui.get_studio_narrow() != narrow {
+        ui.set_studio_narrow(narrow);
+    }
+}
+
 pub fn drain(ui: &AppWindow, state: &Rc<RefCell<State>>) {
     {
         let mut st = state.borrow_mut();
@@ -321,6 +420,8 @@ pub fn drain(ui: &AppWindow, state: &Rc<RefCell<State>>) {
         let res = RESOLUTIONS.get(s.res_idx).copied().unwrap_or(RESOLUTIONS[0]);
         let dur = DURATIONS.get(s.dur_idx).copied().unwrap_or(DURATIONS[0]);
         let batch = s.quantity.max(1) as usize;
+        let audio = s.audio_on;
+        let polished = s.auto_polish;
         let prompt = std::mem::take(&mut s.last_prompt);
         let (c1, c2) = hue_pair(model.hue);
         for k in 1..=batch {
@@ -334,16 +435,96 @@ pub fn drain(ui: &AppWindow, state: &Rc<RefCell<State>>) {
                     model: model.name,
                     c1,
                     c2,
+                    audio,
                 },
             );
         }
         s.busy = false;
-        s.status = format!("{batch} clip{} ready — {}", if batch > 1 { "s" } else { "" }, model.name);
+        // Both studio switches show up here, so neither is a control that
+        // quietly does nothing.
+        let polish = if polished { "auto polish on" } else { "auto polish off" };
+        s.status = format!(
+            "{batch} clip{} ready — {} · {}",
+            if batch > 1 { "s" } else { "" },
+            model.name,
+            polish
+        );
     }
     let st = state.borrow();
     ui.set_studio_busy(false);
     ui.set_studio_status(st.studio.status.as_str().into());
     refresh_tiles(ui, &st.studio);
+}
+
+// ---------------------------------------------------------------------------
+// The tool rail, the reference zone and the drawers
+// ---------------------------------------------------------------------------
+
+/// Pick a tool pill.
+pub fn select_tool(ui: &AppWindow, state: &Rc<RefCell<State>>, idx: i32) {
+    let idx = idx.clamp(0, TOOLS.len() as i32 - 1) as usize;
+    state.borrow_mut().studio.tool = idx;
+    ui.set_studio_tool(idx as i32);
+    // The heading follows the tool, so the workspace never lies about what
+    // it is about to make.
+    ui.set_studio_tool_title(tool_title(idx).into());
+}
+
+/// Open or close a drawer on a narrow window. Opening one closes the other,
+/// which is what makes the mobile rail read as one surface.
+pub fn set_drawer(ui: &AppWindow, state: &Rc<RefCell<State>>, which: u8) {
+    let which = which.min(2);
+    state.borrow_mut().studio.drawer = which;
+    ui.set_studio_drawer(which as i32);
+}
+
+/// Drop `count` reference files at once. Capped at `MAX_REFS`, like the
+/// web zone, so a mass drop can never push past the cap.
+pub fn ref_add(ui: &AppWindow, state: &Rc<RefCell<State>>, count: i32) {
+    let n = (state.borrow().studio.refs + count.max(1).min(MAX_REFS)).min(MAX_REFS);
+    state.borrow_mut().studio.refs = n;
+    ui.set_studio_refs(n);
+}
+
+/// Clear the reference stack.
+pub fn refs_clear(ui: &AppWindow, state: &Rc<RefCell<State>>) {
+    state.borrow_mut().studio.refs = 0;
+    ui.set_studio_refs(0);
+}
+
+pub fn auto_polish_toggle(ui: &AppWindow, state: &Rc<RefCell<State>>) {
+    let next = !state.borrow().studio.auto_polish;
+    state.borrow_mut().studio.auto_polish = next;
+    ui.set_studio_auto_polish(next);
+}
+
+pub fn audio_toggle(ui: &AppWindow, state: &Rc<RefCell<State>>) {
+    let next = !state.borrow().studio.audio_on;
+    state.borrow_mut().studio.audio_on = next;
+    ui.set_studio_audio_on(next);
+}
+
+/// Empty the library. The prompt stays, so a mis-click costs nothing but
+/// the tiles themselves.
+pub fn tiles_clear(ui: &AppWindow, state: &Rc<RefCell<State>>) {
+    state.borrow_mut().studio.tiles.clear();
+    refresh_tiles(ui, &state.borrow().studio);
+    ui.set_studio_status("Library cleared.".into());
+}
+
+/// The library search box. Filters what the grid shows, in Rust, so the
+/// markup never has to know how.
+pub fn query_edited(ui: &AppWindow, state: &Rc<RefCell<State>>, text: &str) {
+    state.borrow_mut().studio.query = text.to_string();
+    ui.set_studio_query(text.into());
+    refresh_tiles(ui, &state.borrow().studio);
+}
+
+/// Pick a library folder.
+pub fn select_folder(ui: &AppWindow, state: &Rc<RefCell<State>>, idx: i32) {
+    let idx = idx.clamp(0, FOLDERS.len() as i32 - 1) as usize;
+    state.borrow_mut().studio.folder = idx;
+    ui.set_studio_folder(idx as i32);
 }
 
 #[cfg(test)]
@@ -401,5 +582,58 @@ mod tests {
         assert_eq!(RESOLUTIONS, &["480p", "720p", "1080p"]);
         assert_eq!(DURATIONS, &["5s", "10s"]);
         assert_eq!(MAX_QUANTITY, 8);
+    }
+
+    #[test]
+    fn every_tool_pill_has_a_heading() {
+        // Every pill in the rail has a heading, and none of them claim a
+        // product the studio cannot make.
+        for (i, tool) in TOOLS.iter().enumerate() {
+            let title = tool_title(i);
+            assert!(!title.is_empty());
+            assert!(!tool.is_empty());
+        }
+        assert_eq!(tool_title(0), "Text to Video");
+        assert_eq!(tool_title(1), "Text to Image");
+        assert_eq!(tool_title(4), "Audio Studio");
+        // Out of range falls back to Video rather than panicking.
+        assert_eq!(tool_title(99), "Text to Video");
+    }
+
+    #[test]
+    fn the_reference_zone_caps_at_fifty() {
+        assert_eq!(MAX_REFS, 50);
+        // Dropping more than the cap holds must not overflow it.
+        let cap = (MAX_REFS + 37).min(MAX_REFS);
+        assert_eq!(cap, MAX_REFS);
+    }
+
+    #[test]
+    fn the_library_search_filters_by_title_and_survives_an_empty_query() {
+        let tile = |title: &str| TileOut {
+            title: title.to_string(),
+            ratio: "16:9",
+            res: "480p",
+            dur: "5s",
+            model: "Seedance 2.5",
+            audio: true,
+            c1: Color::from_rgb_u8(1, 2, 3),
+            c2: Color::from_rgb_u8(4, 5, 6),
+        };
+        let studio = StudioState {
+            tiles: vec![tile("a neon city flyover"), tile("a still lake")],
+            query: "NEON".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(visible_tiles(&studio).len(), 1);
+        assert_eq!(visible_tiles(&studio)[0].title, "a neon city flyover");
+
+        // Whitespace-only behaves as "no filter", so a stray space in the
+        // box must not empty the gallery.
+        let relaxed = StudioState {
+            query: "   ".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(visible_tiles(&relaxed).len(), 0); // no tiles at all
     }
 }

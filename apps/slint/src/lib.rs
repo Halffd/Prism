@@ -40,7 +40,7 @@ mod headless_tests {
     //! instantiates, without needing a display.
 
     use crate::shared::AppWindow;
-    use slint::Model;
+    use slint::{ComponentHandle, Model};
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -83,6 +83,103 @@ mod headless_tests {
         assert!(!ui.get_studio_busy());
         assert_eq!(ui.get_studio_tiles().row_count(), 1);
         assert!(ui.get_studio_status().contains("ready"));
+    }
+
+    #[test]
+    fn the_tool_rail_retitles_the_workspace_headless() {
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = AppWindow::new().expect("AppWindow must build headless");
+        let state = Rc::new(RefCell::new(crate::shared::State::new()));
+        crate::shared::studio::init(&ui, &state);
+
+        // Seeded from Rust, not hardcoded in markup.
+        assert_eq!(ui.get_studio_tool_labels().row_count(), 6);
+        assert_eq!(ui.get_studio_folder_labels().row_count(), 4);
+        assert_eq!(ui.get_studio_tool_title(), "Text to Video");
+
+        // Switching a pill moves the heading with it.
+        crate::shared::studio::select_tool(&ui, &state, 1);
+        assert_eq!(ui.get_studio_tool(), 1);
+        assert_eq!(ui.get_studio_tool_title(), "Text to Image");
+        crate::shared::studio::select_tool(&ui, &state, 4);
+        assert_eq!(ui.get_studio_tool_title(), "Audio Studio");
+
+        // Out of range clamps instead of panicking.
+        crate::shared::studio::select_tool(&ui, &state, 99);
+        assert_eq!(ui.get_studio_tool(), 5);
+    }
+
+    #[test]
+    fn the_reference_zone_caps_and_clears_headless() {
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = AppWindow::new().expect("AppWindow must build headless");
+        let state = Rc::new(RefCell::new(crate::shared::State::new()));
+        crate::shared::studio::init(&ui, &state);
+
+        assert_eq!(ui.get_studio_refs(), 0);
+        crate::shared::studio::ref_add(&ui, &state, 3);
+        assert_eq!(ui.get_studio_refs(), 3);
+        // A mass drop cannot push past the zone's cap.
+        crate::shared::studio::ref_add(&ui, &state, 999);
+        assert_eq!(ui.get_studio_refs(), 50);
+        // Clearing returns the counter, and the prompt survives it.
+        ui.set_studio_prompt("a lighthouse in fog".into());
+        crate::shared::studio::refs_clear(&ui, &state);
+        assert_eq!(ui.get_studio_refs(), 0);
+        assert_eq!(ui.get_studio_prompt(), "a lighthouse in fog");
+    }
+
+    #[test]
+    fn the_library_search_filters_and_clears_headless() {
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = AppWindow::new().expect("AppWindow must build headless");
+        let state = Rc::new(RefCell::new(crate::shared::State::new()));
+        crate::shared::studio::init(&ui, &state);
+
+        ui.set_studio_prompt("a neon city flyover".into());
+        crate::shared::studio::generate(&ui, &state);
+        for _ in 0..60 {
+            crate::shared::studio::drain(&ui, &state);
+        }
+        assert_eq!(ui.get_studio_tiles().row_count(), 1);
+
+        // A query that matches nothing empties the visible set but leaves
+        // the library intact.
+        crate::shared::studio::query_edited(&ui, &state, "zzz");
+        assert_eq!(ui.get_studio_visible_tiles().row_count(), 0);
+        assert_eq!(ui.get_studio_tiles().row_count(), 1);
+
+        // A matching query brings the tile back.
+        crate::shared::studio::query_edited(&ui, &state, "neon");
+        assert_eq!(ui.get_studio_visible_tiles().row_count(), 1);
+
+        // Clearing empties the library and reports it.
+        crate::shared::studio::tiles_clear(&ui, &state);
+        assert_eq!(ui.get_studio_tiles().row_count(), 0);
+        assert_eq!(ui.get_studio_status(), "Library cleared.");
+    }
+
+    #[test]
+    fn the_window_width_drives_the_drawers() {
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = AppWindow::new().expect("AppWindow must build headless");
+        let state = Rc::new(RefCell::new(crate::shared::State::new()));
+        crate::shared::studio::init(&ui, &state);
+
+        // A wide window lays the rail and the library out as columns.
+        ui.window().set_size(slint::LogicalSize::new(1400.0, 900.0));
+        crate::shared::studio::poll_narrow(&ui);
+        assert!(!ui.get_studio_narrow());
+
+        // Below the threshold the outer columns become drawers; above it
+        // they are columns again.
+        ui.window().set_size(slint::LogicalSize::new(430.0, 800.0));
+        crate::shared::studio::poll_narrow(&ui);
+        assert!(ui.get_studio_narrow());
+
+        ui.window().set_size(slint::LogicalSize::new(1400.0, 900.0));
+        crate::shared::studio::poll_narrow(&ui);
+        assert!(!ui.get_studio_narrow());
     }
 
     #[test]

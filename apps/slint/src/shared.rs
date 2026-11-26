@@ -3934,6 +3934,79 @@ pub fn run_ui() {
             studio::select_dur(&ui, &state_c, i);
         });
     }
+    // ---- studio: tool rail, reference zone, drawers, library search ----
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_studio_tiles_clear(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            studio::tiles_clear(&ui, &state_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_studio_select_tool(move |i| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            studio::select_tool(&ui, &state_c, i);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_studio_set_drawer(move |which| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            studio::set_drawer(&ui, &state_c, which as u8);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_studio_ref_add(move |count| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            studio::ref_add(&ui, &state_c, count);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_studio_refs_clear(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            studio::refs_clear(&ui, &state_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_studio_auto_polish_toggle(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            studio::auto_polish_toggle(&ui, &state_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_studio_audio_toggle(move || {
+            let Some(ui) = ui_w.upgrade() else { return };
+            studio::audio_toggle(&ui, &state_c);
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_studio_query_edited(move |text| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            studio::query_edited(&ui, &state_c, text.as_str());
+        });
+    }
+    {
+        let ui_w = ui.as_weak();
+        let state_c = state.clone();
+        ui.on_studio_select_folder(move |i| {
+            let Some(ui) = ui_w.upgrade() else { return };
+            studio::select_folder(&ui, &state_c, i);
+        });
+    }
     // ---- image studio callbacks ----
     {
         let ui_w = ui.as_weak();
@@ -4165,6 +4238,7 @@ pub fn run_ui() {
                 drain_research(&ui, &state_c);
                 media::drain(&ui, &state_c);
                 studio::drain(&ui, &state_c);
+                studio::poll_narrow(&ui);
                 image::drain(&ui, &state_c);
                 graph::drain(&ui, &state_c);
             },
