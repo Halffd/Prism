@@ -26,7 +26,11 @@ import type {
 } from '@prism/shared-types';
 import { matchSnippet } from '@prism/shared-types';
 import { UnifiedAIClient, networkStatusService } from '@prism/api-client';
-import { ImageGenerationService } from '@prism/image-gen';
+import {
+  DEFAULT_IMAGE_GENERATION_MODEL,
+  ImageGenerationService,
+  normalizeImageGenerationModel,
+} from '@prism/image-gen';
 import type { Message, ContextData, AIConfig } from '@prism/shared-types';
 import {
   addMessage,
@@ -249,7 +253,7 @@ export function Popup() {
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [isGeneratingImage, setIsGeneratingImage] = useState<boolean>(false);
   const [imageGenerationModel, setImageGenerationModel] = useState<string>(
-    'stabilityai/stable-diffusion-2-1',
+    DEFAULT_IMAGE_GENERATION_MODEL,
   );
   const [imageGenerationApiKey, setImageGenerationApiKey] =
     useState<string>('');
@@ -1072,7 +1076,9 @@ export function Popup() {
         setImageGenerationApiKey(result.imageGenApiKey);
       }
       if (result.imageGenModel) {
-        setImageGenerationModel(result.imageGenModel);
+        setImageGenerationModel(
+          normalizeImageGenerationModel(result.imageGenModel),
+        );
       }
     });
   };

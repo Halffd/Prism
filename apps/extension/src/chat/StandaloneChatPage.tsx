@@ -6,7 +6,11 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { UnifiedAIClient } from '@prism/api-client';
 import type { ChatSession, PromptShortcut } from '@prism/shared-types';
-import { ImageGenerationService } from '@prism/image-gen';
+import {
+  DEFAULT_IMAGE_GENERATION_MODEL,
+  ImageGenerationService,
+  normalizeImageGenerationModel,
+} from '@prism/image-gen';
 import type {
   Message,
   ContextData,
@@ -108,7 +112,7 @@ export function StandaloneChatPage() {
   const [isGeneratingImage, setIsGeneratingImage] = useState<boolean>(false);
   void isGeneratingImage;
   const [imageGenerationModel, setImageGenerationModel] = useState<string>(
-    'stabilityai/stable-diffusion-2-1',
+    DEFAULT_IMAGE_GENERATION_MODEL,
   );
   const [imageGenerationApiKey, setImageGenerationApiKey] =
     useState<string>('');
@@ -709,7 +713,7 @@ export function StandaloneChatPage() {
       setImageGenerationApiKey(savedApiKey);
     }
     if (savedModel) {
-      setImageGenerationModel(savedModel);
+      setImageGenerationModel(normalizeImageGenerationModel(savedModel));
     }
   };
 

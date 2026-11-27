@@ -12,9 +12,11 @@ import {
 } from '@prism/shared-types';
 import { UnifiedAIClient } from '@prism/api-client';
 import {
+  DEFAULT_IMAGE_GENERATION_MODEL,
   IMAGE_MODEL_OPTIONS,
   imageModelOptionLabel,
   imageModelsForAccess,
+  normalizeImageGenerationModel,
   type ImageModelAccess,
 } from '@prism/image-gen';
 import { logger, type LogLevel } from '@prism/logging';
@@ -87,7 +89,7 @@ export function Settings({ onClose }: SettingsProps) {
   const [imageGenerationApiKey, setImageGenerationApiKey] =
     useState<string>('');
   const [imageGenerationModel, setImageGenerationModel] = useState<string>(
-    'stabilityai/stable-diffusion-2-1',
+    DEFAULT_IMAGE_GENERATION_MODEL,
   );
   const [syncStatus, setSyncStatus] = useState<string>('');
   const syncFileRef = useRef<HTMLInputElement>(null);
@@ -354,7 +356,9 @@ export function Settings({ onClose }: SettingsProps) {
       const imageGenConfig = await getImageGenConfig();
       if (imageGenConfig) {
         setImageGenerationApiKey(imageGenConfig.apiKey);
-        setImageGenerationModel(imageGenConfig.model);
+        setImageGenerationModel(
+          normalizeImageGenerationModel(imageGenConfig.model),
+        );
       } else {
         // Fallback to chrome.storage
         const result = await chrome.storage.local.get([
@@ -365,7 +369,9 @@ export function Settings({ onClose }: SettingsProps) {
           setImageGenerationApiKey(result.imageGenApiKey);
         }
         if (result.imageGenModel) {
-          setImageGenerationModel(result.imageGenModel);
+          setImageGenerationModel(
+            normalizeImageGenerationModel(result.imageGenModel),
+          );
         }
       }
 

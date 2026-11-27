@@ -16,7 +16,13 @@ import {
   savePromptShortcut,
   getPromptShortcuts,
 } from '@prism/shared-db';
-import { ImageGenerationService } from '@prism/image-gen';
+import {
+  DEFAULT_IMAGE_GENERATION_MODEL,
+  ImageGenerationService,
+  imageModelOptionLabel,
+  imageModelsForAccess,
+  normalizeImageGenerationModel,
+} from '@prism/image-gen';
 import type { Message, ContextData, AIConfig } from '@prism/shared-types';
 import {
   setMessages,
@@ -49,7 +55,7 @@ export default function ChatPage() {
   const [imageGenerationPrompt, setImageGenerationPrompt] = useState<string>('');
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [isGeneratingImage, setIsGeneratingImage] = useState<boolean>(false);
-  const [imageGenerationModel, setImageGenerationModel] = useState<string>('stabilityai/stable-diffusion-2-1');
+  const [imageGenerationModel, setImageGenerationModel] = useState<string>(DEFAULT_IMAGE_GENERATION_MODEL);
   const [imageGenerationApiKey, setImageGenerationApiKey] = useState<string>('');
 
   useEffect(() => {
@@ -136,7 +142,7 @@ export default function ChatPage() {
     const savedApiKey = localStorage.getItem('imageGenApiKey');
     const savedModel = localStorage.getItem('imageGenModel');
     if (savedApiKey) setImageGenerationApiKey(savedApiKey);
-    if (savedModel) setImageGenerationModel(savedModel);
+    if (savedModel) setImageGenerationModel(normalizeImageGenerationModel(savedModel));
   }, []);
 
   const generateImage = async () => {
@@ -511,11 +517,15 @@ export default function ChatPage() {
             onChange={(e) => setImageGenerationModel(e.target.value)}
             className="w-full p-2 border rounded"
           >
-            <option value="stabilityai/stable-diffusion-2-1">Stable Diffusion 2.1</option>
-            <option value="runwayml/stable-diffusion-v1-5">Stable Diffusion 1.5</option>
-            <option value="stabilityai/stable-diffusion-xl-base-1.0">SDXL</option>
-            <option value="black-forest-labs/FLUX.1-schnell">FLUX Schnell</option>
-            <option value="black-forest-labs/FLUX.1-dev">FLUX Dev</option>
+            {(['free', 'pro-only'] as const).map((access) => (
+              <optgroup key={access} label={`${access} models`}>
+                {imageModelsForAccess(access).map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {imageModelOptionLabel(model)}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
           </select>
         </div>
       </div>

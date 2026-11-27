@@ -7,7 +7,11 @@ import type {
   VideoGenRequest,
   VideoGenResult,
 } from '@prism/shared-types';
-import { ImageGenerationService } from '@prism/image-gen';
+import {
+  DEFAULT_IMAGE_GENERATION_MODEL,
+  ImageGenerationService,
+  normalizeImageGenerationModel,
+} from '@prism/image-gen';
 
 /**
  * Media capabilities in the extension.
@@ -86,7 +90,7 @@ export function defaultMediaSettings(): MediaSettings {
     'image-gen': {
       provider: 'huggingface',
       apiKey: '',
-      model: 'stabilityai/stable-diffusion-2-1',
+      model: DEFAULT_IMAGE_GENERATION_MODEL,
     },
     inpaint: { provider: 'stability', apiKey: '', model: '' },
     'video-gen': { provider: 'runway', apiKey: '', model: '' },
@@ -185,7 +189,7 @@ export async function generateImage(
     throw new MediaCapabilityError('An API key is required for image generation.');
   }
   const service = new ImageGenerationService({
-    model: settings.model || 'stabilityai/stable-diffusion-2-1',
+    model: normalizeImageGenerationModel(settings.model),
     apiKey,
   });
   const result = await service.generateImage(trimmed);
