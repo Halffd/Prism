@@ -19,6 +19,24 @@ let client = new UnifiedAIClient({ aiConfig: defaultAIConfig });
 /** Single owner of the action badge for the whole service worker. */
 const badge = new BadgeController();
 
+// The side-panel API is not in the shared Chrome typings, so access it
+// through a narrowed runtime shape. A browser without it keeps the
+// in-page surface rather than failing to load the service worker.
+type SidePanelApi = {
+  setPanelBehavior: (behavior: {
+    openPanelOnActionClick: boolean;
+  }) => Promise<void> | void;
+};
+
+const sidePanel = (chrome as unknown as { sidePanel?: SidePanelApi }).sidePanel;
+if (sidePanel?.setPanelBehavior) {
+  void Promise.resolve(
+    sidePanel.setPanelBehavior({ openPanelOnActionClick: true }),
+  ).catch(() => {
+    /* a browser without side-panel support keeps the in-page path */
+  });
+}
+
 chrome.runtime.onMessage.addListener(
   (request: BackgroundRequest, sender, sendResponse): boolean | void => {
     if (request.type === 'SEND_MESSAGE') {

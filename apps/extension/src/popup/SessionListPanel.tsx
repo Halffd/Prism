@@ -25,13 +25,12 @@ interface SessionListPanelProps {
   onToggleArchive: (sessionId: string, archived: boolean) => void;
   onSetTags: (sessionId: string, tags: string[]) => void;
   onRefresh: () => void;
+  /** Open the session in the standalone chat page. */
+  onOpenPage?: (sessionId: string) => void;
 }
 
 /** Download a JSON document as a file. */
-function downloadJson(
-  data: unknown,
-  filename: string,
-): void {
+function downloadJson(data: unknown, filename: string): void {
   const blob = new Blob([JSON.stringify(data, null, 2)], {
     type: 'application/json',
   });
@@ -62,6 +61,7 @@ export function SessionListPanel({
   onToggleArchive,
   onSetTags,
   onRefresh,
+  onOpenPage,
 }: SessionListPanelProps): React.ReactElement {
   const [filters, setFilters] = useState<SessionFilters>(
     defaultSessionFilters(),
@@ -281,9 +281,7 @@ export function SessionListPanel({
                 <button
                   type="button"
                   onClick={() => onSelect(session.id)}
-                  className={
-                    session.id === currentSessionId ? 'active' : ''
-                  }
+                  className={session.id === currentSessionId ? 'active' : ''}
                   aria-label={`Open session ${session.title}`}
                 >
                   <span className="session-title">
@@ -340,9 +338,7 @@ export function SessionListPanel({
                   onClick={() => onToggleRead(session.id, unread)}
                   className="session-toggle-btn"
                   title={unread ? 'Mark as read' : 'Mark as unread'}
-                  aria-label={
-                    unread ? 'Mark as read' : 'Mark as unread'
-                  }
+                  aria-label={unread ? 'Mark as read' : 'Mark as unread'}
                 >
                   {unread ? '◉' : '○'}
                 </button>
@@ -357,6 +353,17 @@ export function SessionListPanel({
                 >
                   {archived ? '📥' : '📤'}
                 </button>
+                {onOpenPage && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenPage(session.id)}
+                    className="session-toggle-btn"
+                    title="Open session page"
+                    aria-label={`Open session page ${session.title}`}
+                  >
+                    ↗
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => onDelete(session.id)}

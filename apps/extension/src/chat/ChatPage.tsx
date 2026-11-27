@@ -68,6 +68,12 @@ import {
 } from './chat-tabs';
 import { getOfflineModels } from '../popup/model-cache';
 import { withFallback } from '../shared/async';
+import {
+  appendTranscripts,
+  readImageFilesAsDataUrls,
+  transcribeImageAttachments,
+} from './image-attachments';
+import { useAutoBackup } from './use-auto-backup';
 import { assembleContext } from '@prism/context-manager';
 import { CharacterSelector } from '../components/CharacterSelector';
 import { PersonaSelector } from '../components/PersonaSelector';
@@ -99,10 +105,7 @@ import {
   type ModeSession,
 } from './modes';
 import { BUILTIN_TOOLS } from '@prism/agent';
-import {
-  loadAgentConsole,
-  type SandboxPosture,
-} from './agentConsole';
+import { loadAgentConsole, type SandboxPosture } from './agentConsole';
 import type {
   WebSearchResultItem,
   DeepSearchPhase,
@@ -164,6 +167,8 @@ export function ChatPage() {
   const groupChatState = useSelector((state: RootState) => state.groupChat);
 
   const [input, setInput] = useState('');
+  const [uploadedImages, setUploadedImages] = useState<string[]>([]);
+  const [imageStatus, setImageStatus] = useState('');
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [showMenu, setShowMenu] = useState(false);
   const [showCharacterSelector, setShowCharacterSelector] = useState(false);
@@ -200,6 +205,7 @@ export function ChatPage() {
     ? BUILTIN_TOOLS.map((t) => t.name)
     : [];
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
+  const reasoningStorageKey = 'reasoningEnabled';
   const { agents: customAgents, activeAgentId } = useSelector(
     (state: RootState) => state.agents,
   );
@@ -249,6 +255,7 @@ export function ChatPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   // The agent console: the host's sandbox posture for the session. The
   // plan comes from the host that would run the commands (the Prism
@@ -323,6 +330,22 @@ export function ChatPage() {
       );
     });
   }, [selectedProvider, reduxAIConfig.model]);
+
+  // Reasoning (thinking mode) survives reloads: it is a user preference, not
+  // a per-render mode.
+  useEffect(() => {
+    chrome.storage.local.get([reasoningStorageKey], (result) => {
+      setThinkingEnabled(result[reasoningStorageKey] === true);
+    });
+  }, [reasoningStorageKey]);
+
+  useEffect(() => {
+    void chrome.storage.local.set({
+      [reasoningStorageKey]: thinkingEnabled,
+    });
+  }, [reasoningStorageKey, thinkingEnabled]);
+
+  useAutoBackup(`${currentSessionId}:${messages.length}`);
 
   useEffect(() => {
     scrollToBottom();
@@ -489,7 +512,10 @@ export function ChatPage() {
     if (index < 0 || index >= messages.length) {
       return;
     }
-    const { messages: forkedMessages, atMessage } = forkMessages(messages, index);
+    const { messages: forkedMessages, atMessage } = forkMessages(
+      messages,
+      index,
+    );
     const newSessionId = `session_fork_${Date.now()}`;
     // The transcript store is keyed by the message id, so the copies get
     // their own ids instead of overwriting the source messages.
@@ -608,14 +634,19 @@ export function ChatPage() {
     await saveTabState(next);
   };
 
-  const switchToSession = async (sessionId: string) => {
+  const switchToSession = async (
+    sessionId: string,
+    focusMessageIndex?: number,
+  ) => {
     const state = await loadTabState();
     const base =
       state ?? initialTabState(currentSessionId || `session_${Date.now()}`);
     await applyTabState(focusTab(base, sessionId));
+    let loadedMessages: Message[] = [];
     try {
       const history = await loadChatHistory(sessionId);
       if (history && Array.isArray(history)) {
+        loadedMessages = history;
         dispatch(setMessages(history));
       } else {
         dispatch(setMessages([]));
@@ -626,6 +657,27 @@ export function ChatPage() {
       dispatch(setMessages([]));
       setHistoryMissing(true);
     }
+
+    // A search hit can point at another conversation. Move the jumper and
+    // scroll once that transcript is on screen so the page navigation
+    // lands on the message rather than only opening the session.
+    if (focusMessageIndex === undefined) {
+      return;
+    }
+    const clampedIndex = Math.min(
+      Math.max(focusMessageIndex, 0),
+      Math.max(loadedMessages.length - 1, 0),
+    );
+    setCurrentMessageIndex(clampedIndex);
+    requestAnimationFrame(() => {
+      const element = messagesContainerRef.current?.querySelector<HTMLElement>(
+        `[data-message-index="${clampedIndex}"]`,
+      );
+      element?.scrollIntoView({
+        behavior: lowSpecMode ? 'auto' : 'smooth',
+        block: 'center',
+      });
+    });
   };
 
   const createNewSession = async () => {
@@ -900,8 +952,58 @@ export function ChatPage() {
     return null;
   };
 
+  // Image attachments: pick, drop, remove and transcribe. The OCR call is
+  // optional; if the active provider has no OCR service the composer keeps
+  // the images and reports that transcription is unavailable.
+  const addImageToInput = () => {
+    imageInputRef.current?.click();
+  };
+
+  const handleImageFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) {
+      return;
+    }
+    const urls = await readImageFilesAsDataUrls(Array.from(files));
+    if (urls.length === 0) {
+      setImageStatus('No image files were added.');
+      return;
+    }
+    setUploadedImages((previous) => [...previous, ...urls]);
+    setImageStatus('');
+  };
+
+  const removeUploadedImage = (index: number) => {
+    setUploadedImages((previous) =>
+      previous.filter((_, position) => position !== index),
+    );
+  };
+
+  const transcribeUploadedImages = async () => {
+    if (uploadedImages.length === 0) {
+      return;
+    }
+    setImageStatus('Transcribing images…');
+    const transcripts = await transcribeImageAttachments(
+      client,
+      uploadedImages,
+    );
+    const added = transcripts.filter(
+      (transcript) => transcript.trim().length > 0,
+    );
+    if (added.length === 0) {
+      setImageStatus('No image text found.');
+      return;
+    }
+    setInput((previous) => appendTranscripts(previous, transcripts));
+    setImageStatus(
+      added.length === 1
+        ? 'Added 1 image transcript.'
+        : `Added ${added.length} image transcripts.`,
+    );
+  };
+
   const sendMessage = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() && uploadedImages.length === 0) return;
 
     const result = await chrome.storage.local.get(['displaySettings']);
     const settings = result.displaySettings;
@@ -974,6 +1076,10 @@ export function ChatPage() {
 
     const systemPrompt = assembled.systemPrompt;
 
+    // Keep the attachments for this request even though the composer is
+    // cleared immediately, so a pending send is not detached from them.
+    const attachments = uploadedImages;
+
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
@@ -981,10 +1087,12 @@ export function ChatPage() {
       timestamp: Date.now(),
       tokens: totalTokens,
       context: reduxContext ?? undefined,
+      ...(attachments.length > 0 ? { images: attachments } : {}),
     };
 
     dispatch(addMessage(userMessage));
     setInput('');
+    setUploadedImages([]);
     dispatch(setLoading(true));
 
     try {
@@ -1021,7 +1129,7 @@ export function ChatPage() {
           groupCharacters,
           assembled,
           currentSessionId,
-          undefined, // images
+          attachments.length > 0 ? attachments : undefined, // images
           {
             speakingCharacterId,
             addressedCharacterIds: addressedIds,
@@ -1156,6 +1264,7 @@ export function ChatPage() {
                 systemPrompt,
               },
               currentSessionId,
+              attachments.length > 0 ? attachments : undefined,
             ),
           30000,
           { success: false, error: 'AI request timed out. Try again.' },
@@ -1713,6 +1822,17 @@ export function ChatPage() {
                       {msg.content}
                     </ReactMarkdown>
                   </div>
+                  {msg.images && msg.images.length > 0 && (
+                    <div className="message-images">
+                      {msg.images.map((image, imageIndex) => (
+                        <img
+                          key={`${msg.id}-image-${imageIndex}`}
+                          src={image}
+                          alt={`Attachment ${imageIndex + 1}`}
+                        />
+                      ))}
+                    </div>
+                  )}
                   <ChatMessageEnhanced
                     message={msg}
                     characterId={msg.characterId}
@@ -1733,7 +1853,9 @@ export function ChatPage() {
                     message={msg}
                     index={index}
                     onToggleRead={(message) => void toggleMessageRead(message)}
-                    onSetTag={(message, tag) => void setMessageTag(message, tag)}
+                    onSetTag={(message, tag) =>
+                      void setMessageTag(message, tag)
+                    }
                     onFork={(_message, messageIndex) =>
                       void forkConversation(messageIndex)
                     }
@@ -1780,9 +1902,7 @@ export function ChatPage() {
             if (sessionId === currentSessionId) {
               void jumpToMessage(messageIndex);
             } else {
-              void switchToSession(sessionId).then(() => {
-                setCurrentMessageIndex(messageIndex);
-              });
+              void switchToSession(sessionId, messageIndex);
             }
           }}
         />
@@ -1842,121 +1962,132 @@ export function ChatPage() {
           />
         )}
 
-        <div className="input-container">
-          <div className="mode-bar" role="group" aria-label="Interaction mode">
-            {MODES.map((m) => {
-              const isPrimary = modeSession.primary === m.id;
-              const isMixed = modeSession.mixed.includes(m.id);
-              return (
-                <span key={m.id} className="mode-tile">
-                  <button
-                    onClick={() => setModeSession({ ...modeSession, primary: m.id, mixed: modeSession.mixed.filter((x) => x !== m.id) })}
-                    className={`mode-toggle-btn ${isPrimary ? 'active' : ''} ${isMixed ? 'mixed' : ''}`}
-                    title={`${m.blurb} — ${traitsSummary(m)}`}
-                  >
-                    {m.label}
-                  </button>
-                  {isPrimary ? (
-                    <span className="mode-blend-mark primary" title="Primary mode — owns the prompt voice">●</span>
-                  ) : (
-                    <button
-                      className="mode-blend-mark"
-                      onClick={() =>
-                        setModeSession(
-                          isMixed
-                            ? unmixMode(modeSession, m.id)
-                            : mixMode(modeSession, m.id),
-                        )
-                      }
-                      title={
-                        isMixed
-                          ? `Remove ${m.label} from the blend`
-                          : `Blend ${m.label} into this session`
-                      }
-                    >
-                      {isMixed ? '+' : '○'}
-                    </button>
-                  )}
-                </span>
-              );
-            })}
-          </div>
-          <div className="mode-summary" role="status">
-            {sessionSummary(modeSession)} ·{' '}
-            {activeFeatures(modeSession).join(' · ') || 'no capabilities'}
-            <button
-              className="mode-link-btn"
-              onClick={() => setShowCapEditor(!showCapEditor)}
-            >
-              {showCapEditor ? 'hide capabilities' : 'capabilities'}
-            </button>
-            <button
-              className="mode-link-btn"
-              onClick={() => setShowPermEditor(!showPermEditor)}
-            >
-              {showPermEditor ? 'hide permissions' : 'permissions'}
-            </button>
-          </div>
-          {showCapEditor && (
-            <div className="mode-editor" role="group" aria-label="Capabilities">
-              {FEATURES.map((f) => {
-                const on = sessionHasFeature(modeSession, f.id);
-                return (
-                  <label key={f.id} className="cap-row" title={f.description}>
-                    <input
-                      type="checkbox"
-                      checked={on}
-                      onChange={(e) =>
-                        setModeSession(
-                          setFeature(modeSession, f.id, e.target.checked),
-                        )
-                      }
-                    />
-                    <span>{f.label}</span>
-                  </label>
-                );
-              })}
-            </div>
-          )}
-          {showPermEditor && (
-            <div className="mode-editor" role="group" aria-label="Permissions">
-              <div className="cap-row">
-                <span>default</span>
+      <div className="input-container">
+        <div className="mode-bar" role="group" aria-label="Interaction mode">
+          {MODES.map((m) => {
+            const isPrimary = modeSession.primary === m.id;
+            const isMixed = modeSession.mixed.includes(m.id);
+            return (
+              <span key={m.id} className="mode-tile">
                 <button
-                  className="mode-link-btn"
                   onClick={() =>
                     setModeSession({
                       ...modeSession,
-                      defaultPermission: cyclePermission(
-                        modeSession.defaultPermission,
-                      ),
+                      primary: m.id,
+                      mixed: modeSession.mixed.filter((x) => x !== m.id),
                     })
                   }
+                  className={`mode-toggle-btn ${isPrimary ? 'active' : ''} ${isMixed ? 'mixed' : ''}`}
+                  title={`${m.blurb} — ${traitsSummary(m)}`}
                 >
-                  {modeSession.defaultPermission}
+                  {m.label}
                 </button>
-              </div>
-              {availableTools.length === 0 && (
-                <div className="cap-row">no tools in this session</div>
-              )}
-              {availableTools.map((tool) => (
-                <div key={tool} className="cap-row">
-                  <span>{tool}</span>
+                {isPrimary ? (
+                  <span
+                    className="mode-blend-mark primary"
+                    title="Primary mode — owns the prompt voice"
+                  >
+                    ●
+                  </span>
+                ) : (
                   <button
-                    className="mode-link-btn"
+                    className="mode-blend-mark"
                     onClick={() =>
                       setModeSession(
-                        cycleToolPermission(modeSession, tool, availableTools),
+                        isMixed
+                          ? unmixMode(modeSession, m.id)
+                          : mixMode(modeSession, m.id),
                       )
                     }
+                    title={
+                      isMixed
+                        ? `Remove ${m.label} from the blend`
+                        : `Blend ${m.label} into this session`
+                    }
                   >
-                    {permissionFor(modeSession, tool)}
+                    {isMixed ? '+' : '○'}
                   </button>
-                </div>
-              ))}
+                )}
+              </span>
+            );
+          })}
+        </div>
+        <div className="mode-summary" role="status">
+          {sessionSummary(modeSession)} ·{' '}
+          {activeFeatures(modeSession).join(' · ') || 'no capabilities'}
+          <button
+            className="mode-link-btn"
+            onClick={() => setShowCapEditor(!showCapEditor)}
+          >
+            {showCapEditor ? 'hide capabilities' : 'capabilities'}
+          </button>
+          <button
+            className="mode-link-btn"
+            onClick={() => setShowPermEditor(!showPermEditor)}
+          >
+            {showPermEditor ? 'hide permissions' : 'permissions'}
+          </button>
+        </div>
+        {showCapEditor && (
+          <div className="mode-editor" role="group" aria-label="Capabilities">
+            {FEATURES.map((f) => {
+              const on = sessionHasFeature(modeSession, f.id);
+              return (
+                <label key={f.id} className="cap-row" title={f.description}>
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    onChange={(e) =>
+                      setModeSession(
+                        setFeature(modeSession, f.id, e.target.checked),
+                      )
+                    }
+                  />
+                  <span>{f.label}</span>
+                </label>
+              );
+            })}
+          </div>
+        )}
+        {showPermEditor && (
+          <div className="mode-editor" role="group" aria-label="Permissions">
+            <div className="cap-row">
+              <span>default</span>
+              <button
+                className="mode-link-btn"
+                onClick={() =>
+                  setModeSession({
+                    ...modeSession,
+                    defaultPermission: cyclePermission(
+                      modeSession.defaultPermission,
+                    ),
+                  })
+                }
+              >
+                {modeSession.defaultPermission}
+              </button>
             </div>
-          )}
-          <ChatInputBar
+            {availableTools.length === 0 && (
+              <div className="cap-row">no tools in this session</div>
+            )}
+            {availableTools.map((tool) => (
+              <div key={tool} className="cap-row">
+                <span>{tool}</span>
+                <button
+                  className="mode-link-btn"
+                  onClick={() =>
+                    setModeSession(
+                      cycleToolPermission(modeSession, tool, availableTools),
+                    )
+                  }
+                >
+                  {permissionFor(modeSession, tool)}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <ChatInputBar
           onOpenCharacterSelector={() => setShowCharacterSelector(true)}
           onOpenPersonaSelector={() => setShowPersonaSelector(true)}
           onOpenPresetManager={() => setShowPresetManager(true)}
@@ -1975,6 +2106,56 @@ export function ChatPage() {
             }
           }}
         />
+        <div className="chat-attachments">
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            aria-label="Attach images to the message"
+            onChange={(event) => {
+              void handleImageFiles(event.target.files);
+              event.target.value = '';
+            }}
+          />
+          <button
+            type="button"
+            onClick={addImageToInput}
+            className="attachment-btn"
+            title="Attach images to the message"
+          >
+            🖼️ Attach images
+          </button>
+          <button
+            type="button"
+            onClick={() => void transcribeUploadedImages()}
+            className="attachment-btn"
+            disabled={uploadedImages.length === 0}
+            title="Transcribe the attached images"
+          >
+            🧾 Transcribe images
+          </button>
+          {uploadedImages.map((image, index) => (
+            <div
+              key={`attachment-${index}-${image.slice(-16)}`}
+              className="attached-image"
+            >
+              <img src={image} alt={`Attached ${index + 1}`} />
+              <button
+                type="button"
+                onClick={() => removeUploadedImage(index)}
+                aria-label={`Remove attached image ${index + 1}`}
+                title="Remove image"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+          {imageStatus && (
+            <span className="attachment-status">{imageStatus}</span>
+          )}
+        </div>
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -2039,6 +2220,8 @@ export function ChatPage() {
           <button
             onClick={() => setThinkingEnabled(!thinkingEnabled)}
             className={`mode-toggle-btn ${thinkingEnabled ? 'active' : ''}`}
+            aria-pressed={thinkingEnabled}
+            aria-label="Toggle reasoning mode"
             title="Thinking mode (step-by-step reasoning; provider-native where supported)"
           >
             <Icon name="psychology" title="Thinking mode" />

@@ -27,7 +27,7 @@ export interface BackupSettings {
 export const BACKUP_SETTING_KEY = 'autoBackup';
 
 export const DEFAULT_BACKUP_SETTINGS: BackupSettings = {
-  enabled: false,
+  enabled: true,
   retention: 5,
   intervalMs: 15 * 60 * 1000,
 };

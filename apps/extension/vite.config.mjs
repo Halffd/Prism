@@ -209,6 +209,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         popup: resolve(__dirname, 'index.html'),
+        sidebar: resolve(__dirname, 'sidebar.html'),
         settings: resolve(__dirname, 'settings.html'),
         chat: resolve(__dirname, 'chat.html'),
         background: resolve(__dirname, 'src/background/background.ts'),

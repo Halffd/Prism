@@ -20,21 +20,28 @@ import {
 describe('Automatic local backup', () => {
   beforeEach(async () => {
     const db = await getDatabase();
-    const tx = db.transaction(['chatSessions', 'chatHistory', 'cache'], 'readwrite');
+    const tx = db.transaction(
+      ['chatSessions', 'chatHistory', 'cache'],
+      'readwrite',
+    );
     await tx.objectStore('chatSessions').clear();
     await tx.objectStore('chatHistory').clear();
     await tx.objectStore('cache').clear();
     await tx.done;
   });
 
-  test('the defaults are off with a retention of five', async () => {
+  test('automatic backup is on by default with a retention of five', async () => {
     const settings = await loadBackupSettings();
-    expect(settings.enabled).toBe(false);
+    expect(settings.enabled).toBe(true);
     expect(settings.retention).toBe(DEFAULT_BACKUP_SETTINGS.retention);
   });
 
   test('the settings roundtrip through storage', async () => {
-    await saveBackupSettings({ enabled: true, retention: 3, intervalMs: 60000 });
+    await saveBackupSettings({
+      enabled: true,
+      retention: 3,
+      intervalMs: 60000,
+    });
     const settings = await loadBackupSettings();
     expect(settings).toEqual({
       enabled: true,

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Prism Chat</title>
+    <base href="/" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="/src/styles.scss" />
+    <style>
+      body {
+        margin: 0;
+        background: var(--surface, #141218);
+      }
+
+      #sidebarApp {
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="sidebarApp"></div>
+    <script type="module" src="/src/sidebar/sidebar-entry.tsx"></script>
+  </body>
+</html>

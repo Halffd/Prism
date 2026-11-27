@@ -7,11 +7,14 @@ import {
 } from '@prism/image-gen';
 
 interface ImageGenerationSectionProps {
-  generatedImage: string | null;
+  generatedImages: string[];
+  setGeneratedImages: (value: string[]) => void;
   imageGenerationPrompt: string;
   setImageGenerationPrompt: (value: string) => void;
   imageGenerationModel: string;
   setImageGenerationModel: (value: string) => void;
+  imageCount: number;
+  setImageCount: (value: number) => void;
   generateImage: () => void;
   isGeneratingImage: boolean;
   imageGenerationApiKey: string;
@@ -22,51 +25,69 @@ const ACCESS_LABEL: Record<ImageModelAccess, string> = {
   'pro-only': 'Pro-only models',
 };
 
+/** How many images one request can ask for. */
+export const MAX_IMAGE_GENERATION_COUNT = 4;
+
+const IMAGE_COUNTS = [1, 2, 3, MAX_IMAGE_GENERATION_COUNT];
+
 export const ImageGenerationSection: React.FC<ImageGenerationSectionProps> = ({
-  generatedImage,
+  generatedImages,
+  setGeneratedImages,
   imageGenerationPrompt,
   setImageGenerationPrompt,
   imageGenerationModel,
   setImageGenerationModel,
+  imageCount,
+  setImageCount,
   generateImage,
   isGeneratingImage,
-  imageGenerationApiKey
+  imageGenerationApiKey,
 }) => {
   const selectedModel =
     IMAGE_MODEL_OPTIONS.find((model) => model.id === imageGenerationModel) ??
     IMAGE_MODEL_OPTIONS[0];
 
-  if (generatedImage) {
+  if (generatedImages.length > 0) {
     return (
       <div className="image-generation-result">
-        <h3>Generated Image</h3>
+        <h3>Generated Image{generatedImages.length === 1 ? '' : 's'}</h3>
         <p className="image-result-model">
           {imageModelOptionLabel(selectedModel)} ·{' '}
           {selectedModel.access === 'pro-only'
             ? 'needs image-provider access'
             : 'works with a standard provider token'}
         </p>
-        <img src={generatedImage} alt="Generated" style={{ maxWidth: '100%', borderRadius: '8px' }} />
+        <div className="image-generation-grid">
+          {generatedImages.map((image, index) => (
+            <figure key={`${index}-${image.slice(-24)}`}>
+              <img src={image} alt={`Generated ${index + 1}`} />
+              <button
+                type="button"
+                className="action-btn"
+                onClick={() => {
+                  const link = document.createElement('a');
+                  link.href = image;
+                  link.download = `generated-image-${Date.now()}-${index + 1}.png`;
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                }}
+              >
+                Download {index + 1}
+              </button>
+            </figure>
+          ))}
+        </div>
         <div className="image-actions">
           <button
-            onClick={() => setImageGenerationPrompt('')}
-            className="action-btn"
-          >
-            Generate New
-          </button>
-          <button
+            type="button"
             onClick={() => {
-              // Create a download link for the image
-              const link = document.createElement('a');
-              link.href = generatedImage;
-              link.download = `generated-image-${Date.now()}.png`;
-              document.body.appendChild(link);
-              link.click();
-              document.body.removeChild(link);
+              setImageGenerationPrompt('');
+              setGeneratedImages([]);
             }}
             className="action-btn"
           >
-            Download
+            Generate New
           </button>
         </div>
       </div>
@@ -86,10 +107,14 @@ export const ImageGenerationSection: React.FC<ImageGenerationSectionProps> = ({
         />
         <button
           onClick={generateImage}
-          disabled={isGeneratingImage || !imageGenerationPrompt.trim() || !imageGenerationApiKey}
+          disabled={
+            isGeneratingImage ||
+            !imageGenerationPrompt.trim() ||
+            !imageGenerationApiKey
+          }
           className="image-generate-btn"
         >
-          {isGeneratingImage ? 'Generating...' : 'Generate Image'}
+          {isGeneratingImage ? `Generating ${imageCount}…` : 'Generate Image'}
         </button>
       </div>
       <label className="image-model-row">
@@ -109,6 +134,29 @@ export const ImageGenerationSection: React.FC<ImageGenerationSectionProps> = ({
                 </option>
               ))}
             </optgroup>
+          ))}
+        </select>
+      </label>
+      <label className="image-count-row">
+        <span>Images</span>
+        <select
+          value={String(imageCount)}
+          onChange={(e) =>
+            setImageCount(
+              Math.min(
+                MAX_IMAGE_GENERATION_COUNT,
+                Math.max(1, Number(e.target.value) || 1),
+              ),
+            )
+          }
+          className="image-count-select"
+          aria-label="Select how many images to generate"
+          disabled={isGeneratingImage}
+        >
+          {IMAGE_COUNTS.map((count) => (
+            <option key={count} value={String(count)}>
+              {count}
+            </option>
           ))}
         </select>
       </label>

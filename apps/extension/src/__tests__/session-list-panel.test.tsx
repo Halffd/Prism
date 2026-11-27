@@ -50,9 +50,12 @@ describe('SessionListPanel', () => {
 
   /** Show the archived sessions too. */
   const showArchived = () =>
-    fireEvent.change(screen.getByLabelText('Filter sessions by archive state'), {
-      target: { value: 'all' },
-    });
+    fireEvent.change(
+      screen.getByLabelText('Filter sessions by archive state'),
+      {
+        target: { value: 'all' },
+      },
+    );
 
   test('shows a tag chip per session', () => {
     renderPanel();
@@ -113,9 +116,12 @@ describe('SessionListPanel', () => {
     fireEvent.change(screen.getByLabelText('Filter sessions by title'), {
       target: { value: '' },
     });
-    fireEvent.change(screen.getByLabelText('Filter sessions by archive state'), {
-      target: { value: 'archived' },
-    });
+    fireEvent.change(
+      screen.getByLabelText('Filter sessions by archive state'),
+      {
+        target: { value: 'archived' },
+      },
+    );
     expect(screen.getByLabelText('Open session Beta')).toBeTruthy();
     expect(screen.queryByLabelText('Open session Alpha')).toBeNull();
 
@@ -125,6 +131,13 @@ describe('SessionListPanel', () => {
     });
     expect(screen.getByLabelText('Open session Alpha')).toBeTruthy();
     expect(screen.queryByLabelText('Open session Beta')).toBeNull();
+  });
+
+  test('opens a session page when the panel can', () => {
+    const props = renderPanel({ onOpenPage: jest.fn() });
+
+    fireEvent.click(screen.getByLabelText('Open session page Alpha'));
+    expect(props.onOpenPage).toHaveBeenCalledWith('a');
   });
 
   test('reports the corrupt sessions instead of hiding the problem', () => {

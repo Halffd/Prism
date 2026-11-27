@@ -100,18 +100,15 @@ const createSidebar = (position: 'left' | 'right', width: number) => {
 
   sidebar.appendChild(header);
   sidebar.appendChild(content);
-
-  const closeBtn = document.getElementById('prism-sidebar-close');
-  if (closeBtn) {
-    closeBtn.addEventListener('click', () => {
-      sidebar.classList.remove('active');
-      setTimeout(() => {
-        sidebar.remove();
-      }, 300);
-    });
-  }
-
   document.body.appendChild(sidebar);
+
+  const closeBtn = sidebar.querySelector('#prism-sidebar-close');
+  closeBtn?.addEventListener('click', () => {
+    sidebar.classList.remove('active');
+    setTimeout(() => {
+      sidebar.remove();
+    }, 300);
+  });
 
   setTimeout(() => {
     sidebar.classList.add('active');

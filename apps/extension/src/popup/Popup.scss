@@ -372,7 +372,9 @@
       font-size: var(--font-sm);
       font-weight: 500;
       cursor: pointer;
-      transition: transform 0.2s, filter 0.2s;
+      transition:
+        transform 0.2s,
+        filter 0.2s;
 
       &:hover:not(:disabled) {
         transform: scale(1.05);
@@ -390,7 +392,8 @@
     }
   }
 
-  .image-model-row {
+  .image-model-row,
+  .image-count-row {
     display: flex;
     align-items: center;
     gap: var(--spacing-sm);
@@ -398,7 +401,8 @@
     color: var(--on-surface-variant);
     font-size: var(--font-sm);
 
-    .image-model-select {
+    .image-model-select,
+    .image-count-select {
       flex: 1;
       min-width: 0;
       padding: var(--spacing-xs) var(--spacing-sm);
@@ -444,6 +448,39 @@
     margin-bottom: var(--spacing-md);
     border: none;
     box-shadow: var(--elevation-ambient);
+  }
+
+  .image-generation-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: var(--spacing-sm);
+    width: 100%;
+
+    figure {
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      gap: var(--spacing-xs);
+    }
+
+    img {
+      width: 100%;
+      margin-bottom: 0;
+    }
+
+    .action-btn {
+      padding: var(--spacing-xs) var(--spacing-sm);
+      border: none;
+      background: var(--surface-container-high);
+      color: var(--on-surface-variant);
+      border-radius: var(--radius-pill);
+      font-size: var(--font-sm);
+      cursor: pointer;
+
+      &:hover {
+        background: var(--surface-container-highest);
+      }
+    }
   }
 
   .image-actions {
@@ -1146,7 +1183,9 @@
     font-size: var(--font-sm);
     font-weight: 500;
     cursor: pointer;
-    transition: transform 0.2s, filter 0.2s;
+    transition:
+      transform 0.2s,
+      filter 0.2s;
 
     &:hover:not(:disabled) {
       transform: scale(1.05);

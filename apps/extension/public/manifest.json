@@ -3,16 +3,18 @@
   "name": "Prism - Context AI Assistant",
   "version": "0.1.0",
   "description": "AI assistant that understands your webpage context",
-  "permissions": ["activeTab", "storage", "contextMenus"],
+  "permissions": ["activeTab", "storage", "contextMenus", "sidePanel"],
   "host_permissions": ["http://localhost:3000/*", "https://api.prism.app/*"],
   "action": {
-    "default_popup": "index.html",
     "default_title": "Prism - Context AI Assistant",
     "default_icon": {
       "16": "icon16.png",
       "48": "icon48.png",
       "128": "icon128.png"
     }
+  },
+  "side_panel": {
+    "default_path": "sidebar.html"
   },
   "background": {
     "service_worker": "background.js",
@@ -25,7 +27,7 @@
         "default": "Ctrl+Shift+P",
         "mac": "MacCtrl+Shift+P"
       },
-      "description": "Open Prism Popup"
+      "description": "Open Prism Sidebar"
     },
     "open-chat-tab": {
       "suggested_key": {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { useAuth } from '../auth-provider';
 import { Icon } from '@prism/ui-components';
@@ -19,11 +19,7 @@ import {
   updateChatSessionMeta,
   type DBChatSession,
 } from '@prism/shared-db';
-import type {
-  ApiResponse,
-  PromptShortcut,
-  Snippet,
-} from '@prism/shared-types';
+import type { ApiResponse, PromptShortcut, Snippet } from '@prism/shared-types';
 import { matchSnippet } from '@prism/shared-types';
 import { UnifiedAIClient, networkStatusService } from '@prism/api-client';
 import {
@@ -31,6 +27,7 @@ import {
   ImageGenerationService,
   normalizeImageGenerationModel,
 } from '@prism/image-gen';
+import { MAX_IMAGE_GENERATION_COUNT } from './ImageGenerationSection';
 import type { Message, ContextData, AIConfig } from '@prism/shared-types';
 import {
   addMessage,
@@ -72,10 +69,7 @@ import {
   saveTabState,
   type ChatTabState,
 } from '../chat/chat-tabs';
-import {
-  customModelOptions,
-  resolveRequestConfig,
-} from '../chat/custom-model';
+import { customModelOptions, resolveRequestConfig } from '../chat/custom-model';
 import { SessionListPanel } from './SessionListPanel';
 import {
   getProviderOptions,
@@ -83,7 +77,7 @@ import {
   type ProviderOption,
 } from './provider-catalog';
 import { modelsForProvider, resolveModels } from './model-cache';
-import { loadBackupSettings, runBackupNow } from './auto-backup';
+import { useAutoBackup } from '../chat/use-auto-backup';
 import { withFallback } from '../shared/async';
 
 // Initialize with default settings - will be overridden by stored settings
@@ -141,8 +135,8 @@ export function Popup() {
   const [isOnline, setIsOnline] = useState(true); // Track network status
   // The provider catalogue is shared with the core; the synchronous list
   // paints immediately and the async one adds the core's labels.
-  const [providerOptions, setProviderOptions] = useState<ProviderOption[]>(
-    () => getProviderOptions(),
+  const [providerOptions, setProviderOptions] = useState<ProviderOption[]>(() =>
+    getProviderOptions(),
   );
   // The stored sessions, including their tags/read/archive state.
   const [storedSessions, setStoredSessions] = useState<DBChatSession[]>([]);
@@ -250,11 +244,12 @@ export function Popup() {
   // Image generation state
   const [imageGenerationPrompt, setImageGenerationPrompt] =
     useState<string>('');
-  const [generatedImage, setGeneratedImage] = useState<string | null>(null);
+  const [generatedImages, setGeneratedImages] = useState<string[]>([]);
   const [isGeneratingImage, setIsGeneratingImage] = useState<boolean>(false);
   const [imageGenerationModel, setImageGenerationModel] = useState<string>(
     DEFAULT_IMAGE_GENERATION_MODEL,
   );
+  const [imageGenerationCount, setImageGenerationCount] = useState<number>(1);
   const [imageGenerationApiKey, setImageGenerationApiKey] =
     useState<string>('');
 
@@ -542,50 +537,9 @@ export function Popup() {
   // Automatic local backup.
   //
   // A snapshot is written after the transcript changes and on a timer
-  // while the popup is open. The settings page owns the toggle and the
-  // retention count; the popup only performs the writes.
-  const lastBackupAtRef = useRef(0);
-
-  const writeBackupSnapshot = useCallback(async () => {
-    try {
-      const settings = await loadBackupSettings();
-      if (!settings.enabled) return;
-      // Do not write a snapshot for every keystroke-sized change: one
-      // per minute is enough to keep the history close.
-      if (Date.now() - lastBackupAtRef.current < 60_000) return;
-      lastBackupAtRef.current = Date.now();
-      await runBackupNow(settings.retention);
-    } catch (error) {
-      console.warn('Automatic backup failed:', error);
-    }
-  }, []);
-
-  // A snapshot after every change to the transcript.
-  useEffect(() => {
-    void writeBackupSnapshot();
-  }, [messages.length, currentSessionId, writeBackupSnapshot]);
-
-  // A snapshot on a timer, so the backup follows the sessions even when
-  // the popup is left open without a new message.
-  useEffect(() => {
-    let cancelled = false;
-    // `@types/node` and the DOM lib each define `setInterval` with a
-    // different handle type; this matches whichever is in scope.
-    let timer: ReturnType<typeof setInterval> | null = null;
-
-    void loadBackupSettings().then((settings) => {
-      if (cancelled || !settings.enabled) return;
-      timer = setInterval(() => void writeBackupSnapshot(), settings.intervalMs);
-    });
-
-    return () => {
-      cancelled = true;
-      if (timer !== null) {
-        clearInterval(timer);
-        timer = null;
-      }
-    };
-  }, [writeBackupSnapshot]);
+  // while the popup is open. The hook is shared with the chat page and
+  // the side panel so one surface does not own the backup behaviour.
+  useAutoBackup(`${currentSessionId}:${messages.length}`);
 
   // Listen for tab updates to refresh context when switching between tabs
   useEffect(() => {
@@ -1071,16 +1025,27 @@ export function Popup() {
   // Image generation functions
   const initializeImageGeneration = () => {
     // Load image generation config from storage
-    chrome.storage.local.get(['imageGenApiKey', 'imageGenModel'], (result) => {
-      if (result.imageGenApiKey) {
-        setImageGenerationApiKey(result.imageGenApiKey);
-      }
-      if (result.imageGenModel) {
-        setImageGenerationModel(
-          normalizeImageGenerationModel(result.imageGenModel),
-        );
-      }
-    });
+    chrome.storage.local.get(
+      ['imageGenApiKey', 'imageGenModel', 'imageGenCount'],
+      (result) => {
+        if (result.imageGenApiKey) {
+          setImageGenerationApiKey(result.imageGenApiKey);
+        }
+        if (result.imageGenModel) {
+          setImageGenerationModel(
+            normalizeImageGenerationModel(result.imageGenModel),
+          );
+        }
+        if (typeof result.imageGenCount === 'number') {
+          setImageGenerationCount(
+            Math.min(
+              MAX_IMAGE_GENERATION_COUNT,
+              Math.max(1, Math.floor(result.imageGenCount)),
+            ),
+          );
+        }
+      },
+    );
   };
 
   const generateImage = async () => {
@@ -1089,8 +1054,13 @@ export function Popup() {
       return;
     }
 
+    const requestedCount = Math.min(
+      MAX_IMAGE_GENERATION_COUNT,
+      Math.max(1, Math.floor(imageGenerationCount)),
+    );
+
     setIsGeneratingImage(true);
-    setGeneratedImage(null);
+    setGeneratedImages([]);
 
     try {
       const service = new ImageGenerationService({
@@ -1098,27 +1068,58 @@ export function Popup() {
         apiKey: imageGenerationApiKey,
       });
 
-      const result = await service.generateImage(imageGenerationPrompt);
-      setGeneratedImage(result.imageUrl);
+      const settled = await Promise.allSettled(
+        Array.from({ length: requestedCount }, () =>
+          service.generateImage(imageGenerationPrompt),
+        ),
+      );
 
-      // Add the generated image to the chat as a message
+      const urls = settled
+        .filter(
+          (
+            outcome,
+          ): outcome is PromiseFulfilledResult<
+            Awaited<ReturnType<typeof service.generateImage>>
+          > => outcome.status === 'fulfilled',
+        )
+        .map((outcome) => outcome.value.imageUrl);
+
+      if (urls.length === 0) {
+        const failure =
+          settled.find(
+            (outcome): outcome is PromiseRejectedResult =>
+              outcome.status === 'rejected',
+          ) ?? null;
+        throw failure?.reason instanceof Error
+          ? failure.reason
+          : new Error('No image was generated.');
+      }
+
+      setGeneratedImages(urls);
+
+      // Add the generated images to the chat as one assistant message.
       const imageMessage: Message = {
         id: `img_${Date.now()}`,
         role: 'assistant',
-        content: `Generated image for: "${imageGenerationPrompt}"`,
+        content:
+          urls.length === 1
+            ? `Generated image for: "${imageGenerationPrompt}"`
+            : `Generated ${urls.length} images for: "${imageGenerationPrompt}"`,
+        images: urls,
         timestamp: Date.now(),
         context: reduxContext ?? undefined,
       };
 
-      // Add the image as a new message in the chat
+      // Add the image message to the chat and store the transcript.
       const newMessages = [...messages, imageMessage];
-      setMessages(newMessages);
+      dispatch(addMessage(imageMessage));
       await saveCurrentChatToDB(newMessages);
 
       // Save the image generation config
       await chrome.storage.local.set({
         imageGenApiKey: imageGenerationApiKey,
         imageGenModel: imageGenerationModel,
+        imageGenCount: requestedCount,
       });
     } catch (error) {
       console.error('Error generating image:', error);
@@ -1132,6 +1133,7 @@ export function Popup() {
     await chrome.storage.local.set({
       imageGenApiKey: imageGenerationApiKey,
       imageGenModel: imageGenerationModel,
+      imageGenCount: imageGenerationCount,
     });
   };
   void saveImageGenerationConfig;
@@ -1688,7 +1690,10 @@ export function Popup() {
     // transcript visible and opens the same session with its tabs,
     // model controls and metrics. Restricted pages have no content
     // script, so fall back to a normal chat tab in that case.
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const [tab] = await chrome.tabs.query({
+      active: true,
+      currentWindow: true,
+    });
     const tabId = tab?.id;
     if (tabId !== undefined) {
       const injected = await withFallback<{ success?: boolean } | undefined>(
@@ -2053,6 +2058,17 @@ export function Popup() {
                 void patchSessionMeta(sessionId, { tags })
               }
               onRefresh={() => void loadChatSessionsFromDB()}
+              onOpenPage={(sessionId) => {
+                const opened = chrome.runtime.sendMessage({
+                  type: 'OPEN_CHAT_SESSION',
+                  sessionId,
+                }) as unknown as Promise<void> | void;
+                void Promise.resolve(opened).catch(() => {
+                  // The session list remains the fallback when the
+                  // background service worker cannot open a page.
+                });
+                setShowMenu(false);
+              }}
             />
           </div>
 
@@ -2433,11 +2449,14 @@ export function Popup() {
       </div>
 
       <ImageGenerationSection
-        generatedImage={generatedImage}
+        generatedImages={generatedImages}
+        setGeneratedImages={setGeneratedImages}
         imageGenerationPrompt={imageGenerationPrompt}
         setImageGenerationPrompt={setImageGenerationPrompt}
         imageGenerationModel={imageGenerationModel}
         setImageGenerationModel={setImageGenerationModel}
+        imageCount={imageGenerationCount}
+        setImageCount={setImageGenerationCount}
         generateImage={generateImage}
         isGeneratingImage={isGeneratingImage}
         imageGenerationApiKey={imageGenerationApiKey}

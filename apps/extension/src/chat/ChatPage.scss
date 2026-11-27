@@ -131,6 +131,20 @@
         }
       }
 
+      .message-images {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--spacing-sm);
+        margin-bottom: var(--spacing-sm);
+
+        img {
+          max-width: 160px;
+          border-radius: var(--radius-md);
+          border: none;
+          box-shadow: var(--elevation-ambient);
+        }
+      }
+
       .message-header {
         display: flex;
         justify-content: space-between;
@@ -555,7 +569,9 @@
   font-size: 1rem;
   padding: 6px 10px;
   border-radius: 999px;
-  transition: background 0.2s, color 0.2s;
+  transition:
+    background 0.2s,
+    color 0.2s;
 
   &:hover {
     background: var(--surface_variant);
@@ -563,12 +579,12 @@
 
   &.active {
     background: var(--primary);
-    color: var(--on_primary, #0F0D13);
+    color: var(--on_primary, #0f0d13);
   }
 
   &.deep.active {
     background: var(--tertiary);
-    color: var(--on_tertiary, #0F0D13);
+    color: var(--on_tertiary, #0f0d13);
   }
 }
 
@@ -604,7 +620,9 @@
   padding: 4px 10px;
   font-size: 14px;
   cursor: pointer;
-  transition: background 0.2s ease, color 0.2s ease;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease;
   outline: none;
 
   &:hover {
@@ -693,7 +711,6 @@
   }
 }
 
-
 // Per-response telemetry strip: provider · model · tok/s · latency · context
 .metrics-bar {
   display: flex;
@@ -710,5 +727,67 @@
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
     opacity: 0.85;
+  }
+}
+
+// Composer attachments: pick images, transcribe them and clear them.
+.chat-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px 0;
+
+  .attachment-btn {
+    background: var(--surface-container-high);
+    border: none;
+    color: var(--on-surface-variant);
+    border-radius: 16px;
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+      background: var(--surface-container-highest);
+      color: var(--on-surface);
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+  }
+
+  .attached-image {
+    position: relative;
+    display: inline-flex;
+
+    img {
+      width: 44px;
+      height: 44px;
+      object-fit: cover;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--outline-variant);
+    }
+
+    button {
+      position: absolute;
+      top: -6px;
+      right: -6px;
+      width: 18px;
+      height: 18px;
+      border: none;
+      border-radius: 50%;
+      background: var(--surface-container-highest);
+      color: var(--on-surface);
+      cursor: pointer;
+      font-size: 10px;
+      line-height: 1;
+    }
+  }
+
+  .attachment-status {
+    font-size: 11px;
+    color: var(--on-surface-variant);
   }
 }
